@@ -11,6 +11,7 @@ import os
 
 import mlogger
 import torch
+import torch.nn as nn
 from torch.autograd import Variable
 from tqdm import tqdm
 from nas.dataset.datasets import get_data
@@ -34,7 +35,7 @@ def argument_parser():
                         help='Take blocks with probas >0.5 instead of sampling during evaluation')
 
     # Training
-    parser.add_argument('-path', default='./', type=str,
+    parser.add_argument('-path', default='./dataset/', type=str,
                         help='path for the execution')
 
     parser.add_argument('-dset', default='CIFAR10', type=str, help='Dataset')
@@ -58,7 +59,7 @@ def argument_parser():
     parser.add_argument('-lr_pol_val', action='store', nargs='*', default=[0.1, 0.01, 0.001], type=str,
                         help='learning rate decay period')
 
-    parser.add_argument('-cuda', action='store', default=-1, type=int,
+    parser.add_argument('-cuda', action='store', default='', type=str,
                         help='Enables cuda and select device')
 
     parser.add_argument('-lp', action='store', default=-1, type=int,
@@ -84,16 +85,19 @@ def argument_parser():
                         type=restricted_str('max', 'abs'), help='Method used to compute the cost of an architecture')
     parser.add_argument('-pen', dest='arch_penalty', action='store', default=0, type=float,
                         help='Penalty for inconsistent architecture')
-
     return parser.parse_known_args()[0]
 
 
 def main(args, plotter):
+    # start run and set environment
     logger.info('Starting run : {}'.format(args['exp_name']))
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(args['cuda'])
+    os.environ['CUDA_VISIBLE_DEVICES'] = args['cuda']
 
     # 获得数据集
     train_loader, val_loader, test_loader, data_properties = get_data(args['dset'], args['bs'], args['path'], args)
+
+    if args['lp'] == -1:
+        args['lp'] = len(train_loader)
 
     # 创建NAS模型
     nas_model = NasModel(args, data_properties)
@@ -118,7 +122,7 @@ def main(args, plotter):
     xp.test.accuracy = mlogger.metric.Simple(plotter=plotter, plot_title="val_test_accuracy", plot_legend="test")
     xp.test.timer = mlogger.metric.Timer(plotter=plotter, plot_title="Time", plot_legend="test")
 
-    for cost in nas_model.architecture_cost_evaluators:
+    for cost in args['cost_evaluation']:
         xp.train.__setattr__('train_sampled_%s'%cost,
                             mlogger.metric.Average(plotter=plotter,
                                                    plot_title='train_%s'%cost,
@@ -141,9 +145,9 @@ def main(args, plotter):
     x = torch.Tensor()
     y = torch.LongTensor()
 
-    if args['cuda'] > -1:
-        logger.info('Running with cuda (GPU n{})'.format(args['cuda']))
-        nas_model.model.cuda()
+    if len(args['cuda']) > 0 and len(args['cuda'].split(',')) > 0:
+        logger.info('Running with cuda (GPU {})'.format(args['cuda']))
+        nas_model.cuda([int(c) for c in args['cuda'].split(',')])
         x = x.cuda()
         y = y.cuda()
     else:
@@ -158,84 +162,44 @@ def main(args, plotter):
         # path_lr 负责网络架构参数学习率调整
         nas_model.adjust_lr(epoch, args['lr_pol_tresh'], args['lr_pol_val'], logger, ['path'])
 
-        for ce in nas_model.architecture_cost_evaluators.values():
-            ce.new_epoch()
-
         for i, (inputs, labels) in enumerate(tqdm(train_loader, desc='Train', ascii=True)):
             # set model status (train)
             x.resize_(inputs.size()).copy_(inputs)
             y.resize_(labels.size()).copy_(labels)
 
             # train and return predictions, loss, correct
-            predictions, indiv_loss, correct = nas_model.train(x, y)
+            loss, model_accuracy = nas_model.train(x, y)
+            # model_sampled_cost = model_sampled_cost.mean()
+            # model_pruned_cost = model_pruned_cost.mean()
 
-            # architecture cost
-            nas_archs = nas_model.architectures
-            optim_cost = None
-            for cost, cost_eval in nas_model.architecture_cost_evaluators.items():
-                sampled_cost, pruned_cost = cost_eval.get_costs(nas_archs)
+            # record architecture cost both sampled and pruned (training)
+            # xp.train.__getattribute__('train_sampled_%s' % args['cost_optimization']).update(model_sampled_cost.item())
+            # xp.train.__getattribute__('train_pruned_%s' % args['cost_optimization']).update(model_pruned_cost.item())
 
-                if cost == args['cost_optimization']:
-                    optim_cost = sampled_cost
-                    xp.train.objective_cost.update(sampled_cost.mean().item())
+            # record model loss
+            xp.train.classif_loss.update(loss.item())
+            # record model accuracy
+            xp.train.accuracy.update(model_accuracy * 100 / float(inputs.size(0)))
 
-                # record architecture cost both sampled and pruned (training)
-                xp.train.__getattribute__('train_sampled_%s'% cost).update(sampled_cost.mean().item())
-                xp.train.__getattribute__('train_pruned_%s' % cost).update(pruned_cost.mean().item())
-
-            # final architecture cost
-            cost = (optim_cost + args['arch_penalty'] * nas_model.architecture_consistence) - args['objective_cost']
-
-            if args['objective_method'] == 'max':
-                cost.clamp_(min=0)
-            elif args['objective_method'] == 'abs':
-                cost.abs_()
-            else:
-                raise RuntimeError
-
-            # build architecture loss (use reinforcement learning)
-            cost = indiv_loss.data.new(cost.size()).copy_(cost)
-            rewards = -(indiv_loss.data.squeeze() + args['lambda'] * cost)
-            mean_reward = rewards.mean()
-            rewards = (rewards - mean_reward)
-
-            # record architecture reward
-            xp.train.rewards.update(mean_reward.item())
-
-            rewards = Variable(rewards)
-            sampling_loss = nas_model.architecture_loss(rewards=rewards)
-            loss = indiv_loss.mean() + sampling_loss
-
+            # update model parameter
             nas_model.optimizer.zero_grad()
             loss.backward()
             nas_model.optimizer.step()
-
-            # record model loss and accuracy
-            xp.train.classif_loss.update(loss.item())
-            xp.train.accuracy.update(correct * 100 / float(inputs.size(0)))
 
             xp.train.timer.update()
             for metric in xp.train.metrics():
                 metric.log()
 
             if (i + 1) % args['lp'] == 0:
-                logger.info('Evaluation')
+                logger.info('\nEvaluation')
 
                 progress = epoch + (i + 1) / len(train_loader)
                 val_score = nas_model.eval(x, y, val_loader, 'validation')
                 test_score = nas_model.eval(x, y, test_loader, 'test')
 
                 # record model accuracy on validation and test dataset
-                xp.val.accuracy.update(val_score.item())
-                xp.test.accuracy.update(test_score.item())
-
-                nas_archs = nas_model.architectures
-                for ce_name, ce in nas_model.architecture_cost_evaluators.items():
-                    samp_cost, pruned_cost = ce.get_costs(nas_archs)
-
-                    # record architecture cost both sampled and pruned (test)
-                    xp.val.__getattribute__('eval_sampled_%s' % ce_name).update(samp_cost.mean().item())
-                    xp.val.__getattribute__('eval_pruned_%s' % ce_name).update(pruned_cost.mean().item())
+                xp.val.accuracy.update(val_score)
+                xp.test.accuracy.update(test_score)
 
                 msg = '[{:.2f}] Loss: {:.5f} - Cost: {:.3E} - Train: {:2.2f}% - Val: {:2.2f}% - Test: {:2.2f}%'
                 logger.info(msg.format(progress,

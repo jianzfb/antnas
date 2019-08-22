@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*-
 # @Time    : 2019-07-24 11:39
-# @File    : ShareCNF.py
+# @File    : BaselineSN.py
 # @Author  : jian<jian@mltalker.com>
 from __future__ import division
 from __future__ import unicode_literals
@@ -10,7 +10,8 @@ from numbers import Number
 import networkx as nx
 import numpy as np
 import torch.nn.functional as F
-from torch import nn, torch
+from torch import nn
+import torch
 from nas.interfaces.NetworkBlock import *
 from nas.interfaces.NetworkCell import *
 from nas.networks.StochasticSuperNetwork import StochasticSuperNetwork
@@ -29,8 +30,13 @@ class Conv_Transfer_Block(NetworkBlock):
         self.bn = nn.BatchNorm2d(out_chan)
         self.relu = relu
 
+        self.conv_in_data_size = None
+        self.conv_out_data_size = None
+
     def forward(self, x):
+        self.conv_in_data_size = x.size()
         x = self.conv(x)
+        self.conv_out_data_size = x.size()
         x = self.bn(x)
         if self.relu:
             x = F.relu(x)
@@ -39,13 +45,12 @@ class Conv_Transfer_Block(NetworkBlock):
             return x
         return x * (self._sampling == 1).float()
 
-    def get_flop_cost(self, x):
-        y = self(x)
-        flops_1 = self.get_conv2d_flops(self.conv, x, y)
-        flops_2 = self.get_bn_flops(self.bn, x, y)
+    def get_flop_cost(self):
+        flops_1 = self.get_conv2d_flops(self.conv, self.conv_in_data_size, self.conv_out_data_size)
+        flops_2 = self.get_bn_flops(self.bn, self.conv_out_data_size, self.conv_out_data_size)
         flops_3 = 0
         if self.relu:
-            flops_3 = self.get_relu_flops(self.relu, x, y)
+            flops_3 = self.get_relu_flops(self.relu, self.conv_out_data_size, self.conv_out_data_size)
 
         total_flops = flops_1 + flops_2 + flops_3
         return [0] + [total_flops] + [0] * (self.state_num - 2)
@@ -62,21 +67,27 @@ class Out_Layer(NetworkBlock):
     def __init__(self, in_chan, out_shape, bias=True):
         super(Out_Layer, self).__init__()
         self.avg_global_pool = nn.AvgPool2d(kernel_size=2, stride=2)
-        self.conv_1 = ConvBn(in_chan, in_chan, True, 1, 1, 0, True)
+        # self.conv_1 = ConvBn(in_chan, in_chan, True, 1, 1, 0, True)
+        self.conv_1 = nn.Conv2d(in_chan, in_chan, kernel_size=1, stride=1, padding=0, bias=bias)
+        self.bn = nn.BatchNorm2d(in_chan)
+
         self.conv = nn.Conv2d(in_chan, out_shape[0], 1, bias=bias)
         self.out_shape = out_shape
 
     def forward(self, x):
         x = self.conv_1(x)
+        x = self.bn(x)
+        x = F.relu(x)
+
         x = self.avg_global_pool(x)
         x = self.conv(x)
         return x.view(-1, *self.out_shape)
 
-    def get_flop_cost(self, x):
+    def get_flop_cost(self):
         return [0] + [0] * (self.state_num - 1)
 
 
-class BaselineSSN(StochasticSuperNetwork):
+class BaselineSN(StochasticSuperNetwork):
     _INPUT_NODE_FORMAT = 'I_{}_{}'              # 不可学习
     _OUTPUT_NODE_FORMAT = 'O_{}_{}'             # 不可学习
     _AGGREGATION_NODE_FORMAT = 'A_{}_{}'        # 不可学习
@@ -90,7 +101,7 @@ class BaselineSSN(StochasticSuperNetwork):
                  channels_per_block,
                  data_prop,
                  static_node_proba, *args, **kwargs):
-        super(BaselineSSN, self).__init__(*args, **kwargs)
+        super(BaselineSN, self).__init__(*args, **kwargs)
 
         self.in_chan = data_prop['in_channels']
         self.in_size = data_prop['img_dim']
@@ -145,7 +156,7 @@ class BaselineSSN(StochasticSuperNetwork):
         sampling_param = sampling_param_generator(out_name)
 
         self.graph.add_node(out_name,
-                            module=out_module,
+                            module=len(self.blocks),
                             sampling_param=len(self.sampling_parameters),
                             pos=BSNDrawer.get_draw_pos(pos=(0, offset_per_stage[-1]+sum(cells_per_block[-1])*2)))
         self.graph.add_edge(self._CELL_NODE_FORMAT.format(*(0, offset_per_stage[-1] + sum(cells_per_block[-1]) * 2 - 1)),
@@ -235,7 +246,7 @@ class BaselineSSN(StochasticSuperNetwork):
         sampling_param = sampling_param_generator(agg_node_name)
 
         self.graph.add_node(agg_node_name,
-                            module=module,
+                            module=len(self.blocks),
                             sampling_param=len(self.sampling_parameters),
                             pos=BSNDrawer.get_draw_pos(pos=pos))
 
@@ -248,7 +259,7 @@ class BaselineSSN(StochasticSuperNetwork):
         cell_node_name = node_format.format(*pos)
         sampling_param = sampling_param_generator(cell_node_name)
         self.graph.add_node(cell_node_name,
-                            module=module,
+                            module=len(self.blocks),
                             sampling_param=len(self.sampling_parameters),
                             pos=BSNDrawer.get_draw_pos(pos=pos))
 
@@ -267,7 +278,7 @@ class BaselineSSN(StochasticSuperNetwork):
         pos = BSNDrawer.get_draw_pos(source=source, dest=dest, pos_shift=pos_shift)
         sampling_param = sampling_param_generator(trans_name)
 
-        self.graph.add_node(trans_name, module=module, sampling_param=len(self.sampling_parameters), pos=pos)
+        self.graph.add_node(trans_name, module=len(self.blocks), sampling_param=len(self.sampling_parameters), pos=pos)
         self.graph.add_edge(source_name, trans_name,  width_node=trans_name)
         self.graph.add_edge(trans_name, dest_name,  width_node=trans_name)
         self.sampling_parameters.append(sampling_param)

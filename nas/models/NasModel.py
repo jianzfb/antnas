@@ -8,57 +8,38 @@ from __future__ import print_function
 import torch
 from torch.autograd import Variable
 from torch import optim
+import torch.nn as nn
 
 from nas.implem.ParameterCostEvaluator import ParameterCostEvaluator
 from nas.implem.TimeCostEvaluator import TimeCostEvaluator
-from nas.implem.BaselineSSN import BaselineSSN
+from nas.implem.BaselineSN import *
 from nas.implem.ComputationalCostEvaluator import ComputationalCostEvaluator
 from nas.interfaces.PathRecorder import PathRecorder
 from tqdm import tqdm
+from torch.nn.parallel import DistributedDataParallel
 
 
 class NasModel(object):
     def __init__(self, args, data_properties):
         self.args = args
         # 创建搜索空间
-        self._model = BaselineSSN(blocks_per_stage=[1, 1, 1, 3],
-                            cells_per_block=[[3], [3], [6], [6, 6, 3]],
-                            channels_per_block=[[16], [32], [64], [128, 256, 512]],
-                            data_prop=data_properties,
-                            static_node_proba=args['static'],
-                            deter_eval=args['deter_eval'])
+        self._model = BaselineSN(blocks_per_stage=[1, 1, 1, 3],
+                                 cells_per_block=[[3], [3], [6], [6, 6, 3]],
+                                 channels_per_block=[[16], [32], [64], [128, 256, 512]],
+                                 data_prop=data_properties,
+                                 static_node_proba=args['static'],
+                                 deter_eval=args['deter_eval'])
 
-        # 架构路径分析
-        self.path_recorder = PathRecorder(self.model.graph, self.model.out_node)
-        self._model.subscribe(self.path_recorder.new_event)
+        self._model._cost_optimization = args['cost_optimization']
+        self._model._architecture_penalty = args['arch_penalty']
+        self._model._objective_cost = args['objective_cost']
+        self._model._objective_method = args['objective_method']
+        self._model._architecture_lambda = args['lambda']
+        self._model._cost_evaluation = args['cost_evaluation']
 
-        # 架构代价估计
-        self._cost_evaluators = None
         # 模型优化器
         self._optimizer = None
-
-        # 初始化架构约束和模型优化器
         self.initialize()
-
-    def initialize_cost_evaluator(self):
-        if self._cost_evaluators is not None:
-            return self._cost_evaluators
-
-        cost_evaluators = {
-            'comp': ComputationalCostEvaluator,
-            'time': TimeCostEvaluator,
-            'param': ParameterCostEvaluator
-        }
-
-        self.model.eval()
-
-        used_ce = {}
-        for k in self.args['cost_evaluation']:
-            used_ce[k] = cost_evaluators[k](path_recorder=self.path_recorder)
-            used_ce[k].init_costs(self.model, main_cost=(k == self.args['cost_optimization']))
-
-        self._cost_evaluators = used_ce
-        return self._cost_evaluators
 
     def initialize_optimizer(self):
         if self._optimizer is not None:
@@ -74,9 +55,13 @@ class NasModel(object):
                  'weight_decay': 0}
             ], lr=self.args['lr'], weight_decay=self.args['weight_decay'], momentum=self.args['momentum'], nesterov=self.args['nesterov'])
         elif self.args['optim'] == 'ADAM':
-            optimizer = optim.Adam(self.model.parameters(), lr=self.args['lr'], weight_decay=self.args['weight_decay'])
+            optimizer = optim.Adam(self.model.parameters(),
+                                   lr=self.args['lr'],
+                                   weight_decay=self.args['weight_decay'])
         elif self.args['optim'] == 'RMS':
-            optimizer = optim.RMSprop(self.model.parameters(), lr=self.args['lr'], weight_decay=self.args['weight_decay'],
+            optimizer = optim.RMSprop(self.model.parameters(),
+                                      lr=self.args['lr'],
+                                      weight_decay=self.args['weight_decay'],
                                       momentum=self.args['momentum'])
         else:
             raise RuntimeError
@@ -86,7 +71,6 @@ class NasModel(object):
 
     def initialize(self):
         self.initialize_optimizer()
-        self.initialize_cost_evaluator()
 
     @property
     def optimizer(self):
@@ -96,57 +80,34 @@ class NasModel(object):
         if not self.model.training:
             self.model.train()
 
-        # 1.step get model output feature map
-        predictions = self.model(Variable(x))
-
-        # 2.step compute loss
-        loss = self.model.loss(predictions, Variable(y))
-
-        # 3.step compute accuracy
-        correct = self.model.accuray(predictions, Variable(y))
-
-        return predictions, loss, correct
+        # forward modelr
+        loss, accuracy = self.model(Variable(x), Variable(y))
+        return loss.mean(), accuracy.sum()
 
     def eval(self, x, y, loader, name=''):
         if self.model.training:
            self.model.eval()
 
-        correct = 0
+        total_correct = 0
         total = 0
         for images, labels in tqdm(loader, desc=name, ascii=True):
             x.resize_(images.size()).copy_(images)
             y.resize_(labels.size()).copy_(labels)
 
-            # 1.step get model output feature map
             with torch.no_grad():
-                preds = self.model(x)
+                _, accuracy = self.model(Variable(x), Variable(y))
 
-            # 2.step compute accuracy
-            batch_correct = self.model.accuray(preds, y)
-
-            correct += batch_correct
+            total_correct += accuracy.sum()
             total += labels.size(0)
 
-        return 100 * correct.float().item() / total
-
-    @property
-    def architectures(self):
-        return self.path_recorder.get_architectures(self.model.out_node)
-
-    @property
-    def architecture_consistence(self):
-        return self.path_recorder.get_consistence(self.model.out_node).float()
-
-    @property
-    def architecture_cost_evaluators(self):
-        return self._cost_evaluators
+        return 100 * total_correct.float().item() / total
 
     @property
     def model(self):
         return self._model
-
-    def architecture_loss(self, *args, **kwargs):
-        return self.model.architecture_loss(*args, **kwargs)
+    @model.setter
+    def model(self, val):
+        self._model = val
 
     def adjust_lr(self, epoch, tresh, val, logger=None, except_groups=None):
         if except_groups is None:
@@ -167,3 +128,8 @@ class NasModel(object):
                 logger.info('{} - {}'.format(param_group['name'], param_group['lr']))
 
         return lr
+
+    def cuda(self, cuda_list):
+        self.model.to(0)
+        if len(cuda_list) > 1:
+            self.model = nn.DataParallel(self.model, [i for i in range(len(cuda_list))])

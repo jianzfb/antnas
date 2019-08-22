@@ -8,6 +8,8 @@ class CostEvaluator(object):
         super(CostEvaluator, self).__init__()
         self.path_recorder = path_recorder
         self.costs = None
+        self.model = kwargs.get('model')
+        self.main_cost = kwargs.get('main_cost')
 
     @abc.abstractmethod
     def get_cost(self, **kwargs):

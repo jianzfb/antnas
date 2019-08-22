@@ -1,9 +1,13 @@
 from nas.interfaces.CostEvaluator import CostEvaluator
 import torch
 
+
 class EdgeCostEvaluator(CostEvaluator):
 
     def get_cost(self, architectures):
+        if self.costs is None:
+            self.init_costs(self.model, self.main_cost)
+
         # self.costs is N x state
         costs = torch.gather(self.costs, dim=1, index=architectures.long())
         # costs = costs * architectures

@@ -16,7 +16,7 @@ class CellBlock(NetworkBlock):
         super(CellBlock, self).__init__()
         self.channles = channles
         self._sampling = None
-        self.op_list = []
+        self.op_list = nn.ModuleList()
 
         # zero state
         self.skip_op = Skip(channles, out_channels, reduction=reduction)
@@ -93,9 +93,9 @@ class CellBlock(NetworkBlock):
         cell_result = sum(val_list)
         return cell_result
 
-    def get_flop_cost(self, x):
+    def get_flop_cost(self):
         cost_list = [0]
         for i in range(len(self.op_list) - 1):
-            cost_list.append(self.op_list[i+1].get_flop_cost(x))
+            cost_list.append(self.op_list[i+1].get_flop_cost()[1])
 
         return cost_list

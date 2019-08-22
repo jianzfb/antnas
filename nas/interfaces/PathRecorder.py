@@ -11,7 +11,6 @@ class PathRecorder(object):
     def __init__(self, graph, default_out=None):
         self.graph = graph
         self.default_out = default_out
-
         self.n_nodes = self.graph.number_of_nodes()
 
         # create node-to-index and index-to-node mapping

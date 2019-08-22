@@ -8,19 +8,17 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-
-from nas.interfaces.Observable import Observable
 from nas.networks.SuperNetwork import SuperNetwork
 from nas.interfaces.NetworkBlock import *
+from nas.interfaces.PathRecorder import PathRecorder
+import copy
 
 
-class StochasticSuperNetwork(Observable, SuperNetwork):
+class StochasticSuperNetwork(SuperNetwork):
     INIT_NODE_PARAM = 3
 
     def __init__(self, deter_eval, *args, **kwargs):
         super(StochasticSuperNetwork, self).__init__(*args, **kwargs)
-        self.sampled_architecture = nn.Parameter()
-
         self.nodes_param = None
         self.probas = None
         self.entropies = None
@@ -74,32 +72,81 @@ class StochasticSuperNetwork(Observable, SuperNetwork):
         return None
 
     def forward(self, *input):
+        # 0.step build auxiliary running info
+        if self.running_path_recorder is None:
+            self.running_path_recorder = PathRecorder(self.graph, self.out_node)
+            self.subscribe(self.running_path_recorder.new_event)
+
+        running_graph = copy.deepcopy(self.net)
+
+        # 1.step start new iteration
         self.fire(type='new_iteration')
+        assert len(input) == 2
 
-        assert len(input) == 1
+        x, y = input
+        input = [x]
+
+        # 2.step sampling network
         self._sample_archs(input[0].size(0))
-        self.net.node[self.in_node]['input'] = [*input]
+        running_graph.node[self.in_node]['input'] = [*input]
 
+        # 3.step forward sampling network
+        model_out = None
         for node in self.traversal_order:
-            cur_node = self.net.node[node]
+            cur_node = running_graph.node[node]
             input = self.format_input(cur_node.pop('input'))
 
             if len(input) == 0:
                 raise RuntimeError('Node {} has no inputs'.format(node))
             batch_size = input[0].size(0) if type(input) == list else input.size(0)
             sampling = self.get_sampling(node, batch_size)
-            cur_node['module'].sampling(sampling)
-            out = cur_node['module'](input)
+            self.blocks[cur_node['module']].sampling(sampling)
+            out = self.blocks[cur_node['module']](input)
 
-            # sampling = self.get_sampling(node, out)
-            # out = out * sampling
             if node == self.out_node:
-                return out
+                model_out = out
+                break
 
-            for succ in self.net.successors(node):
-                if 'input' not in self.net.node[succ]:
-                    self.net.node[succ]['input'] = []
-                self.net.node[succ]['input'].append(out)
+            for succ in running_graph.successors(node):
+                if 'input' not in running_graph.node[succ]:
+                    running_graph.node[succ]['input'] = []
+                running_graph.node[succ]['input'].append(out)
+
+        # 4.step compute model loss
+        indiv_loss = self.loss(model_out, y)
+
+        # 5.step compute model accuracy
+        model_accuracy = self.accuray(model_out, y)
+
+        # 6.step compute architecture loss
+        optim_cost = None
+        sampled_cost = None
+        pruned_cost = None
+        for cost, cost_eval in self.architecture_cost_evaluators.items():
+            sampled_cost, pruned_cost = cost_eval.get_costs(self.architecture)
+
+            if cost == self.architecture_cost_optimization:
+                optim_cost = sampled_cost
+
+        cost = (optim_cost + self.architecture_penalty * self.architecture_consistence) - self.architecture_objective_cost
+
+        if self.architecture_objective_method == 'max':
+            cost.clamp_(min=0)
+        elif self.architecture_objective_method == 'abs':
+            cost.abs_()
+
+        cost = indiv_loss.data.new(cost.size()).copy_(cost)
+        rewards = -(indiv_loss.data.squeeze() + self.architecture_lambda * cost)
+        mean_reward = rewards.mean()
+        rewards = (rewards - mean_reward)
+
+        rewards = Variable(rewards)
+        sampling_loss = self.architecture_loss(rewards=rewards)
+        loss = indiv_loss.mean() + sampling_loss
+
+        # sampled_cost = sampled_cost.mean()
+        # pruned_cost = pruned_cost.mean()
+        return loss, model_accuracy
 
     def _sample_archs(self, batch_size):
         batch_size = int(batch_size)

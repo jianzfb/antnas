@@ -6,7 +6,8 @@ from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
 import torch.nn.functional as F
-from torch import nn, torch
+from torch import nn
+import torch
 
 
 def cross_entropy(predictions, labels):
