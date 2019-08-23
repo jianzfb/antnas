@@ -33,6 +33,10 @@ class Conv_Transfer_Block(NetworkBlock):
         self.conv_in_data_size = None
         self.conv_out_data_size = None
 
+        self.params = {
+            'out_chan': out_chan,
+        }
+
     def forward(self, x):
         self.conv_in_data_size = x.size()
         x = self.conv(x)
@@ -73,6 +77,9 @@ class Out_Layer(NetworkBlock):
 
         self.conv = nn.Conv2d(in_chan, out_shape[0], 1, bias=bias)
         self.out_shape = out_shape
+        self.params = {
+            'out_shape': out_shape,
+        }
 
     def forward(self, x):
         x = self.conv_1(x)
@@ -157,6 +164,7 @@ class BaselineSN(StochasticSuperNetwork):
 
         self.graph.add_node(out_name,
                             module=len(self.blocks),
+                            module_params=out_module.params,
                             sampling_param=len(self.sampling_parameters),
                             pos=BSNDrawer.get_draw_pos(pos=(0, offset_per_stage[-1]+sum(cells_per_block[-1])*2)))
         self.graph.add_edge(self._CELL_NODE_FORMAT.format(*(0, offset_per_stage[-1] + sum(cells_per_block[-1]) * 2 - 1)),
@@ -200,6 +208,7 @@ class BaselineSN(StochasticSuperNetwork):
                                                 self._CELL_NODE_FORMAT,
                                                 self._AGGREGATION_NODE_FORMAT,
                                                 self._TRANSFORMATION_FORMAT,
+                                                module_type='conv',
                                                 pos_shift=4)
 
         return stage_offset
@@ -239,6 +248,7 @@ class BaselineSN(StochasticSuperNetwork):
                                                 self._CELL_NODE_FORMAT,
                                                 self._AGGREGATION_NODE_FORMAT,
                                                 self._TRANSFORMATION_FORMAT,
+                                                module_type='identity',
                                                 pos_shift=2)
 
     def add_aggregation(self, pos, module, node_format):
@@ -247,6 +257,7 @@ class BaselineSN(StochasticSuperNetwork):
 
         self.graph.add_node(agg_node_name,
                             module=len(self.blocks),
+                            module_params=module.params,
                             sampling_param=len(self.sampling_parameters),
                             pos=BSNDrawer.get_draw_pos(pos=pos))
 
@@ -260,6 +271,7 @@ class BaselineSN(StochasticSuperNetwork):
         sampling_param = sampling_param_generator(cell_node_name)
         self.graph.add_node(cell_node_name,
                             module=len(self.blocks),
+                            module_params=module.params,
                             sampling_param=len(self.sampling_parameters),
                             pos=BSNDrawer.get_draw_pos(pos=pos))
 
@@ -267,7 +279,8 @@ class BaselineSN(StochasticSuperNetwork):
         self.blocks.append(module)
         return cell_node_name
 
-    def add_transformation(self, source, dest, module, src_node_format, des_node_format, transform_format, pos_shift=0):
+    def add_transformation(self, source, dest, module, src_node_format, des_node_format, transform_format,
+                           module_type, pos_shift=0):
         src_l, src_s = source
         dst_l, dst_s = dest
 
@@ -278,7 +291,9 @@ class BaselineSN(StochasticSuperNetwork):
         pos = BSNDrawer.get_draw_pos(source=source, dest=dest, pos_shift=pos_shift)
         sampling_param = sampling_param_generator(trans_name)
 
-        self.graph.add_node(trans_name, module=len(self.blocks), sampling_param=len(self.sampling_parameters), pos=pos)
+        self.graph.add_node(trans_name, module=len(self.blocks), module_params=module.params,
+                            module_type=module_type,
+                            sampling_param=len(self.sampling_parameters), pos=pos)
         self.graph.add_edge(source_name, trans_name,  width_node=trans_name)
         self.graph.add_edge(trans_name, dest_name,  width_node=trans_name)
         self.sampling_parameters.append(sampling_param)

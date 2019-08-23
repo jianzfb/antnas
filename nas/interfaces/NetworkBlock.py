@@ -103,6 +103,7 @@ class DummyBlock(NetworkBlock):
 
     def __init__(self):
         super(DummyBlock, self).__init__()
+        self.params = {}
 
     def forward(self, x):
         if self._sampling is None:
@@ -153,6 +154,12 @@ class ConvBn(NetworkBlock):
         self.flop_cost = []
         self.conv_in_data_size = None
         self.conv_out_data_size = None
+        self.out_chan = out_chan
+        self.params = {
+            'stride': stride,
+            'out_chan': out_chan,
+            'k_size': k_size
+        }
 
     def forward(self, x):
         self.conv_in_data_size = x.size()
@@ -214,6 +221,7 @@ class Add_Block(NetworkBlock):
         self.flop_cost = []
         self.data_size = None
         self.data_num = 1
+        self.params = {}
 
     def forward(self, x):
         if not isinstance(x, list):
