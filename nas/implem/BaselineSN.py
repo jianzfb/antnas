@@ -34,7 +34,8 @@ class Conv_Transfer_Block(NetworkBlock):
         self.conv_out_data_size = None
 
         self.params = {
-            'out_chan': out_chan,
+            'module_list': ['conv_transfer_block'],
+            'conv_transfer_block': {'out_chan': out_chan}
         }
 
     def forward(self, x):
@@ -78,7 +79,8 @@ class Out_Layer(NetworkBlock):
         self.conv = nn.Conv2d(in_chan, out_shape[0], 1, bias=bias)
         self.out_shape = out_shape
         self.params = {
-            'out_shape': out_shape,
+            'module_list': ['out_layer'],
+            'out_layer': {'out_shape': out_shape}
         }
 
     def forward(self, x):
@@ -208,7 +210,6 @@ class BaselineSN(StochasticSuperNetwork):
                                                 self._CELL_NODE_FORMAT,
                                                 self._AGGREGATION_NODE_FORMAT,
                                                 self._TRANSFORMATION_FORMAT,
-                                                module_type='conv',
                                                 pos_shift=4)
 
         return stage_offset
@@ -248,7 +249,6 @@ class BaselineSN(StochasticSuperNetwork):
                                                 self._CELL_NODE_FORMAT,
                                                 self._AGGREGATION_NODE_FORMAT,
                                                 self._TRANSFORMATION_FORMAT,
-                                                module_type='identity',
                                                 pos_shift=2)
 
     def add_aggregation(self, pos, module, node_format):
@@ -279,8 +279,7 @@ class BaselineSN(StochasticSuperNetwork):
         self.blocks.append(module)
         return cell_node_name
 
-    def add_transformation(self, source, dest, module, src_node_format, des_node_format, transform_format,
-                           module_type, pos_shift=0):
+    def add_transformation(self, source, dest, module, src_node_format, des_node_format, transform_format, pos_shift=0):
         src_l, src_s = source
         dst_l, dst_s = dest
 
@@ -292,7 +291,6 @@ class BaselineSN(StochasticSuperNetwork):
         sampling_param = sampling_param_generator(trans_name)
 
         self.graph.add_node(trans_name, module=len(self.blocks), module_params=module.params,
-                            module_type=module_type,
                             sampling_param=len(self.sampling_parameters), pos=pos)
         self.graph.add_edge(source_name, trans_name,  width_node=trans_name)
         self.graph.add_edge(trans_name, dest_name,  width_node=trans_name)

@@ -103,7 +103,10 @@ class DummyBlock(NetworkBlock):
 
     def __init__(self):
         super(DummyBlock, self).__init__()
-        self.params = {}
+        self.params = {
+            'module_list': ['dummy_block'],
+            'dummy_block': {}
+        }
 
     def forward(self, x):
         if self._sampling is None:
@@ -156,9 +159,10 @@ class ConvBn(NetworkBlock):
         self.conv_out_data_size = None
         self.out_chan = out_chan
         self.params = {
-            'stride': stride,
-            'out_chan': out_chan,
-            'k_size': k_size
+            'module_list': ['convbn'],
+            'convbn': {'stride': stride,
+                       'out_chan': out_chan,
+                       'k_size': k_size}
         }
 
     def forward(self, x):
@@ -221,7 +225,10 @@ class Add_Block(NetworkBlock):
         self.flop_cost = []
         self.data_size = None
         self.data_num = 1
-        self.params = {}
+        self.params = {
+            'module_list': ['add_block'],
+            'add_block':{}
+        }
 
     def forward(self, x):
         if not isinstance(x, list):

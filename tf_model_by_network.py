@@ -12,10 +12,26 @@ slim = tf.contrib.slim
 # graph.add_edge('first', 'next')
 # nx.write_gpickle(graph, "test.gpickle")
 
-def skip(inputs, out_channels, reduction):
+def convbn(inputs, out_chan, k_size, stride):
+    return slim.conv2d(inputs,
+                       num_outputs=out_chan,
+                       kernel_size=k_size,
+                       stride=stride,
+                       activation_fn=tf.nn.relu,
+                       normalizer_fn=slim.batch_norm)
+
+
+def add_block(inputs):
+    if not isinstance(inputs, list):
+        return inputs
+    assert isinstance(inputs, list)
+    return sum(inputs)
+
+
+def skip(inputs, out_chan, reduction):
     input_shape = inputs.get_shape()
-    if out_channels > input_shape[-1]:
-        pad = tf.zeros((input_shape[0], input_shape[1], input_shape[2], out_channels - input_shape[-1]))
+    if out_chan > input_shape[-1]:
+        pad = tf.zeros((input_shape[0], input_shape[1], input_shape[2], out_chan - input_shape[-1]))
         inputs = tf.concat([inputs, pad], axis=-1)
 
     if reduction:
@@ -24,7 +40,7 @@ def skip(inputs, out_channels, reduction):
     return inputs
 
 
-def inverted_residual_block_withse(inputs, expansion, kernel_size, out_chan, skip, reduction, ratio):
+def inverted_residual_block_withse(inputs, expansion, kernel_size, out_chan, reduction, skip=True, ratio=4):
     x = inputs
     input_shape = inputs.get_shape().as_list()
     x = slim.conv2d(x,
@@ -43,7 +59,6 @@ def inverted_residual_block_withse(inputs, expansion, kernel_size, out_chan, ski
     se_x = slim.fully_connected(se_x, num_outputs=input_shape[3] * expansion // ratio, activation_fn=tf.nn.relu)
     se_x = slim.fully_connected(se_x, num_outputs=input_shape[3] * expansion, activation_fn=None)
     se_x = (0.2 * se_x) + 0.5
-    print(se_x.get_shape())
     se_x = tf.clip_by_value(se_x, 0.0, 1.0)
     se_x = tf.reshape(se_x, shape=[input_shape[0], 1, 1, input_shape[3] * expansion])
     x = tf.multiply(se_x, x)
@@ -57,25 +72,6 @@ def inverted_residual_block_withse(inputs, expansion, kernel_size, out_chan, ski
     if skip and input_shape[0] == out_chan and (not reduction):
         x = x + inputs
     return x
-
-
-def cell_block(inputs, out_channels, reduction, sampled):
-    if sampled == 0:
-        return skip(inputs, out_channels, reduction)
-    elif sampled == 1:
-        return inverted_residual_block_withse(inputs, expansion=3, kernel_size=3, out_chan=out_channels,
-                                              skip=True, reduction=reduction, ratio=4)
-    elif sampled == 2:
-        return inverted_residual_block_withse(inputs, expansion=3, kernel_size=5, out_chan=out_channels,
-                                              skip=True, reduction=reduction, ratio=4)
-    elif sampled == 3:
-        return inverted_residual_block_withse(inputs, expansion=6, kernel_size=3, out_chan=out_channels,
-                                              skip=True, reduction=reduction, ratio=4)
-    elif sampled == 4:
-        return inverted_residual_block_withse(inputs, expansion=6, kernel_size=5, out_chan=out_channels,
-                                              skip=True, reduction=reduction, ratio=4)
-    else:
-        raise ValueError('cell state %d do not exist' % sampled)
 
 
 def conv_transfer_block(inputs, out_chan):
@@ -107,40 +103,55 @@ def out_layer(inputs, out_shape):
     return x
 
 
-def get_operate_fn(node_name, node):
+def identity(inputs):
+    return inputs
+
+
+op_list = {
+    'convbn': convbn,
+    'add_block': add_block,
+    'inverted_residual_block_withse': inverted_residual_block_withse,
+    'identity': identity,
+    'skip': skip,
+    'conv_transfer_block': conv_transfer_block,
+    'out_layer': out_layer
+}
+
+op_name_trans = {
+    'convbn': 'convbn',
+    'dummy_block': 'identity',
+    'add_block': 'add_block',
+    'IRB_k3e3_skip': 'inverted_residual_block_withse',
+    'IRB_k5e3_skip': 'inverted_residual_block_withse',
+    'IRB_k3e6_skip': 'inverted_residual_block_withse',
+    'IRB_k5e6_skip': 'inverted_residual_block_withse',
+    'skip': 'skip',
+    'conv_transfer_block': 'conv_transfer_block',
+    'out_layer': 'out_layer'
+}
+
+
+def get_operate_fn(node):
     params = node['module_params']
-    print(params)
+    # print(params)
+    sampled = node['sampled']
+
+    if len(params['module_list']) == 1:
+        sampled_name = params['module_list'][0]
+        op_params = params[sampled_name]
+        op_name = op_name_trans[sampled_name]
+    else:
+        sampled_name = params['module_list'][sampled]
+        op_params = params[sampled_name]
+        op_name = op_name_trans[sampled_name]
+
+    print(op_name)
 
     def network_fn(inputs):
-        if node_name.startswith('I'):
-            return slim.conv2d(inputs,
-                               num_outputs=params['out_chan'],
-                               kernel_size=params['k_size'],
-                               stride=params['stride'],
-                               activation_fn=tf.nn.relu,
-                               normalizer_fn=slim.batch_norm)
-
-        elif node_name.startswith('A'):
-            if not isinstance(inputs, list):
-                return inputs
-            assert isinstance(inputs, list)
-            return sum(inputs)
-
-        elif node_name.startswith('CELL'):
-            return cell_block(inputs, out_channels=params['out_chan'],
-                              reduction=params['reduction'], sampled=node['sampled'])
-
-        elif node_name.startswith('T'):
-            if node['module_type'] == 'conv':
-                return conv_transfer_block(inputs, params['out_chan']) * float(node['sampled'] == 1)
-            elif node['module_type'] == 'identity':
-                return inputs * float(node['sampled'] == 1)
-
-        elif node_name.startswith('O'):
-            return out_layer(inputs, params['out_shape'])
-
+        if len(params['module_list']) == 1:
+            return op_list[op_name](inputs, **op_params) * float(sampled == 1)
         else:
-            raise ValueError('Name of operate unknown %s' % node_name)
+            return op_list[op_name](inputs, **op_params)
 
     return network_fn
 
@@ -151,7 +162,7 @@ def format_input(inputs):
     return inputs
 
 
-def get_nodel(images):
+def get_model(images):
     graph = nx.read_gpickle("test.gpickle")
     travel = list(nx.topological_sort(graph))
 
@@ -159,17 +170,17 @@ def get_nodel(images):
     layers_map = {}
     i = 0
     for node_name in travel:
+        print()
         print(node_name)
         cur_node = graph.node[node_name]
-        print(cur_node)
         for pre_name in graph.predecessors(node_name):
             input_feature.append(layers_map[pre_name])
 
         input_feature = format_input(input_feature)
 
-        output = get_operate_fn(node_name, cur_node)(input_feature)
-        print(output.get_shape())
-        layers_map[node_name] = output
+        outputs = get_operate_fn(cur_node)(input_feature)
+        print(outputs.get_shape())
+        layers_map[node_name] = outputs
         input_feature = []
         i += 1
         # if i == 3:
@@ -178,4 +189,4 @@ def get_nodel(images):
 
 if __name__ == '__main__':
     image = tf.random_uniform((1, 32, 32, 3))
-    get_nodel(image)
+    get_model(image)
