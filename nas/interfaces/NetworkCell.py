@@ -17,6 +17,14 @@ class CellBlock(NetworkBlock):
         self.channles = channles
         self._sampling = None
         self.op_list = nn.ModuleList()
+        self.params = {
+            'module_list': ['skip', 'IRB_k3e3_skip', 'IRB_k5e3_skip', 'IRB_k3e6_skip', 'IRB_k5e6_skip'],
+            'skip': {'out_chan': out_channels, 'reduction': reduction},
+            'IRB_k3e3_skip': {'kernel_size': 3, 'expansion': 3, 'out_chan': out_channels, 'reduction': reduction},
+            'IRB_k5e3_skip': {'kernel_size': 5, 'expansion': 3, 'out_chan': out_channels, 'reduction': reduction},
+            'IRB_k3e6_skip': {'kernel_size': 3, 'expansion': 6, 'out_chan': out_channels, 'reduction': reduction},
+            'IRB_k5e6_skip': {'kernel_size': 5, 'expansion': 6, 'out_chan': out_channels, 'reduction': reduction}
+        }
 
         # zero state
         self.skip_op = Skip(channles, out_channels, reduction=reduction)

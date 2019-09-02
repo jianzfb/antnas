@@ -100,6 +100,8 @@ class NasModel(object):
             total_correct += accuracy.sum()
             total += labels.size(0)
 
+        nx.write_gpickle(self.model.net, "test.gpickle")
+
         return 100 * total_correct.float().item() / total
 
     @property

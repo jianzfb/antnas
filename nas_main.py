@@ -39,7 +39,7 @@ def argument_parser():
                         help='path for the execution')
 
     parser.add_argument('-dset', default='CIFAR10', type=str, help='Dataset')
-    parser.add_argument('-bs', action='store', default=64, type=int, help='Size of each batch')
+    parser.add_argument('-bs', action='store', default=2, type=int, help='Size of each batch')
     parser.add_argument('-epochs', action='store', default=300, type=int,
                         help='Number of training epochs')
 

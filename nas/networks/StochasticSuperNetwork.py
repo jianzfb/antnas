@@ -12,6 +12,7 @@ from nas.networks.SuperNetwork import SuperNetwork
 from nas.interfaces.NetworkBlock import *
 from nas.interfaces.PathRecorder import PathRecorder
 import copy
+import networkx as nx
 
 
 class StochasticSuperNetwork(SuperNetwork):
@@ -100,6 +101,7 @@ class StochasticSuperNetwork(SuperNetwork):
                 raise RuntimeError('Node {} has no inputs'.format(node))
             batch_size = input[0].size(0) if type(input) == list else input.size(0)
             sampling = self.get_sampling(node, batch_size)
+            self.net.node[node]['sampled'] = torch.squeeze(sampling)[0].item()
             self.blocks[cur_node['module']].sampling(sampling)
             out = self.blocks[cur_node['module']](input)
 
@@ -146,6 +148,7 @@ class StochasticSuperNetwork(SuperNetwork):
 
         # sampled_cost = sampled_cost.mean()
         # pruned_cost = pruned_cost.mean()
+        nx.write_gpickle(self.net, "test.gpickle")
         return loss, model_accuracy
 
     def _sample_archs(self, batch_size):
