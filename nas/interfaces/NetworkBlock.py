@@ -1,27 +1,83 @@
-import timeit
-
 import torch.nn.functional as F
 from torch import nn
 import torch
+import json
+import os
+import threading
 
 
 class NetworkBlock(nn.Module):
     state_num = 5
     epoch = 0
-    is_training = True
-    is_running = False
+    lookup_table = {}
 
     def __init__(self):
         super(NetworkBlock, self).__init__()
-        self._sampling = None
+        self._sampling = threading.local()
+        self._last_sampling = threading.local()
+        self.node_regularizer = threading.local()
+        self._is_switch = False
 
-    def get_exec_time(self, x):
-        n_exec, time = timeit.Timer(lambda: self(x)).autorange()
-        mean_time = time / n_exec
-        return mean_time
+    @property
+    def switch(self):
+        return self._is_switch
+
+    @switch.setter
+    def switch(self, val):
+        self._is_switch = val
+
+    def get_latency(self, x):
+        return [0.0] * NetworkBlock.state_num
 
     def get_param_num(self, x):
-        return 0
+        return [0] * NetworkBlock.state_num
+
+    def get_flop_cost(self, x):
+        return [0.0] * self.state_num
+
+    @staticmethod
+    def load_lookup_table(lookup_table_file):
+        if os.path.exists(lookup_table_file):
+            with open(lookup_table_file) as fp:
+                NetworkBlock.lookup_table = json.load(fp)
+            return True
+        else:
+            return False
+
+    @staticmethod
+    def proximate_latency(kernel_latency, kernel_profile):
+        if kernel_profile in kernel_latency:
+            return kernel_latency[kernel_profile]
+
+        name_list = []
+        latency_list = []
+        for k,v in kernel_latency.items():
+            a,b,c,d = k.split('x')
+            total = (int(a)*int(b)*int(c))/int(d[-1])
+            if total not in name_list:
+                name_list.append(total)
+                latency_list.append(v)
+
+        kernel_a,kernel_b,kernel_c,kernel_d = kernel_profile.split('x')
+        kernel_total = (int(kernel_a)*int(kernel_b)*int(kernel_c))/int(kernel_d[-1])
+
+        most_prox_index = 0
+        most_prox_val = 100000000000
+        for index in range(len(name_list)):
+            a = name_list[index] if name_list[index] > kernel_total else kernel_total
+            b = kernel_total if name_list[index] >= kernel_total else name_list[index]
+            ratio = float(a) / float(b)
+
+            if most_prox_val > ratio:
+                most_prox_val = ratio
+                most_prox_index = index
+
+        prox_latency = 0.0
+        if name_list[most_prox_index] > kernel_total:
+            prox_latency = latency_list[most_prox_index] / most_prox_val
+        else:
+            prox_latency = latency_list[most_prox_index] * most_prox_val
+        return prox_latency
 
     @staticmethod
     def get_conv2d_flops(m, x_size, y_size):
@@ -93,28 +149,45 @@ class NetworkBlock(nn.Module):
 
         return total_ops
 
-    def sampling(self, val):
-        self._sampling = val
+    def set_sampling(self, val):
+        self._sampling.value = val
+
+    def get_sampling(self):
+        return getattr(self._sampling, 'value', None)
+
+    def set_last_sampling(self, val):
+        self._last_sampling.value = val
+
+    def get_last_sampling(self):
+        return getattr(self._last_sampling, 'value', None)
+
+    def set_node_regularizer(self, val):
+        self.node_regularizer.value = val
+
+    def get_node_regularizer(self):
+        return getattr(self.node_regularizer, 'value', None)
 
 
-class DummyBlock(NetworkBlock):
+class Identity(NetworkBlock):
     n_layers = 0
     n_comp_steps = 0
 
     def __init__(self):
-        super(DummyBlock, self).__init__()
+        super(Identity, self).__init__()
+        self.switch = True
+
         self.params = {
-            'module_list': ['dummy_block'],
-            'dummy_block': {}
+            'module_list': ['identity'],
+            'identity': {}
         }
 
     def forward(self, x):
-        if self._sampling is None:
+        if self.get_sampling() is None:
             return x
 
-        return x * (self._sampling == 1).float()
+        return x * (self._sampling.value == 1).float()
 
-    def get_flop_cost(self):
+    def get_flop_cost(self, x):
         return [0] * self.state_num
 
 
@@ -129,6 +202,13 @@ class Skip(NetworkBlock):
         self.reduction = reduction
         self.pool2d = torch.nn.AvgPool2d(2, 2)
 
+        self.switch = True
+
+        self.params = {
+            'module_list': ['skip'],
+            'skip': {'out_chan': out_channels, 'reduction': reduction},
+        }
+
     def forward(self, x):
         x_res = x
         if self.out_channels > self.in_channels:
@@ -139,9 +219,12 @@ class Skip(NetworkBlock):
         if self.reduction:
             x_res = self.pool2d(x_res)
 
-        return x_res
+        if self.get_sampling() is None:
+            return x_res
 
-    def get_flop_cost(self):
+        return x_res * (self._sampling.value == 1).float()
+
+    def get_flop_cost(self, x):
         return [0] * self.state_num
 
 
@@ -154,43 +237,41 @@ class ConvBn(NetworkBlock):
         self.conv = nn.Conv2d(in_chan, out_chan, kernel_size=k_size, stride=stride, padding=padding, bias=bias)
         self.bn = nn.BatchNorm2d(out_chan)
         self.relu = relu
-        self.flop_cost = []
-        self.conv_in_data_size = None
-        self.conv_out_data_size = None
         self.out_chan = out_chan
         self.params = {
             'module_list': ['convbn'],
             'convbn': {'stride': stride,
                        'out_chan': out_chan,
-                       'k_size': k_size}
+                       'k_size': k_size,
+                       'relu': relu,
+                       'bias': bias}
         }
+        self.switch = True
 
     def forward(self, x):
-        self.conv_in_data_size = x.size()
         x = self.conv(x)
-        self.conv_out_data_size = x.size()
         x = self.bn(x)
         if self.relu:
             x = F.relu(x)
 
-        if self._sampling is None:
+        if self.get_sampling() is None:
             return x
 
-        return x * (self._sampling == 1).float()
+        return x * (self._sampling.value == 1).float()
 
-    def get_flop_cost(self):
-        if len(self.flop_cost) > 0:
-            return self.flop_cost
+    def get_flop_cost(self, x):
+        conv_in_data_size = torch.Size([1, *x.shape[1:]])
+        conv_out_data_size = torch.Size([1, self.out_chan, x.shape[-1]//self.conv.stride[0],x.shape[-1]//self.conv.stride[1]])
 
-        flops_1 = self.get_conv2d_flops(self.conv, self.conv_in_data_size, self.conv_out_data_size)
-        flops_2 = self.get_bn_flops(self.bn, self.conv_out_data_size, self.conv_out_data_size)
+        flops_1 = self.get_conv2d_flops(self.conv, conv_in_data_size, conv_out_data_size)
+        flops_2 = self.get_bn_flops(self.bn, conv_out_data_size, conv_out_data_size)
         flops_3 = 0
         if self.relu:
-            flops_3 = self.get_relu_flops(None, self.conv_out_data_size, self.conv_out_data_size)
+            flops_3 = self.get_relu_flops(None, conv_out_data_size, conv_out_data_size)
 
         total_flops = flops_1 + flops_2 + flops_3
-        self.flop_cost = [0] + [total_flops] + [0] * (self.state_num - 2)
-        return self.flop_cost
+        flop_cost = [0] + [total_flops] + [0] * (self.state_num - 2)
+        return flop_cost
 
 
 # class Upsamp_Block(NetworkBlock):
@@ -216,39 +297,30 @@ class ConvBn(NetworkBlock):
 #         return cost
 
 
-class Add_Block(NetworkBlock):
+class AddBlock(NetworkBlock):
     n_layers = 0
     n_comp_steps = 1
 
     def __init__(self):
-        super(Add_Block, self).__init__()
-        self.flop_cost = []
-        self.data_size = None
-        self.data_num = 1
+        super(AddBlock, self).__init__()
         self.params = {
-            'module_list': ['add_block'],
-            'add_block':{}
+            'module_list': ['addblock'],
+            'addblock': {}
         }
 
     def forward(self, x):
         if not isinstance(x, list):
-            self.data_size = x.size()
-            self.data_num = 1
             return x
+
         assert isinstance(x, list)
-        self.data_size = x[0].size()
-        self.data_num = len(x)
         return sum(x)
 
-    def get_flop_cost(self):
-        if len(self.flop_cost) > 0:
-            return self.flop_cost
-
-        if self.data_num == 1:
+    def get_flop_cost(self, x):
+        if not isinstance(x, list):
             return [0] * self.state_num
 
-        self.flop_cost = [0] + [self.data_size.numel()/self.data_size[0] * (self.data_num - 1)] * (self.state_num - 1)
-        return self.flop_cost
+        flop_cost = [0] + [x[0].size().numel()/x[0].size()[0] * (len(x) - 1)] * (self.state_num - 1)
+        return flop_cost
 
 
 # class Moving_Add_Block(NetworkBlock):
@@ -346,54 +418,53 @@ class InvertedResidualBlock(NetworkBlock):
         self.kernel_size = kernel_size
         self.in_chan = in_chan
         self.out_chan = out_chan
-
-        self.flop_cost = []
-        self.step_1_in_size = None
-        self.step_2_in_size = None
-        self.step_3_in_size = None
-        self.step_3_out_size = None
-        self.flop_cost = []
+        self.expansion = expansion
 
     def forward(self, input):
         x = input
-        self.step_1_in_size = x.size()
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu1(x)
 
-        self.step_2_in_size = x.size()
         x = self.dwconv2(x)
         x = self.bn2(x)
         x = self.relu2(x)
 
-        self.step_3_in_size = x.size()
         x = self.conv3(x)
         x = self.bn3(x)
-        self.step_3_out_size = x.size()
 
         if self.skip and self.in_chan == self.out_chan and (not self.reduction):
             x = x + input
 
         return x
 
-    def get_flop_cost(self):
-        if len(self.flop_cost) > 0:
-            return self.flop_cost
+    def get_flop_cost(self, x):
+        step_1_in_size = torch.Size([1, *x.shape[1:]])
+        step_2_in_size = [1, self.in_chan*self.expansion, x.shape[2], x.shape[3]]
+        step_2_out_size = [1, self.in_chan*self.expansion, x.shape[2], x.shape[3]]
+        if self.reduction:
+            step_2_out_size[2] = step_2_out_size[2] // 2
+            step_2_out_size[3] = step_2_out_size[3] // 2
+        step_2_in_size = torch.Size(step_2_in_size)
+        step_2_out_size = torch.Size(step_2_out_size)
 
-        flops_1 = self.get_conv2d_flops(self.conv1, self.step_1_in_size, self.step_2_in_size)
-        flops_2 = self.get_bn_flops(self.bn1, self.step_2_in_size, self.step_2_in_size)
-        flops_3 = self.get_relu_flops(self.relu1, self.step_2_in_size, self.step_2_in_size)
+        step_3_in_size = torch.Size([1, step_2_out_size[1], step_2_out_size[2],step_2_out_size[3]])
+        step_3_out_size = torch.Size([1, self.out_chan, step_2_out_size[2], step_2_out_size[3]])
 
-        flops_4 = self.get_conv2d_flops(self.dwconv2, self.step_2_in_size, self.step_3_in_size)
-        flops_5 = self.get_bn_flops(self.bn2, self.step_3_in_size,self.step_3_in_size)
-        flops_6 = self.get_relu_flops(self.relu2, self.step_3_in_size, self.step_3_in_size)
+        flops_1 = self.get_conv2d_flops(self.conv1, step_1_in_size, step_2_in_size)
+        flops_2 = self.get_bn_flops(self.bn1, step_2_in_size, step_2_in_size)
+        flops_3 = self.get_relu_flops(self.relu1, step_2_in_size, step_2_in_size)
 
-        flops_7 = self.get_conv2d_flops(self.conv3, self.step_3_in_size, self.step_3_out_size)
-        flops_8 = self.get_bn_flops(self.bn3, self.step_3_out_size, self.step_3_out_size)
+        flops_4 = self.get_conv2d_flops(self.dwconv2, step_2_in_size, step_2_out_size)
+        flops_5 = self.get_bn_flops(self.bn2, step_2_out_size, step_2_out_size)
+        flops_6 = self.get_relu_flops(self.relu2, step_2_out_size, step_2_out_size)
+
+        flops_7 = self.get_conv2d_flops(self.conv3, step_3_in_size, step_3_out_size)
+        flops_8 = self.get_bn_flops(self.bn3, step_3_out_size, step_3_out_size)
 
         flops_9 = 0
         if self.skip and self.in_chan == self.out_chan and (not self.reduction):
-            flops_9 = 1 * self.step_3_out_size[1] * self.step_3_out_size[2] * self.step_3_out_size[3]
+            flops_9 = 1 * step_1_in_size[1] * step_1_in_size[2] * step_1_in_size[3]
 
         total_flops = flops_1 + \
                       flops_2 + \
@@ -407,6 +478,29 @@ class InvertedResidualBlock(NetworkBlock):
 
         self.flop_cost = [0] + [total_flops] * (self.state_num - 1)
         return self.flop_cost
+
+    def get_latency(self, x):
+        op_latency_table = NetworkBlock.lookup_table['op']
+
+        x_size = x.shape[-1]
+        op_1_name = "convbn_1x1"
+        op_1_kernel_profile = "%dx%dx%dxS%d"%(x_size,self.conv1.in_channels,self.conv1.out_channels,self.conv1.stride[0])
+        op_1_latency = NetworkBlock.proximate_latency(op_latency_table[op_1_name]['latency'], op_1_kernel_profile)
+
+        if self.reduction:
+            x_size = x_size / 2
+
+        op_2_name = "depthwise_%dx%d"%(self.dwconv2.kernel_size[0],self.dwconv2.kernel_size[1])
+        op_2_kernel_profile = "%dx%dx%dxS%d"%(x_size,self.dwconv2.in_channels,self.dwconv2.out_channels,self.dwconv2.stride[0])
+        op_2_latency = NetworkBlock.proximate_latency(op_latency_table[op_2_name]['latency'], op_2_kernel_profile)
+
+        op_3_name = "convbn_1x1"
+        op_3_kernel_profile = "%dx%dx%dxS%d"%(x_size,self.conv3.in_channels,self.conv3.out_channels,self.conv3.stride[0])
+        op_3_latency = NetworkBlock.proximate_latency(op_latency_table[op_3_name]['latency'], op_3_kernel_profile)
+
+        total_latency = op_1_latency + op_2_latency + op_3_latency
+        self.latency_cost = [0] + [total_latency] * (self.state_num - 1)
+        return self.latency_cost
 
 
 class InvertedResidualBlockWithSE(NetworkBlock):
@@ -451,37 +545,19 @@ class InvertedResidualBlockWithSE(NetworkBlock):
         self.out_chan = out_chan
         self.expansion = expansion
 
-        self.step_1_in_size = None
-        self.step_2_in_size = None
-        self.step_2_out_size = None
-        self.step_3_in_size = None
-        self.step_3_out_size = None
-        self.step_2_1_size = None
-        self.step_2_2_size = None
-        self.step_2_3_size = None
-        self.flop_cost = []
-
     def forward(self, input):
         x = input
-        self.step_1_in_size = x.size()
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu1(x)
 
-        self.step_2_in_size = x.size()
         x = self.dwconv2(x)
         x = self.bn2(x)
-        self.step_2_out_size = x.size()
 
         se_x = self.global_pool(x).view(x.size(0), self.in_chan*self.expansion)
-        self.step_2_1_size = se_x.size()
-
         se_x = self.dense_layer_1(se_x)
-        self.step_2_2_size = se_x.size()
-
         se_x = F.relu(se_x)
         se_x = self.dense_layer_2(se_x)
-        self.step_2_3_size = se_x.size()
 
         se_x = (0.2 * se_x) + 0.5
         se_x = F.threshold(-se_x, -1, -1)
@@ -491,41 +567,51 @@ class InvertedResidualBlockWithSE(NetworkBlock):
         x = torch.mul(se_x, x)
 
         x = self.relu2(x)
-        self.step_3_in_size = x.size()
         x = self.conv3(x)
         x = self.bn3(x)
-        self.step_3_out_size = x.size()
 
         if self.skip and self.in_chan == self.out_chan and (not self.reduction):
             x = x + input
 
         return x
 
-    def get_flop_cost(self):
-        if len(self.flop_cost) > 0:
-            return self.flop_cost
+    def get_flop_cost(self, x):
+        step_1_in_size = torch.Size([1, *x.shape[1:]])
+        step_2_in_size = [1, self.in_chan*self.expansion, x.shape[2], x.shape[3]]
+        step_2_out_size = [1, self.in_chan*self.expansion, x.shape[2], x.shape[3]]
+        if self.reduction:
+            step_2_out_size[2] = step_2_out_size[2] // 2
+            step_2_out_size[3] = step_2_out_size[3] // 2
+        step_2_in_size = torch.Size(step_2_in_size)
+        step_2_out_size = torch.Size(step_2_out_size)
 
-        flops_1 = self.get_conv2d_flops(self.conv1, self.step_1_in_size, self.step_2_in_size)
-        flops_2 = self.get_bn_flops(self.bn1, self.step_2_in_size, self.step_2_in_size)
-        flops_3 = self.get_relu_flops(self.relu1, self.step_2_in_size, self.step_2_in_size)
+        step_3_in_size = torch.Size([1, step_2_out_size[1], step_2_out_size[2],step_2_out_size[3]])
+        step_3_out_size = torch.Size([1, self.out_chan, step_2_out_size[2], step_2_out_size[3]])
 
-        flops_4 = self.get_conv2d_flops(self.dwconv2, self.step_2_in_size, self.step_2_out_size)
-        flops_5 = self.get_bn_flops(self.bn2, self.step_2_out_size, self.step_2_out_size)
-        flops_6 = self.get_relu_flops(self.relu2, self.step_2_out_size, self.step_2_out_size)
+        flops_1 = self.get_conv2d_flops(self.conv1, step_1_in_size, step_2_in_size)
+        flops_2 = self.get_bn_flops(self.bn1, step_2_in_size, step_2_in_size)
+        flops_3 = self.get_relu_flops(self.relu1, step_2_in_size, step_2_in_size)
 
-        flops_7 = self.get_conv2d_flops(self.conv3, self.step_3_in_size, self.step_3_out_size)
-        flops_8 = self.get_bn_flops(self.bn3, self.step_3_out_size, self.step_3_out_size)
+        flops_4 = self.get_conv2d_flops(self.dwconv2, step_2_in_size, step_2_out_size)
+        flops_5 = self.get_bn_flops(self.bn2, step_2_out_size, step_2_out_size)
+        flops_6 = self.get_relu_flops(self.relu2, step_2_out_size, step_2_out_size)
 
-        flops_se_1 = self.get_avgglobalpool_flops(self.global_pool, self.step_2_out_size, self.step_2_1_size)
-        flops_se_2 = self.get_linear_flops(self.dense_layer_1, self.step_2_1_size, self.step_2_2_size)
-        flops_se_3 = self.get_relu_flops(F.relu, self.step_2_2_size, self.step_2_2_size)
-        flops_se_4 = self.get_linear_flops(self.dense_layer_2, self.step_2_2_size, self.step_2_3_size)
-        flops_se_5 = 1 * self.step_2_3_size[1] * 2
-        flops_se_6 = 1 * self.step_2_out_size[1] * self.step_2_out_size[2] * self.step_2_out_size[3]
+        flops_7 = self.get_conv2d_flops(self.conv3, step_3_in_size, step_3_out_size)
+        flops_8 = self.get_bn_flops(self.bn3, step_3_out_size, step_3_out_size)
+
+        step_2_1_size = torch.Size([1, self.in_chan*self.expansion])
+        step_2_2_size = torch.Size([1, (self.in_chan * self.expansion)//self.ratio])
+        step_2_3_size = torch.Size([1, self.in_chan * self.expansion])
+        flops_se_1 = self.get_avgglobalpool_flops(self.global_pool, step_2_out_size, step_2_1_size)
+        flops_se_2 = self.get_linear_flops(self.dense_layer_1, step_2_1_size, step_2_2_size)
+        flops_se_3 = self.get_relu_flops(F.relu, step_2_2_size, step_2_2_size)
+        flops_se_4 = self.get_linear_flops(self.dense_layer_2, step_2_2_size, step_2_3_size)
+        flops_se_5 = 1 * step_2_3_size[1] * 2
+        flops_se_6 = 1 * step_2_out_size[1] * step_2_out_size[2] * step_2_out_size[3]
 
         flops_9 = 0
         if self.skip and self.in_chan == self.out_chan and (not self.reduction):
-            flops_9 = 1 * self.step_3_out_size[1] * self.step_3_out_size[2] * self.step_3_out_size[3]
+            flops_9 = 1 * step_3_out_size[1] * step_3_out_size[2] * step_3_out_size[3]
 
         total_flops = flops_1 + \
                       flops_2 + \
@@ -543,56 +629,8 @@ class InvertedResidualBlockWithSE(NetworkBlock):
                       flops_se_5 + \
                       flops_se_6
 
-        self.flop_cost = [0] + [total_flops] * (self.state_num - 1)
-        return self.flop_cost
+        flop_cost = [0] + [total_flops] * (self.state_num - 1)
+        return flop_cost
 
-
-# class SepConv(NetworkBlock):
-#     n_layers = 2
-#     n_comp_steps = 1
-#
-#     def __init__(self, in_chan, kernel_size, skip=True):
-#         super(SepConv, self).__init__()
-#
-#         self.dwconv1 = nn.Conv2d(in_chan,
-#                                  in_chan,
-#                                  kernel_size=kernel_size,
-#                                  stride=1,
-#                                  groups=in_chan,
-#                                  padding=kernel_size // 2)
-#         self.bn1 = nn.BatchNorm2d(in_chan)
-#         self.relu1 = F.relu6
-#
-#         self.conv2 = nn.Conv2d(in_chan,
-#                                in_chan,
-#                                kernel_size=1,
-#                                stride=1)
-#         self.bn2 = nn.BatchNorm2d(in_chan)
-#         self.relu2 = F.relu6
-#
-#         self.kernel_size = kernel_size
-#         self.skip = skip
-#
-#     def forward(self, input):
-#         x = input
-#
-#         x = self.dwconv1(x)
-#         x = self.bn1(x)
-#         x = self.relu1(x)
-#
-#         x = self.conv2(x)
-#         x = self.bn2(x)
-#         x = self.relu2(x)
-#
-#         if self.skip:
-#             x = x + input
-#
-#         return x
-#
-#     def get_flop_cost(self, x):
-#         H = x.size(2)
-#         W = x.size(3)
-#
-#         dwconv1_cost = self.dwconv1.in_channels * H * W * self.dwconv1.kernel_size[0] * self.dwconv1.kernel_size[1]
-#         conv2_cost = self.conv2.in_channels*self.conv2.out_channels*H*W*self.conv2.kernel_size[0]*self.conv2.kernel_size[1]
-#         return dwconv1_cost+conv2_cost
+    def get_latency(self, x):
+        return [0] * self.state_num

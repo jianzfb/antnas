@@ -20,51 +20,6 @@ from nas.implem.Loss import *
 from nas.implem.ClassificationAccuracyEvaluator import *
 
 
-class Conv_Transfer_Block(NetworkBlock):
-    n_layers = 1
-    n_comp_steps = 1
-
-    def __init__(self, in_chan, out_chan, relu, k_size=3, stride=1, bias=True):
-        super(Conv_Transfer_Block, self).__init__()
-        self.conv = nn.Conv2d(in_chan, out_chan, kernel_size=k_size, stride=stride, padding=k_size//2, bias=bias)
-        self.bn = nn.BatchNorm2d(out_chan)
-        self.relu = relu
-
-        self.conv_in_data_size = None
-        self.conv_out_data_size = None
-
-        self.params = {
-            'module_list': ['conv_transfer_block'],
-            'conv_transfer_block': {'out_chan': out_chan}
-        }
-
-    def forward(self, x):
-        self.conv_in_data_size = x.size()
-        x = self.conv(x)
-        self.conv_out_data_size = x.size()
-        x = self.bn(x)
-        if self.relu:
-            x = F.relu(x)
-
-        if self._sampling is None:
-            return x
-        return x * (self._sampling == 1).float()
-
-    def get_flop_cost(self):
-        flops_1 = self.get_conv2d_flops(self.conv, self.conv_in_data_size, self.conv_out_data_size)
-        flops_2 = self.get_bn_flops(self.bn, self.conv_out_data_size, self.conv_out_data_size)
-        flops_3 = 0
-        if self.relu:
-            flops_3 = self.get_relu_flops(self.relu, self.conv_out_data_size, self.conv_out_data_size)
-
-        total_flops = flops_1 + flops_2 + flops_3
-        return [0] + [total_flops] + [0] * (self.state_num - 2)
-
-
-def identity_transfer():
-    return DummyBlock()
-
-
 class Out_Layer(NetworkBlock):
     n_layers = 1
     n_comp_steps = 1
@@ -72,7 +27,6 @@ class Out_Layer(NetworkBlock):
     def __init__(self, in_chan, out_shape, bias=True):
         super(Out_Layer, self).__init__()
         self.avg_global_pool = nn.AvgPool2d(kernel_size=2, stride=2)
-        # self.conv_1 = ConvBn(in_chan, in_chan, True, 1, 1, 0, True)
         self.conv_1 = nn.Conv2d(in_chan, in_chan, kernel_size=1, stride=1, padding=0, bias=bias)
         self.bn = nn.BatchNorm2d(in_chan)
 
@@ -80,7 +34,8 @@ class Out_Layer(NetworkBlock):
         self.out_shape = out_shape
         self.params = {
             'module_list': ['out_layer'],
-            'out_layer': {'out_shape': out_shape}
+            'out_layer': {'out_shape': out_shape},
+            'out': 'outname'
         }
 
     def forward(self, x):
@@ -92,7 +47,7 @@ class Out_Layer(NetworkBlock):
         x = self.conv(x)
         return x.view(-1, *self.out_shape)
 
-    def get_flop_cost(self):
+    def get_flop_cost(self, x):
         return [0] + [0] * (self.state_num - 1)
 
 
@@ -198,7 +153,7 @@ class BaselineSN(StochasticSuperNetwork):
                                             width_node=self._AGGREGATION_NODE_FORMAT.format(0, offset_per_block[block_i] + 0 * 2))
                     else:
                         # 可学习连接
-                        module = Conv_Transfer_Block(channles_per_block[pre_block_i + 1],
+                        module = ConvBn(channles_per_block[pre_block_i + 1],
                                                      channles_per_block[block_i],
                                                      False,
                                                      3,
@@ -216,7 +171,7 @@ class BaselineSN(StochasticSuperNetwork):
 
     def add_block(self, pos_offset, cells, channles, next_block_channels, reduction=False):
         for cell_i in range(cells):
-            self.add_aggregation((0, pos_offset+cell_i*2), Add_Block(), self._AGGREGATION_NODE_FORMAT)
+            self.add_aggregation((0, pos_offset+cell_i*2), AddBlock(), self._AGGREGATION_NODE_FORMAT)
             if cell_i != cells - 1:
                 self.add_cell((0, pos_offset+cell_i*2+1),
                               CellBlock(channles, channles),
@@ -245,7 +200,7 @@ class BaselineSN(StochasticSuperNetwork):
                         # 可学习连接
                         self.add_transformation((0, pos_offset+pre_cell_i*2+1),
                                                 (0, pos_offset+cell_i*2),
-                                                identity_transfer(),
+                                                Identity(),
                                                 self._CELL_NODE_FORMAT,
                                                 self._AGGREGATION_NODE_FORMAT,
                                                 self._TRANSFORMATION_FORMAT,

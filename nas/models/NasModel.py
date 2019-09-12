@@ -11,7 +11,7 @@ from torch import optim
 import torch.nn as nn
 
 from nas.implem.ParameterCostEvaluator import ParameterCostEvaluator
-from nas.implem.TimeCostEvaluator import TimeCostEvaluator
+from nas.implem.LatencyCostEvaluator import LatencyCostEvaluator
 from nas.implem.BaselineSN import *
 from nas.implem.ComputationalCostEvaluator import ComputationalCostEvaluator
 from nas.interfaces.PathRecorder import PathRecorder
@@ -23,19 +23,25 @@ class NasModel(object):
     def __init__(self, args, data_properties):
         self.args = args
         # 创建搜索空间
+        static_node_proba = args['static']
+        deter_eval = args['deter_eval']
+        args.pop('static')
+        args.pop('deter_eval')
         self._model = BaselineSN(blocks_per_stage=[1, 1, 1, 3],
                                  cells_per_block=[[3], [3], [6], [6, 6, 3]],
                                  channels_per_block=[[16], [32], [64], [128, 256, 512]],
                                  data_prop=data_properties,
-                                 static_node_proba=args['static'],
-                                 deter_eval=args['deter_eval'])
+                                 static_node_proba=static_node_proba,
+                                 deter_eval=deter_eval,
+                                 **args)
 
         self._model._cost_optimization = args['cost_optimization']
         self._model._architecture_penalty = args['arch_penalty']
         self._model._objective_cost = args['objective_cost']
         self._model._objective_method = args['objective_method']
         self._model._architecture_lambda = args['lambda']
-        self._model._cost_evaluation = args['cost_evaluation']
+
+        self._model_cache = self._model
 
         # 模型优化器
         self._optimizer = None
@@ -80,8 +86,11 @@ class NasModel(object):
         if not self.model.training:
             self.model.train()
 
-        # forward modelr
+        # 1.step forward model
         loss, accuracy = self.model(Variable(x), Variable(y))
+        # 2.step get last sampling
+        last_sampling = self._model_cache.path_recorder.get_and_reset()
+        self._model_cache.last_sampling = last_sampling
         return loss.mean(), accuracy.sum()
 
     def eval(self, x, y, loader, name=''):
@@ -100,9 +109,14 @@ class NasModel(object):
             total_correct += accuracy.sum()
             total += labels.size(0)
 
-        nx.write_gpickle(self.model.net, "test.gpickle")
-
         return 100 * total_correct.float().item() / total
+
+    def save(self, path):
+        # 1.step save model
+        torch.save(self._model_cache.state_dict(), '%s.model'%path)
+
+        # 2.step save architecture
+        self._model_cache.save_architecture(path)
 
     @property
     def model(self):

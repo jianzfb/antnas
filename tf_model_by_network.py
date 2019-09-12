@@ -170,7 +170,6 @@ def get_model(images):
     layers_map = {}
     i = 0
     for node_name in travel:
-        print()
         print(node_name)
         cur_node = graph.node[node_name]
         for pre_name in graph.predecessors(node_name):

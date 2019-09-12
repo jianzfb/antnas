@@ -54,6 +54,7 @@ def argument_parser():
     parser.add_argument('-wd', dest='weight_decay', action='store', default=1e-4, type=float,
                         help='weight decay used during optimisation')
 
+    parser.add_argument('-latest_num', action='store', default=1, type=int,help='save the latest number model state')
     parser.add_argument('-lr_pol_tresh', action='store', default=[150, 225], type=str,
                         help='learning rate decay rate')
     parser.add_argument('-lr_pol_val', action='store', nargs='*', default=[0.1, 0.01, 0.001], type=str,
@@ -61,11 +62,14 @@ def argument_parser():
 
     parser.add_argument('-cuda', action='store', default='', type=str,
                         help='Enables cuda and select device')
+    parser.add_argument('-latency', action='store', default='./latency.lookuptable.json',type=str,
+                        help='latency lookup table')
 
     parser.add_argument('-lp', action='store', default=-1, type=int,
                         help='Number of iterations between two logging messages')
     parser.add_argument('-draw_env', default='test', type=str, help='Visdom drawing environment')
 
+    parser.add_argument('-regularizer', action='store', default=1,type=int, help='architecture regularizer')
     parser.add_argument('-static', action='store', default=-1, type=restricted_float(0, 1),
                         help='sample a static binary weight with given proba for each stochastic Node.')
 
@@ -73,9 +77,9 @@ def argument_parser():
                         help='Maximum number of module evaluation in parallel')
     parser.add_argument('-ce', '-cost_evaluation', dest='cost_evaluation', action='store',
                         default=['comp'],
-                        type=restricted_list('comp', 'time', 'para'))
+                        type=restricted_list('comp', 'latency', 'para'))
     parser.add_argument('-co', dest='cost_optimization', action='store', default='comp',
-                        type=restricted_str('comp', 'time', 'para'))
+                        type=restricted_str('comp', 'latency', 'para'))
 
     parser.add_argument('-lambda', dest='lambda', action='store', default=1e-7, type=float,
                         help='Constant balancing the ratio classifier loss/architectural loss')
@@ -169,6 +173,7 @@ def main(args, plotter):
 
             # train and return predictions, loss, correct
             loss, model_accuracy = nas_model.train(x, y)
+
             # model_sampled_cost = model_sampled_cost.mean()
             # model_pruned_cost = model_pruned_cost.mean()
 
@@ -217,6 +222,9 @@ def main(args, plotter):
                     metric.log()
 
             plotter.update_plots()
+
+        # save model state
+        nas_model.save('./nas_%d'%(epoch%args['latest_num']))
 
 
 if __name__ == '__main__':

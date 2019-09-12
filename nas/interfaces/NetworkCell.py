@@ -6,6 +6,7 @@ from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
 from nas.interfaces.NetworkBlock import *
+import torch.nn.functional as F
 
 
 class CellBlock(NetworkBlock):
@@ -15,20 +16,39 @@ class CellBlock(NetworkBlock):
     def __init__(self, channles, out_channels, reduction=False):
         super(CellBlock, self).__init__()
         self.channles = channles
-        self._sampling = None
         self.op_list = nn.ModuleList()
         self.params = {
             'module_list': ['skip', 'IRB_k3e3_skip', 'IRB_k5e3_skip', 'IRB_k3e6_skip', 'IRB_k5e6_skip'],
             'skip': {'out_chan': out_channels, 'reduction': reduction},
-            'IRB_k3e3_skip': {'kernel_size': 3, 'expansion': 3, 'out_chan': out_channels, 'reduction': reduction},
-            'IRB_k5e3_skip': {'kernel_size': 5, 'expansion': 3, 'out_chan': out_channels, 'reduction': reduction},
-            'IRB_k3e6_skip': {'kernel_size': 3, 'expansion': 6, 'out_chan': out_channels, 'reduction': reduction},
-            'IRB_k5e6_skip': {'kernel_size': 5, 'expansion': 6, 'out_chan': out_channels, 'reduction': reduction}
+            'IRB_k3e3_skip': {'kernel_size': 3,
+                              'expansion': 3,
+                              'out_chan': out_channels,
+                              'reduction': reduction,
+                              'skip': True,
+                              'ratio': 4},
+            'IRB_k5e3_skip': {'kernel_size': 5,
+                              'expansion': 3,
+                              'out_chan': out_channels,
+                              'reduction': reduction,
+                              'skip': True,
+                              'ratio': 4},
+            'IRB_k3e6_skip': {'kernel_size': 3,
+                              'expansion': 6,
+                              'out_chan': out_channels,
+                              'reduction': reduction,
+                              'skip': True,
+                              'ratio': 4},
+            'IRB_k5e6_skip': {'kernel_size': 5,
+                              'expansion': 6,
+                              'out_chan': out_channels,
+                              'reduction': reduction,
+                              'skip': True,
+                              'ratio': 4}
         }
 
         # zero state
-        self.skip_op = Skip(channles, out_channels, reduction=reduction)
-        self.op_list.append(self.skip_op)
+        self.skip = Skip(channles, out_channels, reduction=reduction)
+        self.op_list.append(self.skip)
 
         # k3e3 with skip InvertedResidualBlock,
         self.IRB_k3e3_skip = InvertedResidualBlockWithSE(in_chan=channles,
@@ -91,19 +111,39 @@ class CellBlock(NetworkBlock):
         if self._sampling is None:
             return self.op_list[-1](input)
 
+        last_cell_result = None
         val_list = []
         for i in range(len(self.op_list)):
             op_result = self.op_list[i](input)
 
-            op_sampling = (self._sampling == i).float()
+            op_sampling = (self._sampling.value == i).float()
             op_result = op_result * op_sampling
+
+            if getattr(self._last_sampling, 'value', None) is not None:
+                if int(self._last_sampling.value.item()) == i:
+                    last_cell_result = op_result
+
             val_list.append(op_result)
         cell_result = sum(val_list)
+
+        # set regularizer loss
+        if last_cell_result is not None:
+            last_cell_result = last_cell_result.detach()
+            regularizer_loss = F.kl_div(cell_result, last_cell_result, reduction='batchmean')
+            self.set_node_regularizer(regularizer_loss)
+
         return cell_result
 
-    def get_flop_cost(self):
+    def get_flop_cost(self, x):
         cost_list = [0]
         for i in range(len(self.op_list) - 1):
-            cost_list.append(self.op_list[i+1].get_flop_cost()[1])
+            cost_list.append(self.op_list[i+1].get_flop_cost(x)[1])
+
+        return cost_list
+
+    def get_latency(self, x):
+        cost_list = [0]
+        for i in range(len(self.op_list) - 1):
+            cost_list.append(self.op_list[i + 1].get_latency(x)[1])
 
         return cost_list
