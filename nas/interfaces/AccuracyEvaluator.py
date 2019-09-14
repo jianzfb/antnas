@@ -15,5 +15,9 @@ class AccuracyEvaluator(object):
         super(AccuracyEvaluator, self).__init__()
 
     @abc.abstractmethod
+    def task_type(self):
+        raise NotImplementedError
+
+    @abc.abstractmethod
     def accuracy(self, **kwargs):
         raise NotImplementedError

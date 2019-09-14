@@ -25,11 +25,11 @@ class SuperNetwork(nn.Module):
         self.path_recorder = None
         self._cost_evaluators = None
 
-        self._cost_optimization = None
-        self._architecture_penalty = None
-        self._objective_cost = None
-        self._objective_method = 'max'
-        self._architecture_lambda = 1
+        self._cost_optimization = kwargs['cost_optimization']
+        self._architecture_penalty = kwargs['arch_penalty']
+        self._objective_cost = kwargs['objective_cost']
+        self._objective_method = kwargs['objective_method']
+        self._architecture_lambda = kwargs['lambda']
 
         cost_evaluators = {
             'comp': ComputationalCostEvaluator,

@@ -1,42 +1,40 @@
 # -*- coding: UTF-8 -*-
-# @Time    : 2019-07-24 11:39
-# @File    : BaselineSN.py
+# @Time    : 2019-09-14 11:25
+# @File    : SegSN.py
 # @Author  : jian<jian@mltalker.com>
 from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
 
-from numbers import Number
+from nas.interfaces.NetworkBlock import *
+from nas.interfaces.NetworkCell import *
+from nas.networks.StochasticSuperNetwork import StochasticSuperNetwork
+
 import networkx as nx
 import numpy as np
 import torch.nn.functional as F
 from torch import nn
 import torch
-from nas.interfaces.NetworkBlock import *
-from nas.interfaces.NetworkCell import *
-from nas.networks.StochasticSuperNetwork import StochasticSuperNetwork
 from nas.utils.drawers.BSNDrawer import BSNDrawer
 from nas.implem.Loss import *
-from nas.implem.ClassificationAccuracyEvaluator import *
+from nas.implem.SegmentationAccuracyEvaluator import *
 
-__all__ = ['BaselineSN']
-
-class OutLayer(NetworkBlock):
+__all__ = ['SegSN']
+class SegOutLayer(NetworkBlock):
     n_layers = 1
     n_comp_steps = 1
 
     def __init__(self, in_chan, out_shape, bias=True):
-        super(OutLayer, self).__init__()
-        self.avg_global_pool = nn.AvgPool2d(kernel_size=[2,2], stride=[2,2])
+        super(SegOutLayer, self).__init__()
         self.conv_1 = nn.Conv2d(in_chan, in_chan, kernel_size=1, stride=1, padding=0, bias=bias)
         self.bn = nn.BatchNorm2d(in_chan)
 
         self.conv = nn.Conv2d(in_chan, out_shape[0], 1, bias=bias)
         self.out_shape = out_shape
         self.params = {
-            'module_list': ['OutLayer'],
-            'name_list': ['OutLayer'],
-            'OutLayer': {'out_shape': out_shape},
+            'module_list': ['SegOutLayer'],
+            'name_list': ['SegOutLayer'],
+            'SegOutLayer': {'out_shape': out_shape},
             'out': 'outname'
         }
 
@@ -45,15 +43,14 @@ class OutLayer(NetworkBlock):
         x = self.bn(x)
         x = F.relu6(x)
 
-        x = self.avg_global_pool(x)
         x = self.conv(x)
-        return x.view(-1, *self.out_shape)
+        return x
 
     def get_flop_cost(self, x):
         return [0] + [0] * (self.state_num - 1)
 
 
-class BaselineSN(StochasticSuperNetwork):
+class SegSN(StochasticSuperNetwork):
     _INPUT_NODE_FORMAT = 'I_{}_{}'              # 不可学习
     _OUTPUT_NODE_FORMAT = 'O_{}_{}'             # 不可学习
     _AGGREGATION_NODE_FORMAT = 'A_{}_{}'        # 不可学习
@@ -67,20 +64,22 @@ class BaselineSN(StochasticSuperNetwork):
                  channels_per_block,
                  data_prop,
                  static_proba, *args, **kwargs):
-        super(BaselineSN, self).__init__(*args, **kwargs)
+        super(SegSN, self).__init__(*args, **kwargs)
 
         self.in_chan = data_prop['in_channels']
         self.in_size = data_prop['img_dim']
         self.out_dim = data_prop['out_size'][0]
+
         self.static_node_proba = static_proba
         self._input_size = (self.in_chan, self.in_size, self.in_size)
 
         self.blocks = nn.ModuleList([])
         self.graph = nx.DiGraph()
         self.sampling_parameters = nn.ParameterList()
-        self._loss = cross_entropy
-        self._accuracy_evaluator = ClassificationAccuracyEvaluator()
+        self._loss = segmentation_cross_entropy
+        self._accuracy_evaluator = SegmentationAccuracyEvaluator(threshold=0.5, class_num=self.out_dim)
 
+        # 1.step encoder
         # head (固定计算节点，对应激活参数不可学习)
         in_module = ConvBn(self.in_chan, channels_per_block[0][0], k_size=3, padding=3//2, stride=2, relu=True, bias=True)
         in_name = self.add_aggregation((0, 0), module=in_module, node_format=self._INPUT_NODE_FORMAT)
@@ -115,9 +114,42 @@ class BaselineSN(StochasticSuperNetwork):
                             self._AGGREGATION_NODE_FORMAT.format(0, 1),
                             width_node=self._AGGREGATION_NODE_FORMAT.format(0, 1))
 
-        # tail (固定计算节点，对应激活参数不可学习)
+        # 2.step decoder
+        last_decoder_aggregation = None
+        for stage_i in range(len(blocks_per_stage)-1, -1, -1):
+            decoder_aggregation_node_pos = (1, stage_i)
+            self.add_aggregation(decoder_aggregation_node_pos,
+                                 AddBlock(),
+                                 node_format=self._AGGREGATION_NODE_FORMAT)
+
+            encoder_branch = None
+            if stage_i == len(blocks_per_stage) - 1:
+                encoder_branch = (0, offset_per_stage[stage_i] + sum(cells_per_block[stage_i]) * 2 - 1)
+            else:
+                encoder_branch = (0, offset_per_stage[stage_i] + (sum(cells_per_block[stage_i]) - 1) * 2 - 1)
+
+            self.add_transformation(encoder_branch,
+                                    (1, stage_i),
+                                    ConvBn(channels_per_block[stage_i][-1], 64, False, 3, 1, True),
+                                    self._CELL_NODE_FORMAT,
+                                    self._AGGREGATION_NODE_FORMAT,
+                                    self._TRANSFORMATION_FORMAT,
+                                    pos_shift=0)
+
+            if stage_i != len(blocks_per_stage) - 1:
+                self.add_transformation(last_decoder_aggregation,
+                                        decoder_aggregation_node_pos,
+                                        ResizedBlock(64, 64, True, 3, True, 2),
+                                        self._AGGREGATION_NODE_FORMAT,
+                                        self._AGGREGATION_NODE_FORMAT,
+                                        self._TRANSFORMATION_FORMAT,
+                                        pos_shift=0)
+
+            last_decoder_aggregation = decoder_aggregation_node_pos
+
+        # 3.step output(固定计算节点，对应激活参数不可学习)
         # output layer
-        out_module = OutLayer(channels_per_block[-1][-1], data_prop['out_size'], True)
+        out_module = SegOutLayer(64, data_prop['out_size'], True)
         out_name = self._OUTPUT_NODE_FORMAT.format(*(0, offset_per_stage[-1]+sum(cells_per_block[-1])*2))
         sampling_param = self.sampling_param_generator(out_name)
 
@@ -126,7 +158,7 @@ class BaselineSN(StochasticSuperNetwork):
                             module_params=out_module.params,
                             sampling_param=len(self.sampling_parameters),
                             pos=BSNDrawer.get_draw_pos(pos=(0, offset_per_stage[-1]+sum(cells_per_block[-1])*2)))
-        self.graph.add_edge(self._CELL_NODE_FORMAT.format(*(0, offset_per_stage[-1] + sum(cells_per_block[-1]) * 2 - 1)),
+        self.graph.add_edge(self._AGGREGATION_NODE_FORMAT.format(*last_decoder_aggregation),
                             out_name,
                             width_node=out_name)
         self.sampling_parameters.append(sampling_param)
@@ -262,5 +294,3 @@ class BaselineSN(StochasticSuperNetwork):
 
     def accuray(self, predictions, labels):
         return self._accuracy_evaluator.accuracy(predictions, labels)
-
-

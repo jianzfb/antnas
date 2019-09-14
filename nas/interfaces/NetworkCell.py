@@ -18,73 +18,118 @@ class CellBlock(NetworkBlock):
         self.channles = channles
         self.op_list = nn.ModuleList()
         self.params = {
-            'module_list': ['skip', 'IRB_k3e3_skip', 'IRB_k5e3_skip', 'IRB_k3e6_skip', 'IRB_k5e6_skip'],
-            'skip': {'out_chan': out_channels, 'reduction': reduction},
-            'IRB_k3e3_skip': {'kernel_size': 3,
+            'module_list': ['Skip',
+                            'InvertedResidualBlockWithSEHS',
+                            'InvertedResidualBlockWithSEHS',
+                            'InvertedResidualBlockWithSEHS',
+                            'InvertedResidualBlockWithSEHS'],
+            'name_list':['Skip',
+                         'IRB_k3e3_nohs',
+                         'IRB_k3e3_nohs_nose',
+                         'IRB_k3e3',
+                         'IRB_k3e3_nose'],
+            'Skip': {'out_chan': out_channels, 'reduction': reduction},
+            'IRB_k3e3_nohs': {'kernel_size': 3,
                               'expansion': 3,
                               'out_chan': out_channels,
                               'reduction': reduction,
                               'skip': True,
-                              'ratio': 4},
-            'IRB_k5e3_skip': {'kernel_size': 5,
+                              'ratio': 4,
+                              'hs': False,
+                              'se': True},
+            'IRB_k3e3_nohs_nose': {'kernel_size': 5,
                               'expansion': 3,
                               'out_chan': out_channels,
                               'reduction': reduction,
                               'skip': True,
-                              'ratio': 4},
-            'IRB_k3e6_skip': {'kernel_size': 3,
+                              'ratio': 4,
+                              'hs': False,
+                              'se': False},
+            'IRB_k3e3': {'kernel_size': 3,
                               'expansion': 6,
                               'out_chan': out_channels,
                               'reduction': reduction,
                               'skip': True,
-                              'ratio': 4},
-            'IRB_k5e6_skip': {'kernel_size': 5,
+                              'ratio': 4,
+                              'hs': True,
+                              'se': True},
+            'IRB_k3e3_nose': {'kernel_size': 5,
                               'expansion': 6,
                               'out_chan': out_channels,
                               'reduction': reduction,
                               'skip': True,
-                              'ratio': 4}
+                              'ratio': 4,
+                              'hs': True,
+                              'se': False}
         }
 
-        # zero state
-        self.skip = Skip(channles, out_channels, reduction=reduction)
-        self.op_list.append(self.skip)
+        # op 1: skip
+        skip = Skip(channles, out_channels, reduction=reduction)
+        self.op_list.append(skip)
 
-        # k3e3 with skip InvertedResidualBlock,
-        self.IRB_k3e3_skip = InvertedResidualBlockWithSE(in_chan=channles,
+        # op 2: IRB with no HS
+        IRB_k3e3_nohs = InvertedResidualBlockWithSEHS(in_chan=channles,
+                                                      expansion=3,
+                                                      kernel_size=3,
+                                                      out_chan=out_channels,
+                                                      skip=True,
+                                                      reduction=reduction,
+                                                      hs=False)
+        self.op_list.append(IRB_k3e3_nohs)
+
+        # op 3: IRB with no SE and no HS
+        IRB_k3e3_nohs_nose = InvertedResidualBlockWithSEHS(in_chan=channles,
+                                                      expansion=3,
+                                                      kernel_size=3,
+                                                      out_chan=out_channels,
+                                                      skip=True,
+                                                      reduction=reduction,
+                                                      hs=False,
+                                                      se=False)
+        self.op_list.append(IRB_k3e3_nohs_nose)
+
+        # op 4: IRB
+        IRB_k3e3 = InvertedResidualBlockWithSEHS(in_chan=channles,
                                                    expansion=3,
                                                    kernel_size=3,
                                                    out_chan=out_channels,
                                                    skip=True,
                                                    reduction=reduction)
-        self.op_list.append(self.IRB_k3e3_skip)
+        self.op_list.append(IRB_k3e3)
 
-        # k5e3 with skip InvertedResidualBlock
-        self.IRB_k5e3_skip = InvertedResidualBlockWithSE(in_chan=channles,
+        # op 5: IRB with no SE
+        IRB_k3e3_nose = InvertedResidualBlockWithSEHS(in_chan=channles,
                                                    expansion=3,
-                                                   kernel_size=5,
+                                                   kernel_size=3,
                                                    out_chan=out_channels,
                                                    skip=True,
-                                                   reduction=reduction)
-        self.op_list.append(self.IRB_k5e3_skip)
+                                                   reduction=reduction,
+                                                    se=False)
+        self.op_list.append(IRB_k3e3_nose)
 
-        # k3e6 with skip InvertedResidualBlock
-        self.IRB_k3e6_skip = InvertedResidualBlockWithSE(in_chan=channles,
-                                                  expansion=6,
-                                                  kernel_size=3,
-                                                  out_chan=out_channels,
-                                                  skip=True,
-                                                  reduction=reduction)
-        self.op_list.append(self.IRB_k3e6_skip)
-
-        # k5e6 with skip InvertedResidualBlock
-        self.IRB_k5e6_skip = InvertedResidualBlockWithSE(in_chan=channles,
-                                                  expansion=6,
-                                                  kernel_size=5,
-                                                  out_chan=out_channels,
-                                                  skip=True,
-                                                  reduction=reduction)
-        self.op_list.append(self.IRB_k5e6_skip)
+        # IRB_k5e3 = InvertedResidualBlockWithSEHS(in_chan=channles,
+        #                                            expansion=3,
+        #                                            kernel_size=5,
+        #                                            out_chan=out_channels,
+        #                                            skip=True,
+        #                                            reduction=reduction)
+        # self.op_list.append(IRB_k5e3)
+        #
+        # self.IRB_k3e6 = InvertedResidualBlockWithSEHS(in_chan=channles,
+        #                                           expansion=6,
+        #                                           kernel_size=3,
+        #                                           out_chan=out_channels,
+        #                                           skip=True,
+        #                                           reduction=reduction)
+        # self.op_list.append(self.IRB_k3e6)
+        #
+        # self.IRB_k5e6 = InvertedResidualBlockWithSEHS(in_chan=channles,
+        #                                           expansion=6,
+        #                                           kernel_size=5,
+        #                                           out_chan=out_channels,
+        #                                           skip=True,
+        #                                           reduction=reduction)
+        # self.op_list.append(self.IRB_k5e6)
 
         # self.IRB_k5e6_no_skip = InvertedResidualBlock(in_chan=channles,
         #                                              expansion=6,

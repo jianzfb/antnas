@@ -29,8 +29,8 @@ def argument_parser():
     # Experience
     parser.add_argument('-exp-name', action='store', default='', type=str, help='Experience Name')
     # Model
-    parser.add_argument('-arch', action='store', default='BaselineSSN',
-                        type=restricted_str('BaselineSSN'))
+    parser.add_argument('-arch', action='store', default='SegSN',
+                        type=restricted_str('BaselineSN','SegSN'))
     parser.add_argument('-deter_eval', action='store', default=True, type=bool,
                         help='Take blocks with probas >0.5 instead of sampling during evaluation')
 
@@ -38,7 +38,7 @@ def argument_parser():
     parser.add_argument('-path', default='./dataset/', type=str,
                         help='path for the execution')
 
-    parser.add_argument('-dset', default='CIFAR10', type=str, help='Dataset')
+    parser.add_argument('-dset', default='SEG_PASCAL', type=str, help='Dataset')
     parser.add_argument('-bs', action='store', default=2, type=int, help='Size of each batch')
     parser.add_argument('-epochs', action='store', default=300, type=int,
                         help='Number of training epochs')
@@ -70,7 +70,7 @@ def argument_parser():
     parser.add_argument('-draw_env', default='test', type=str, help='Visdom drawing environment')
 
     parser.add_argument('-regularizer', action='store', default=1,type=int, help='architecture regularizer')
-    parser.add_argument('-static', action='store', default=-1, type=restricted_float(0, 1),
+    parser.add_argument('-static_proba', action='store', default=-1, type=restricted_float(0, 1),
                         help='sample a static binary weight with given proba for each stochastic Node.')
 
     parser.add_argument('-np', '--n_parallel', dest='n_parallel', action='store', default=3, type=int,

@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from nas.networks.SuperNetwork import SuperNetwork
 from nas.interfaces.NetworkBlock import *
+from nas.interfaces.NetworkCell import *
 from nas.interfaces.PathRecorder import PathRecorder
 import copy
 import networkx as nx
@@ -182,11 +183,12 @@ class StochasticSuperNetwork(SuperNetwork):
         # probas_resized = params.sigmoid().expand(batch_size, len(self.sampling_parameters))
         # distrib = torch.distributions.Bernoulli(probas_resized)
         #
-        key_map = {}
-        for i, node in enumerate(self.graph.nodes()):
-            key_map[node] = i
-
-        params = torch.stack([self.sampling_parameters[key_map[order_name]] for order_name in self.traversal_order], dim=0)
+        # key_map = {}
+        # for i, node in enumerate(self.graph.nodes()):
+        #     key_map[node] = i
+        #
+        # params = torch.stack([self.sampling_parameters[key_map[order_name]] for order_name in self.traversal_order], dim=0)
+        params = torch.stack([p for p in self.sampling_parameters], dim=0)
         probas_resized = params.softmax(dim=-1).expand(batch_size,
                                                        params.size(0),
                                                        params.size(1))
@@ -271,6 +273,17 @@ class StochasticSuperNetwork(SuperNetwork):
         # 3.step save architecture
         architecture_path = '%s.architecture'%path
         nx.write_gpickle(self.net, architecture_path)
+
+    def sampling_param_generator(self, node_name):
+        if not (node_name.startswith('CELL') or node_name.startswith('T')):
+            # 不可学习，处于永远激活状态
+            param_value = [0] + [1000000000000000] + [0] * (CellBlock.state_num - 2)
+            trainable = False
+        else:
+            param_value = [0] + [np.log(0.9526 * (CellBlock.state_num - 1) / 0.0474)] + [0] * (CellBlock.state_num - 2)
+            trainable = True
+
+        return nn.Parameter(torch.Tensor(param_value), requires_grad=trainable)
 
     def __str__(self):
         model_descr = 'Model:{}\n\t{} nodes\n\t{} blocks\n\t{} parametrized layers\n\t{} computation steps\n\t{} parameters\n\t{} meta-params'

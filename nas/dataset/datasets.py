@@ -2,11 +2,37 @@ import logging
 import os
 
 import torch
+import torch.utils.data as data
 from torch.utils.data import DataLoader
 from torchvision import transforms, datasets
 from torchvision.datasets import MNIST, CIFAR10, SVHN, CIFAR100
+import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+class Temp(data.Dataset):
+    def __init__(self):
+        pass
+
+    def __getitem__(self, index):
+        return np.random.randint(0,255,(3,224,224),dtype=np.uint8), \
+               np.random.randint(0,9,(1,112,112), dtype=np.uint8)
+
+    def __len__(self):
+        return 100
+
+
+def get_SEG_PASCAL(path, *args):
+    img_dim = 224
+    in_channels = 3
+    out_size = (10,)
+
+    train_set = Temp()
+    val_set = Temp()
+    test_set = Temp()
+
+    return train_set, val_set, test_set, img_dim, in_channels, out_size
 
 
 def get_CIFAR10(path, *args):
@@ -196,6 +222,7 @@ sets = {
     'SVHN': get_SVHN,
     'PART': get_PartLabels,
     'ImageNet': get_ImageNet,
+    'SEG_PASCAL': get_SEG_PASCAL
 }
 
 

@@ -9,37 +9,43 @@ import torch
 from torch.autograd import Variable
 from torch import optim
 import torch.nn as nn
-
-from nas.implem.ParameterCostEvaluator import ParameterCostEvaluator
-from nas.implem.LatencyCostEvaluator import LatencyCostEvaluator
-from nas.implem.BaselineSN import *
-from nas.implem.ComputationalCostEvaluator import ComputationalCostEvaluator
-from nas.interfaces.PathRecorder import PathRecorder
 from tqdm import tqdm
 from torch.nn.parallel import DistributedDataParallel
+from nas.networks.SearchSpace import *
 
 
 class NasModel(object):
     def __init__(self, args, data_properties):
         self.args = args
         # 创建搜索空间
-        static_node_proba = args['static']
-        deter_eval = args['deter_eval']
-        args.pop('static')
-        args.pop('deter_eval')
-        self._model = BaselineSN(blocks_per_stage=[1, 1, 1, 3],
-                                 cells_per_block=[[3], [3], [6], [6, 6, 3]],
-                                 channels_per_block=[[16], [32], [64], [128, 256, 512]],
-                                 data_prop=data_properties,
-                                 static_node_proba=static_node_proba,
-                                 deter_eval=deter_eval,
-                                 **args)
+        self._model = SearchSpace(arch=args['arch']).build(blocks_per_stage=[1, 1, 1, 3],
+                                                           cells_per_block=[[3], [3], [6], [6, 6, 3]],
+                                                           channels_per_block=[[16], [32], [64], [128, 256, 512]],
+                                                           data_prop=data_properties,
+                                                           **args)
 
-        self._model._cost_optimization = args['cost_optimization']
-        self._model._architecture_penalty = args['arch_penalty']
-        self._model._objective_cost = args['objective_cost']
-        self._model._objective_method = args['objective_method']
-        self._model._architecture_lambda = args['lambda']
+        # self._model = BaselineSN(blocks_per_stage=[1, 1, 1, 3],
+        #                          cells_per_block=[[3], [3], [6], [6, 6, 3]],
+        #                          channels_per_block=[[16], [32], [64], [128, 256, 512]],
+        #                          data_prop=data_properties,
+        #                          static_proba=static_node_proba,
+        #                          deter_eval=deter_eval,
+        #                          **args)
+        #
+        # self._model = SegSN(blocks_per_stage=[1, 1, 1, 3],
+        #                          cells_per_block=[[3], [3], [6], [6, 6, 3]],
+        #                          channels_per_block=[[16], [32], [64], [128, 256, 512]],
+        #                          data_prop=data_properties,
+        #                          static_node_proba=static_node_proba,
+        #                          deter_eval=deter_eval,
+        #                          **args)
+        #
+        #
+        # self._model._cost_optimization = args['cost_optimization']
+        # self._model._architecture_penalty = args['arch_penalty']
+        # self._model._objective_cost = args['objective_cost']
+        # self._model._objective_method = args['objective_method']
+        # self._model._architecture_lambda = args['lambda']
 
         self._model_cache = self._model
 

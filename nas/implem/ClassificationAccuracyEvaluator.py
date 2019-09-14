@@ -13,6 +13,9 @@ class ClassificationAccuracyEvaluator(AccuracyEvaluator):
     def __init__(self, *args, **kwargs):
         super(ClassificationAccuracyEvaluator, self).__init__(*args, **kwargs)
 
+    def task_type(self):
+        return "CLASSIFICATION"
+
     def accuracy(self, preditions, labels):
         _, predicted = torch.max(preditions.data, 1)
         correct = (predicted == labels).sum()

@@ -33,7 +33,7 @@ class NetworkBlock(nn.Module):
         return [0] * NetworkBlock.state_num
 
     def get_flop_cost(self, x):
-        return [0.0] * self.state_num
+        return [0.0] * NetworkBlock.state_num
 
     @staticmethod
     def load_lookup_table(lookup_table_file):
@@ -119,6 +119,12 @@ class NetworkBlock(nn.Module):
         return total_ops
 
     @staticmethod
+    def get_hs_flops(m, x_size, y_size=None):
+        nelements = x_size.numel() / x_size[0]
+        total_ops = nelements * 4
+        return total_ops
+
+    @staticmethod
     def get_avgpool_flops(m, x_size, y_size):
         total_add = m.kernel_size[0] * m.kernel_size[1]
         total_div = 1
@@ -177,8 +183,9 @@ class Identity(NetworkBlock):
         self.switch = True
 
         self.params = {
-            'module_list': ['identity'],
-            'identity': {}
+            'module_list': ['Identity'],
+            'name_list': ['Identity'],
+            'Identity': {}
         }
 
     def forward(self, x):
@@ -205,8 +212,9 @@ class Skip(NetworkBlock):
         self.switch = True
 
         self.params = {
-            'module_list': ['skip'],
-            'skip': {'out_chan': out_channels, 'reduction': reduction},
+            'module_list': ['Skip'],
+            'name_list': ['Skip'],
+            'Skip': {'out_chan': out_channels, 'reduction': reduction},
         }
 
     def forward(self, x):
@@ -239,8 +247,9 @@ class ConvBn(NetworkBlock):
         self.relu = relu
         self.out_chan = out_chan
         self.params = {
-            'module_list': ['convbn'],
-            'convbn': {'stride': stride,
+            'module_list': ['ConvBn'],
+            'name_list': ['ConvBn'],
+            'ConvBn': {'stride': stride,
                        'out_chan': out_chan,
                        'k_size': k_size,
                        'relu': relu,
@@ -252,7 +261,7 @@ class ConvBn(NetworkBlock):
         x = self.conv(x)
         x = self.bn(x)
         if self.relu:
-            x = F.relu(x)
+            x = F.relu6(x)
 
         if self.get_sampling() is None:
             return x
@@ -274,27 +283,38 @@ class ConvBn(NetworkBlock):
         return flop_cost
 
 
-# class Upsamp_Block(NetworkBlock):
-#     n_layers = 1
-#     n_comp_steps = 1
-#
-#     def __init__(self, in_chan, out_chan, relu, k_size, bias, scale_factor=2):
-#         super(Upsamp_Block, self).__init__()
-#         self.conv_layer = ConvBn(in_chan, out_chan, relu=relu, k_size=k_size, bias=bias)
-#         self.scale_factor = scale_factor
-#
-#     def forward(self, x):
-#         x = F.upsample(x, scale_factor=self.scale_factor)
-#         x = self.conv_layer(x)
-#
-#         if self._sampling is None:
-#             return x
-#
-#         return x * (self._sampling == 1).float()
-#
-#     def get_flop_cost(self, x):
-#         cost = self.conv_layer.get_flop_cost(x)
-#         return cost
+class ResizedBlock(NetworkBlock):
+    n_layers = 1
+    n_comp_steps = 1
+
+    def __init__(self, in_chan, out_chan, relu, k_size, bias, scale_factor=2):
+        super(ResizedBlock, self).__init__()
+        self.conv_layer = ConvBn(in_chan, out_chan, relu=relu, k_size=k_size, bias=bias)
+        self.scale_factor = scale_factor
+
+        self.params = {
+            'module_list': ['ResizedBlock'],
+            'name_list': ['ResizedBlock'],
+            'ResizedBlock': {'in_chan': in_chan,
+                             'out_chan': out_chan,
+                             'relu': relu,
+                             'k_size': k_size,
+                             'bias': bias,
+                             'scale_factor': scale_factor}
+        }
+
+    def forward(self, x):
+        x = F.upsample(x, scale_factor=self.scale_factor)
+        x = self.conv_layer(x)
+
+        if self.get_sampling() is None:
+            return x
+
+        return x * (self._sampling.value == 1).float()
+
+    def get_flop_cost(self, x):
+        flops = self.conv_layer.get_flop_cost(x)[1]
+        return [0] + [flops] + [0] * (NetworkBlock.state_num - 2)
 
 
 class AddBlock(NetworkBlock):
@@ -304,8 +324,9 @@ class AddBlock(NetworkBlock):
     def __init__(self):
         super(AddBlock, self).__init__()
         self.params = {
-            'module_list': ['addblock'],
-            'addblock': {}
+            'module_list': ['AddBlock'],
+            'name_list': ['AddBlock'],
+            'AddBlock': {}
         }
 
     def forward(self, x):
@@ -396,7 +417,7 @@ class InvertedResidualBlock(NetworkBlock):
                                kernel_size=1,
                                stride=1)
         self.bn1 = nn.BatchNorm2d(in_chan*expansion)
-        self.relu1 = F.relu
+        self.relu1 = F.relu6
 
         self.dwconv2 = nn.Conv2d(in_chan*expansion,
                                  in_chan*expansion,
@@ -405,7 +426,7 @@ class InvertedResidualBlock(NetworkBlock):
                                  stride=2 if reduction else 1,
                                  padding=kernel_size // 2)
         self.bn2 = nn.BatchNorm2d(in_chan*expansion)
-        self.relu2 = F.relu
+        self.relu2 = F.relu6
 
         self.conv3 = nn.Conv2d(in_chan*expansion,
                                out_chan,
@@ -414,7 +435,7 @@ class InvertedResidualBlock(NetworkBlock):
         self.bn3 = nn.BatchNorm2d(out_chan)
 
         self.skip = skip
-        self.reduction=reduction
+        self.reduction = reduction
         self.kernel_size = kernel_size
         self.in_chan = in_chan
         self.out_chan = out_chan
@@ -476,8 +497,8 @@ class InvertedResidualBlock(NetworkBlock):
                       flops_8 + \
                       flops_9
 
-        self.flop_cost = [0] + [total_flops] * (self.state_num - 1)
-        return self.flop_cost
+        flop_cost = [0] + [total_flops] * (self.state_num - 1)
+        return flop_cost
 
     def get_latency(self, x):
         op_latency_table = NetworkBlock.lookup_table['op']
@@ -499,15 +520,23 @@ class InvertedResidualBlock(NetworkBlock):
         op_3_latency = NetworkBlock.proximate_latency(op_latency_table[op_3_name]['latency'], op_3_kernel_profile)
 
         total_latency = op_1_latency + op_2_latency + op_3_latency
-        self.latency_cost = [0] + [total_latency] * (self.state_num - 1)
-        return self.latency_cost
+        latency_cost = [0] + [total_latency] * (self.state_num - 1)
+        return latency_cost
 
 
 class InvertedResidualBlockWithSE(NetworkBlock):
     n_layers = 3
     n_comp_steps = 1
 
-    def __init__(self, in_chan, expansion, kernel_size, out_chan, skip=True, reduction=False, ratio=4):
+    def __init__(self,
+                 in_chan,
+                 expansion,
+                 kernel_size,
+                 out_chan,
+                 skip=True,
+                 reduction=False,
+                 ratio=4,
+                 se=True):
         super(InvertedResidualBlockWithSE, self).__init__()
         # expansion,
         self.conv1 = nn.Conv2d(in_chan,
@@ -515,7 +544,7 @@ class InvertedResidualBlockWithSE(NetworkBlock):
                                kernel_size=1,
                                stride=1)
         self.bn1 = nn.BatchNorm2d(in_chan * expansion)
-        self.relu1 = F.relu
+        self.relu1 = F.relu6
 
         self.dwconv2 = nn.Conv2d(in_chan * expansion,
                                  in_chan * expansion,
@@ -525,7 +554,7 @@ class InvertedResidualBlockWithSE(NetworkBlock):
                                  padding=kernel_size // 2)
         self.bn2 = nn.BatchNorm2d(in_chan * expansion)
 
-        self.relu2 = F.relu
+        self.relu2 = F.relu6
         self.conv3 = nn.Conv2d(in_chan * expansion,
                                out_chan,
                                kernel_size=1,
@@ -544,6 +573,7 @@ class InvertedResidualBlockWithSE(NetworkBlock):
         self.in_chan = in_chan
         self.out_chan = out_chan
         self.expansion = expansion
+        self.se = se
 
     def forward(self, input):
         x = input
@@ -554,17 +584,18 @@ class InvertedResidualBlockWithSE(NetworkBlock):
         x = self.dwconv2(x)
         x = self.bn2(x)
 
-        se_x = self.global_pool(x).view(x.size(0), self.in_chan*self.expansion)
-        se_x = self.dense_layer_1(se_x)
-        se_x = F.relu(se_x)
-        se_x = self.dense_layer_2(se_x)
+        if self.se:
+            se_x = self.global_pool(x).view(x.size(0), self.in_chan*self.expansion)
+            se_x = self.dense_layer_1(se_x)
+            se_x = F.relu6(se_x)
+            se_x = self.dense_layer_2(se_x)
 
-        se_x = (0.2 * se_x) + 0.5
-        se_x = F.threshold(-se_x, -1, -1)
-        se_x = F.threshold(-se_x, 0, 0)
+            se_x = (0.2 * se_x) + 0.5
+            se_x = F.threshold(-se_x, -1, -1)
+            se_x = F.threshold(-se_x, 0, 0)
 
-        se_x = se_x.view(se_x.size(0), self.in_chan*self.expansion, 1, 1)
-        x = torch.mul(se_x, x)
+            se_x = se_x.view(se_x.size(0), self.in_chan*self.expansion, 1, 1)
+            x = torch.mul(se_x, x)
 
         x = self.relu2(x)
         x = self.conv3(x)
@@ -599,15 +630,18 @@ class InvertedResidualBlockWithSE(NetworkBlock):
         flops_7 = self.get_conv2d_flops(self.conv3, step_3_in_size, step_3_out_size)
         flops_8 = self.get_bn_flops(self.bn3, step_3_out_size, step_3_out_size)
 
-        step_2_1_size = torch.Size([1, self.in_chan*self.expansion])
-        step_2_2_size = torch.Size([1, (self.in_chan * self.expansion)//self.ratio])
-        step_2_3_size = torch.Size([1, self.in_chan * self.expansion])
-        flops_se_1 = self.get_avgglobalpool_flops(self.global_pool, step_2_out_size, step_2_1_size)
-        flops_se_2 = self.get_linear_flops(self.dense_layer_1, step_2_1_size, step_2_2_size)
-        flops_se_3 = self.get_relu_flops(F.relu, step_2_2_size, step_2_2_size)
-        flops_se_4 = self.get_linear_flops(self.dense_layer_2, step_2_2_size, step_2_3_size)
-        flops_se_5 = 1 * step_2_3_size[1] * 2
-        flops_se_6 = 1 * step_2_out_size[1] * step_2_out_size[2] * step_2_out_size[3]
+        flops_se = 0.0
+        if self.se:
+            step_2_1_size = torch.Size([1, self.in_chan*self.expansion])
+            step_2_2_size = torch.Size([1, (self.in_chan * self.expansion)//self.ratio])
+            step_2_3_size = torch.Size([1, self.in_chan * self.expansion])
+            flops_se_1 = self.get_avgglobalpool_flops(self.global_pool, step_2_out_size, step_2_1_size)
+            flops_se_2 = self.get_linear_flops(self.dense_layer_1, step_2_1_size, step_2_2_size)
+            flops_se_3 = self.get_relu_flops(F.relu, step_2_2_size, step_2_2_size)
+            flops_se_4 = self.get_linear_flops(self.dense_layer_2, step_2_2_size, step_2_3_size)
+            flops_se_5 = 1 * step_2_3_size[1] * 2
+            flops_se_6 = 1 * step_2_out_size[1] * step_2_out_size[2] * step_2_out_size[3]
+            flops_se = flops_se_1 + flops_se_2 + flops_se_3 + flops_se_4 + flops_se_5 + flops_se_6
 
         flops_9 = 0
         if self.skip and self.in_chan == self.out_chan and (not self.reduction):
@@ -621,16 +655,206 @@ class InvertedResidualBlockWithSE(NetworkBlock):
                       flops_6 + \
                       flops_7 + \
                       flops_8 + \
-                      flops_9 + \
-                      flops_se_1 + \
-                      flops_se_2 + \
-                      flops_se_3 + \
-                      flops_se_4 + \
-                      flops_se_5 + \
-                      flops_se_6
+                      flops_9 + flops_se
 
         flop_cost = [0] + [total_flops] * (self.state_num - 1)
         return flop_cost
 
     def get_latency(self, x):
-        return [0] * self.state_num
+        op_latency_table = NetworkBlock.lookup_table['op']
+
+        x_size = x.shape[-1]
+        op_1_name = "convbn_1x1"
+        op_1_kernel_profile = "%dx%dx%dxS%d"%(x_size,self.conv1.in_channels,self.conv1.out_channels,self.conv1.stride[0])
+        op_1_latency = NetworkBlock.proximate_latency(op_latency_table[op_1_name]['latency'], op_1_kernel_profile)
+
+        if self.reduction:
+            x_size = x_size / 2
+
+        op_2_name = "depthwise_%dx%d"%(self.dwconv2.kernel_size[0],self.dwconv2.kernel_size[1])
+        op_2_kernel_profile = "%dx%dx%dxS%d"%(x_size,self.dwconv2.in_channels,self.dwconv2.out_channels,self.dwconv2.stride[0])
+        op_2_latency = NetworkBlock.proximate_latency(op_latency_table[op_2_name]['latency'], op_2_kernel_profile)
+
+        op_3_name = "convbn_1x1"
+        op_3_kernel_profile = "%dx%dx%dxS%d"%(x_size,self.conv3.in_channels,self.conv3.out_channels,self.conv3.stride[0])
+        op_3_latency = NetworkBlock.proximate_latency(op_latency_table[op_3_name]['latency'], op_3_kernel_profile)
+
+        total_latency = op_1_latency + op_2_latency + op_3_latency
+        latency_cost = [0] + [total_latency] * (self.state_num - 1)
+        return latency_cost
+
+
+class InvertedResidualBlockWithSEHS(NetworkBlock):
+    n_layers = 3
+    n_comp_steps = 1
+
+    def __init__(self,
+                 in_chan,
+                 expansion,
+                 kernel_size,
+                 out_chan,
+                 skip=True,
+                 reduction=False,
+                 ratio=4,
+                 se=True,
+                 hs=True):
+        super(InvertedResidualBlockWithSEHS, self).__init__()
+        # expansion,
+        self.conv1 = nn.Conv2d(in_chan,
+                               in_chan * expansion,
+                               kernel_size=1,
+                               stride=1)
+        self.bn1 = nn.BatchNorm2d(in_chan * expansion)
+
+        self.dwconv2 = nn.Conv2d(in_chan * expansion,
+                                 in_chan * expansion,
+                                 kernel_size=kernel_size,
+                                 groups=in_chan * expansion,
+                                 stride=2 if reduction else 1,
+                                 padding=kernel_size // 2)
+        self.bn2 = nn.BatchNorm2d(in_chan * expansion)
+
+        self.conv3 = nn.Conv2d(in_chan * expansion,
+                               out_chan,
+                               kernel_size=1,
+                               stride=1)
+        self.bn3 = nn.BatchNorm2d(out_chan)
+
+        # for se
+        self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
+        self.dense_layer_1 = torch.nn.Linear(in_chan * expansion, (in_chan * expansion)//ratio)
+        self.dense_layer_2 = torch.nn.Linear((in_chan * expansion)//ratio, in_chan * expansion)
+        self.ratio = ratio
+
+        self.skip = skip
+        self.reduction = reduction
+        self.kernel_size = kernel_size
+        self.in_chan = in_chan
+        self.out_chan = out_chan
+        self.expansion = expansion
+        self.se = se
+        self.hs = hs
+
+    def forward(self, input):
+        x = input
+        x = self.conv1(x)
+        x = self.bn1(x)
+        if self.hs:
+            x = x * (F.relu6(x+3.0) / 6.0)
+        else:
+            x = F.relu6(x)
+
+        x = self.dwconv2(x)
+        x = self.bn2(x)
+
+        if self.se:
+            se_x = self.global_pool(x).view(x.size(0), self.in_chan*self.expansion)
+            se_x = self.dense_layer_1(se_x)
+            se_x = F.relu6(se_x)
+            se_x = self.dense_layer_2(se_x)
+
+            se_x = (0.2 * se_x) + 0.5
+            se_x = F.threshold(-se_x, -1, -1)
+            se_x = F.threshold(-se_x, 0, 0)
+
+            se_x = se_x.view(se_x.size(0), self.in_chan*self.expansion, 1, 1)
+            x = torch.mul(se_x, x)
+
+        if self.hs:
+            x = x * (F.relu6(x+3.0) / 6.0)
+        else:
+            x = F.relu6(x)
+
+        x = self.conv3(x)
+        x = self.bn3(x)
+
+        if self.skip and self.in_chan == self.out_chan and (not self.reduction):
+            x = x + input
+
+        return x
+
+    def get_flop_cost(self, x):
+        step_1_in_size = torch.Size([1, *x.shape[1:]])
+        step_2_in_size = [1, self.in_chan*self.expansion, x.shape[2], x.shape[3]]
+        step_2_out_size = [1, self.in_chan*self.expansion, x.shape[2], x.shape[3]]
+        if self.reduction:
+            step_2_out_size[2] = step_2_out_size[2] // 2
+            step_2_out_size[3] = step_2_out_size[3] // 2
+        step_2_in_size = torch.Size(step_2_in_size)
+        step_2_out_size = torch.Size(step_2_out_size)
+
+        step_3_in_size = torch.Size([1, step_2_out_size[1], step_2_out_size[2],step_2_out_size[3]])
+        step_3_out_size = torch.Size([1, self.out_chan, step_2_out_size[2], step_2_out_size[3]])
+
+        flops_1 = self.get_conv2d_flops(self.conv1, step_1_in_size, step_2_in_size)
+        flops_2 = self.get_bn_flops(self.bn1, step_2_in_size, step_2_in_size)
+        flops_3 = 0.0
+        if self.hs:
+            flops_3 = self.get_hs_flops(None, step_2_in_size, step_2_in_size)
+        else:
+            flops_3 = self.get_relu_flops(F.relu6, step_2_in_size, step_2_in_size)
+
+        flops_4 = self.get_conv2d_flops(self.dwconv2, step_2_in_size, step_2_out_size)
+        flops_5 = self.get_bn_flops(self.bn2, step_2_out_size, step_2_out_size)
+
+        flops_6 = 0.0
+        if self.hs:
+            flops_6 = self.get_hs_flops(None, step_2_out_size, step_2_out_size)
+        else:
+            flops_6 = self.get_relu_flops(F.relu6, step_2_out_size, step_2_out_size)
+
+        flops_7 = self.get_conv2d_flops(self.conv3, step_3_in_size, step_3_out_size)
+        flops_8 = self.get_bn_flops(self.bn3, step_3_out_size, step_3_out_size)
+
+        flops_se = 0.0
+        if self.se:
+            step_2_1_size = torch.Size([1, self.in_chan*self.expansion])
+            step_2_2_size = torch.Size([1, (self.in_chan * self.expansion)//self.ratio])
+            step_2_3_size = torch.Size([1, self.in_chan * self.expansion])
+            flops_se_1 = self.get_avgglobalpool_flops(self.global_pool, step_2_out_size, step_2_1_size)
+            flops_se_2 = self.get_linear_flops(self.dense_layer_1, step_2_1_size, step_2_2_size)
+            flops_se_3 = self.get_relu_flops(F.relu6, step_2_2_size, step_2_2_size)
+            flops_se_4 = self.get_linear_flops(self.dense_layer_2, step_2_2_size, step_2_3_size)
+            flops_se_5 = 1 * step_2_3_size[1] * 2
+            flops_se_6 = 1 * step_2_out_size[1] * step_2_out_size[2] * step_2_out_size[3]
+            flops_se = flops_se_1 + flops_se_2 + flops_se_3 + flops_se_4 + flops_se_5 + flops_se_6
+
+        flops_9 = 0
+        if self.skip and self.in_chan == self.out_chan and (not self.reduction):
+            flops_9 = 1 * step_3_out_size[1] * step_3_out_size[2] * step_3_out_size[3]
+
+        total_flops = flops_1 + \
+                      flops_2 + \
+                      flops_3 + \
+                      flops_4 + \
+                      flops_5 + \
+                      flops_6 + \
+                      flops_7 + \
+                      flops_8 + \
+                      flops_9 + flops_se
+
+        flop_cost = [0] + [total_flops] * (self.state_num - 1)
+        return flop_cost
+
+    def get_latency(self, x):
+        op_latency_table = NetworkBlock.lookup_table['op']
+
+        x_size = x.shape[-1]
+        op_1_name = "convbn_1x1"
+        op_1_kernel_profile = "%dx%dx%dxS%d"%(x_size,self.conv1.in_channels,self.conv1.out_channels,self.conv1.stride[0])
+        op_1_latency = NetworkBlock.proximate_latency(op_latency_table[op_1_name]['latency'], op_1_kernel_profile)
+
+        if self.reduction:
+            x_size = x_size / 2
+
+        op_2_name = "depthwise_%dx%d"%(self.dwconv2.kernel_size[0],self.dwconv2.kernel_size[1])
+        op_2_kernel_profile = "%dx%dx%dxS%d"%(x_size,self.dwconv2.in_channels,self.dwconv2.out_channels,self.dwconv2.stride[0])
+        op_2_latency = NetworkBlock.proximate_latency(op_latency_table[op_2_name]['latency'], op_2_kernel_profile)
+
+        op_3_name = "convbn_1x1"
+        op_3_kernel_profile = "%dx%dx%dxS%d"%(x_size,self.conv3.in_channels,self.conv3.out_channels,self.conv3.stride[0])
+        op_3_latency = NetworkBlock.proximate_latency(op_latency_table[op_3_name]['latency'], op_3_kernel_profile)
+
+        total_latency = op_1_latency + op_2_latency + op_3_latency
+        latency_cost = [0] + [total_latency] * (self.state_num - 1)
+        return latency_cost
