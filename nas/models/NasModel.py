@@ -64,7 +64,7 @@ class NasModel(object):
                  'name': 'path',
                  'lr': self.args['path_lr'],
                  'momentum': False,
-                 'weight_decay': 0}
+                 'weight_decay': 0.01}
             ], lr=self.args['lr'], weight_decay=self.args['weight_decay'], momentum=self.args['momentum'], nesterov=self.args['nesterov'])
         elif self.args['optim'] == 'ADAM':
             optimizer = optim.Adam(self.model.parameters(),

@@ -15,21 +15,23 @@ import numpy as np
 import torch.nn.functional as F
 from torch import nn
 import torch
+from torchvision import transforms
 from nas.utils.drawers.BSNDrawer import BSNDrawer
 from nas.implem.Loss import *
 from nas.implem.SegmentationAccuracyEvaluator import *
 
 __all__ = ['SegSN']
+
+
 class SegOutLayer(NetworkBlock):
     n_layers = 1
     n_comp_steps = 1
 
     def __init__(self, in_chan, out_shape, bias=True):
         super(SegOutLayer, self).__init__()
-        self.conv_1 = nn.Conv2d(in_chan, in_chan, kernel_size=1, stride=1, padding=0, bias=bias)
-        self.bn = nn.BatchNorm2d(in_chan)
-
-        self.conv = nn.Conv2d(in_chan, out_shape[0], 1, bias=bias)
+        self.conv_1 = nn.Conv2d(in_chan, out_shape[0], kernel_size=3, stride=1, padding=3//2, bias=bias)
+        self.conv_2 = nn.Conv2d(out_shape[0], out_shape[0], kernel_size=3, stride=1, padding=3//2, bias=bias)
+        self.conv_3 = nn.Conv2d(in_chan, out_shape[0], kernel_size=1, stride=1, padding=0, bias=bias)
         self.out_shape = out_shape
         self.params = {
             'module_list': ['SegOutLayer'],
@@ -38,12 +40,12 @@ class SegOutLayer(NetworkBlock):
             'out': 'outname'
         }
 
-    def forward(self, x):
-        x = self.conv_1(x)
-        x = self.bn(x)
+    def forward(self, input):
+        x = self.conv_1(input)
         x = F.relu6(x)
-
-        x = self.conv(x)
+        x = self.conv_2(x)
+        y = self.conv_3(input)
+        x = x + y
         return x
 
     def get_flop_cost(self, x):
@@ -77,7 +79,7 @@ class SegSN(StochasticSuperNetwork):
         self.graph = nx.DiGraph()
         self.sampling_parameters = nn.ParameterList()
         self._loss = segmentation_cross_entropy
-        self._accuracy_evaluator = SegmentationAccuracyEvaluator(threshold=0.5, class_num=self.out_dim)
+        self._accuracy_evaluator = SegmentationAccuracyEvaluator(class_num=self.out_dim)
 
         # 1.step encoder
         # head (固定计算节点，对应激活参数不可学习)
@@ -89,25 +91,20 @@ class SegSN(StochasticSuperNetwork):
         offset_per_stage = []
         for stage_i in range(len(blocks_per_stage)):
             offset_per_stage.append(pos_offset)
-            if stage_i < len(blocks_per_stage) - 1:
-                pos_offset = self.add_stage(pos_offset,
-                                            blocks_per_stage[stage_i],
-                                            cells_per_block[stage_i],
-                                            channels_per_block[stage_i],
-                                            channels_per_block[stage_i+1][0])
-            else:
-                pos_offset = self.add_stage(pos_offset,
-                                            blocks_per_stage[stage_i],
-                                            cells_per_block[stage_i],
-                                            channels_per_block[stage_i], is_last_stage=True)
+            pos_offset = self.add_stage(pos_offset,
+                                        blocks_per_stage[stage_i],
+                                        cells_per_block[stage_i],
+                                        channels_per_block[stage_i])
 
-            # simple connection between stage
-            # TODO dense connection among stages
             if stage_i > 0:
-                # 固定连接
-                self.graph.add_edge(self._CELL_NODE_FORMAT.format(0, offset_per_stage[stage_i-1]+sum(cells_per_block[stage_i-1])*2-1),
-                                    self._AGGREGATION_NODE_FORMAT.format(0, offset_per_stage[stage_i]),
-                                    width_node=self._AGGREGATION_NODE_FORMAT.format(0, offset_per_stage[stage_i]))
+                # cell transformation
+                self.add_transformation((0, offset_per_stage[stage_i-1]+sum(cells_per_block[stage_i-1])*2-1),
+                                        (0, offset_per_stage[stage_i]),
+                                        CellBlock(channels_per_block[stage_i-1][-1], channels_per_block[stage_i][0], True),
+                                        self._CELL_NODE_FORMAT,
+                                        self._AGGREGATION_NODE_FORMAT,
+                                        self._TRANSFORMATION_FORMAT,
+                                        pos_shift=0,)
 
         # link head to search space
         self.graph.add_edge(self._INPUT_NODE_FORMAT.format(0, 0),
@@ -122,18 +119,13 @@ class SegSN(StochasticSuperNetwork):
                                  AddBlock(),
                                  node_format=self._AGGREGATION_NODE_FORMAT)
 
-            encoder_branch = None
-            if stage_i == len(blocks_per_stage) - 1:
-                encoder_branch = (0, offset_per_stage[stage_i] + sum(cells_per_block[stage_i]) * 2 - 1)
-            else:
-                encoder_branch = (0, offset_per_stage[stage_i] + (sum(cells_per_block[stage_i]) - 1) * 2 - 1)
-
+            encoder_branch = (0, offset_per_stage[stage_i] + sum(cells_per_block[stage_i]) * 2 - 1)
             self.add_transformation(encoder_branch,
                                     (1, stage_i),
-                                    ConvBn(channels_per_block[stage_i][-1], 64, False, 3, 1, True),
+                                    ConvBn(channels_per_block[stage_i][-1], 64, True, 7, 1, 7//2, True),
                                     self._CELL_NODE_FORMAT,
                                     self._AGGREGATION_NODE_FORMAT,
-                                    self._TRANSFORMATION_FORMAT,
+                                    self._LINK_FORMAT,
                                     pos_shift=0)
 
             if stage_i != len(blocks_per_stage) - 1:
@@ -142,13 +134,12 @@ class SegSN(StochasticSuperNetwork):
                                         ResizedBlock(64, 64, True, 3, True, 2),
                                         self._AGGREGATION_NODE_FORMAT,
                                         self._AGGREGATION_NODE_FORMAT,
-                                        self._TRANSFORMATION_FORMAT,
+                                        self._LINK_FORMAT,
                                         pos_shift=0)
 
             last_decoder_aggregation = decoder_aggregation_node_pos
 
         # 3.step output(固定计算节点，对应激活参数不可学习)
-        # output layer
         out_module = SegOutLayer(64, data_prop['out_size'], True)
         out_name = self._OUTPUT_NODE_FORMAT.format(*(0, offset_per_stage[-1]+sum(cells_per_block[-1])*2))
         sampling_param = self.sampling_param_generator(out_name)
@@ -167,7 +158,7 @@ class SegSN(StochasticSuperNetwork):
         # set graph
         self.set_graph(self.graph, in_name, out_name)
 
-    def add_stage(self, pos_offset, block_num, cells_per_block, channles_per_block, next_stage_channels=None, is_last_stage=False):
+    def add_stage(self, pos_offset, block_num, cells_per_block, channles_per_block):
         stage_offset = pos_offset
         offset_per_block = []
         for block_i in range(block_num):
@@ -176,7 +167,7 @@ class SegSN(StochasticSuperNetwork):
             if block_i < block_num - 1:
                 self.add_block(stage_offset, cells_per_block[block_i], channles_per_block[block_i], channles_per_block[block_i + 1])
             else:
-                self.add_block(stage_offset, cells_per_block[block_i], channles_per_block[block_i], next_stage_channels, reduction=True if not is_last_stage else False)
+                self.add_block(stage_offset, cells_per_block[block_i], channles_per_block[block_i], None)
             stage_offset += cells_per_block[block_i] * 2
 
             # dense connection among blocks
@@ -193,6 +184,7 @@ class SegSN(StochasticSuperNetwork):
                                                      channles_per_block[block_i],
                                                      False,
                                                      3,
+                                                     1,
                                                      1,
                                                      True)
                         self.add_transformation((0, offset_per_block[pre_block_i] + cells_per_block[pre_block_i] * 2 - 1),

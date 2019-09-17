@@ -283,13 +283,148 @@ class ConvBn(NetworkBlock):
         return flop_cost
 
 
+class SlimConvBN(NetworkBlock):
+    n_layers = 1
+    n_comp_steps = 1
+
+    def __init__(self, in_chan, out_chan, k_size=3, padding=1, bias=True):
+        super(SlimConvBN, self).__init__()
+
+        self.left_conv1 = nn.Conv2d(in_chan, out_chan, kernel_size=[k_size,1], stride=1, padding=padding, bias=bias)
+        self.left_conv2 = nn.Conv2d(out_chan, out_chan, kernel_size=[1, k_size], stride=1, padding=padding, bias=bias)
+
+        self.right_conv1 = nn.Conv2d(in_chan, out_chan, kernel_size=[1, k_size], stride=1, padding=padding, bias=bias)
+        self.right_conv2 = nn.Conv2d(out_chan, out_chan, kernel_size=[k_size,1], stride=1, padding=padding, bias=bias)
+
+    def forward(self, x):
+        left_x1 = self.left_conv1(x)
+        left_x2 = self.left_conv2(left_x1)
+        right_x1 = self.right_conv1(x)
+        right_x2 = self.right_conv2(right_x1)
+        x = left_x2 + right_x2
+
+        if self.get_sampling() is None:
+            return x
+
+        return x * (self._sampling.value == 1).float()
+
+    def get_flop_cost(self, x):
+        conv_in_data_size = torch.Size([1, *x.shape[1:]])
+        conv_out_data_size = torch.Size([1, self.out_chan, x.shape[-1], x.shape[-1]])
+
+        flops_1 = self.get_conv2d_flops(self.left_conv1, conv_in_data_size, conv_out_data_size)
+        flops_2 = self.get_conv2d_flops(self.left_conv2, conv_out_data_size, conv_out_data_size)
+
+        flops_3 = self.get_conv2d_flops(self.right_conv1, conv_in_data_size, conv_out_data_size)
+        flops_4 = self.get_conv2d_flops(self.right_conv2, conv_out_data_size, conv_out_data_size)
+
+        flops_5 = conv_out_data_size.numel() / conv_out_data_size[0]
+
+        flop_cost = flops_1+flops_2+flops_3+flops_4+flops_5
+
+        return [0] + [flop_cost] + [0]*(self.state_num - 2)
+
+
+# class BottleneckBlockSE(NetworkBlock):
+#     n_layers = 1
+#     n_comp_steps = 1
+#
+#     def __init__(self, in_chan, middle_chan, expansion=6, ratio=4, se=True, bias=True):
+#         super(BottleneckBlockSE, self).__init__()
+#         self.middle_chan = middle_chan
+#         self.conv1 = nn.Conv2d(in_chan, middle_chan, kernel_size=[1,1], stride=1, padding=0, bias=bias)
+#         self.conv2 = nn.Conv2d(middle_chan, middle_chan, kernel_size=[3,3], stride=1, padding=0, bias=bias)
+#         self.conv3 = nn.Conv2d(middle_chan, in_chan, kernel_size=[1,1],stride=1, padding=0, bias=bias)
+#
+#         # for se
+#         self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
+#         self.dense_layer_1 = torch.nn.Linear(in_chan * expansion, (in_chan * expansion) // ratio)
+#         self.dense_layer_2 = torch.nn.Linear((in_chan * expansion) // ratio, in_chan * expansion)
+#         self.ratio = ratio
+#         self.expansion = expansion
+#
+#     def forward(self, x):
+#         input = x
+#
+#         x = self.conv1(x)
+#         x = self.conv2(x)
+#         x = self.conv3(x)
+#
+#         if self.se:
+#
+#
+#         return x
+#
+#     def get_flop_cost(self, x):
+#         return 0
+
+
+class SepConvBN(NetworkBlock):
+    n_layers = 1
+    n_comp_steps = 1
+
+    def __init__(self, in_chan, out_chan, relu, k_size=3, stride=1, bias=True):
+        super(SepConvBN, self).__init__()
+        self.depthwise_conv = nn.Conv2d(in_chan,
+                                        in_chan,
+                                        kernel_size=k_size,
+                                        groups=in_chan,
+                                        stride=stride,
+                                        padding=k_size // 2)
+        self.pointwise_conv = nn.Conv2d(in_chan, out_chan, kernel_size=1, stride=1, padding=0)
+        self.bn = nn.BatchNorm2d(out_chan)
+        self.relu = relu
+        self.out_chan = out_chan
+
+        self.params = {
+            'module_list': ['SepConvBN'],
+            'name_list': ['SepConvBN'],
+            'SepConvBN': {'stride': stride,
+                          'out_chan': out_chan,
+                          'k_size': k_size,
+                          'relu': relu,
+                          'bias': bias}
+        }
+        self.switch = True
+
+    def forward(self, x):
+        x = self.depthwise_conv(x)
+        x = self.pointwise_conv(x)
+        x = self.bn(x)
+        if self.relu:
+            x = F.relu6(x)
+
+        if self.get_sampling() is None:
+            return x
+
+        return x * (self._sampling.value == 1).float()
+
+    def get_flop_cost(self, x):
+        conv_in_data_size = torch.Size([1, *x.shape[1:]])
+        conv_out_data_size = torch.Size([1,
+                                         self.out_chan,
+                                         x.shape[-1]//self.depthwise_conv.stride[0],
+                                         x.shape[-1]//self.depthwise_conv.stride[1]])
+
+        flops_1 = self.get_conv2d_flops(self.depthwise_conv, conv_in_data_size, conv_out_data_size)
+        flops_2 = self.get_conv2d_flops(self.pointwise_conv, conv_out_data_size, conv_out_data_size)
+        flops_3 = self.get_bn_flops(self.bn, conv_out_data_size, conv_out_data_size)
+        flops_4 = 0
+        if self.relu:
+            flops_4 = self.get_relu_flops(None, conv_out_data_size, conv_out_data_size)
+
+        total_flops = flops_1 + flops_2 + flops_3 + flops_4
+        flop_cost = [0] + [total_flops] + [0] * (self.state_num - 2)
+        return flop_cost
+
+
 class ResizedBlock(NetworkBlock):
     n_layers = 1
     n_comp_steps = 1
 
     def __init__(self, in_chan, out_chan, relu, k_size, bias, scale_factor=2):
         super(ResizedBlock, self).__init__()
-        self.conv_layer = ConvBn(in_chan, out_chan, relu=relu, k_size=k_size, bias=bias)
+        self.conv_layer = ConvBn(in_chan, out_chan, relu=relu, k_size=k_size, padding=k_size//2, bias=bias)
         self.scale_factor = scale_factor
 
         self.params = {

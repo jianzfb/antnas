@@ -19,7 +19,7 @@ from nas.models.NasModel import *
 from nas.utils.misc import *
 import numpy as np
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -35,10 +35,10 @@ def argument_parser():
                         help='Take blocks with probas >0.5 instead of sampling during evaluation')
 
     # Training
-    parser.add_argument('-path', default='./dataset/', type=str,
+    parser.add_argument('-path', default='/Users/jian/Downloads/pascal_voc/', type=str,
                         help='path for the execution')
 
-    parser.add_argument('-dset', default='SEG_PASCAL', type=str, help='Dataset')
+    parser.add_argument('-dset', default='PASCAL2012SEG', type=str, help='Dataset')
     parser.add_argument('-bs', action='store', default=2, type=int, help='Size of each batch')
     parser.add_argument('-epochs', action='store', default=300, type=int,
                         help='Number of training epochs')
@@ -105,6 +105,7 @@ def main(args, plotter):
 
     # 创建NAS模型
     nas_model = NasModel(args, data_properties)
+    # nas_model.model.load_state_dict(torch.load('/Users/jian/Downloads/nas_0.model',map_location='cpu'))
 
     # logger initialize
     xp = mlogger.Container()
