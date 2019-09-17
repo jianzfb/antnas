@@ -8,39 +8,39 @@ from torchvision import transforms, datasets
 from torchvision.datasets import MNIST, CIFAR10, SVHN, CIFAR100
 from nas.dataset.pascal_voc import *
 import numpy as np
+from nas.dataset.ext_transforms import *
+from nas.dataset.voc import VOCSegmentation
 
 logger = logging.getLogger(__name__)
 
 
 def get_PASCAL2012_SEG(path, *args):
-    path = os.path.join(path, 'vision')
-    img_dim = 224
+    img_dim = 513
     in_channels = 3
-    out_size = (21,)
+    out_size = (21, 513, 513)
 
-    train_data_transfrom = transforms.Compose([
-        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    train_transform = ExtCompose([
+        ExtRandomScale((0.5, 2.0)),
+        ExtRandomCrop(size=(513, 513), pad_if_needed=True),
+        ExtRandomHorizontalFlip(),
+        ExtToTensor(),
+        ExtNormalize(mean=[0.485, 0.456, 0.406],
+                     std=[0.229, 0.224, 0.225]),
+    ])
 
-    train_target_transform = transforms.Compose([transforms.Resize((112, 112),Image.NEAREST),])
-    train_set = VOCSegmentation(path,
-                                True,
-                                transform=train_data_transfrom,
-                                target_transform=train_target_transform)
+    val_transform = ExtCompose([
+        ExtToTensor(),
+        ExtNormalize(mean=[0.485, 0.456, 0.406],
+                     std=[0.229, 0.224, 0.225]),
+    ])
 
-    val_data_transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    train_dst = VOCSegmentation(root=path, is_aug=True, image_set='train',
+                                transform=train_transform)
 
-    val_target_transform = transforms.Compose([transforms.Resize((112, 112),Image.NEAREST),])
+    val_dst = VOCSegmentation(root=path, is_aug=True, image_set='val',
+                              transform=val_transform)
 
-    val_set = VOCSegmentation(path,False,transform=val_data_transform,target_transform=val_target_transform)
-    test_set = VOCSegmentation(path,False,transform=val_data_transform,target_transform=val_target_transform)
-
-    return train_set, val_set, test_set, img_dim, in_channels, out_size
+    return train_dst, val_dst, None, img_dim, in_channels, out_size
 
 
 def get_CIFAR10(path, *args):
@@ -159,41 +159,6 @@ def get_MNIST(path, *args):
     return train_set, val_set, test_set, img_dim, in_channels, out_size
 
 
-def get_PartLabels(path, *args):
-    from torchdata.datasets.PartLabels import PartLabels
-    from torchdata.transforms import jointransforms
-    img_dim = 256
-    in_channels = 3
-    out_size = (3, 256, 256)
-
-    train_transform = [jointransforms.JointPad(6), jointransforms.JointRandomCrop(img_dim),
-                       jointransforms.JointRandomHorizontalFlip()]
-    train_transform = jointransforms.JointCompose(train_transform)
-
-    test_transform = jointransforms.JointPad(3)
-
-    input_transfroms = [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
-    input_transfroms = transforms.Compose(input_transfroms)
-
-    def label_transform(x):
-        x[1] *= 2
-        x[2] *= 0
-        return x.sum(0)
-
-    out_transfroms = [transforms.ToTensor(),
-                      transforms.Lambda(lambda x: label_transform(x))]
-    out_transfroms = transforms.Compose(out_transfroms)
-
-    train_set = PartLabels(root=path, train=True, download=True, transform=input_transfroms,
-                           target_transform=out_transfroms, joint_transform=train_transform)
-    val_set = PartLabels(root=path, validation=True, download=True, transform=input_transfroms,
-                         target_transform=out_transfroms, joint_transform=test_transform)
-    test_set = PartLabels(root=path, test=True, download=True, transform=input_transfroms,
-                          target_transform=out_transfroms, joint_transform=test_transform)
-
-    return train_set, val_set, test_set, img_dim, in_channels, out_size
-
-
 def get_ImageNet(path, *args):
     img_dim = 256
     in_channels = 3
@@ -228,7 +193,6 @@ sets = {
     'CIFAR100': get_CIFAR100,
     'MNIST': get_MNIST,
     'SVHN': get_SVHN,
-    'PART': get_PartLabels,
     'ImageNet': get_ImageNet,
     'PASCAL2012SEG': get_PASCAL2012_SEG
 }
@@ -244,7 +208,7 @@ def get_data(ds_name, batch_size, path, args=None):
 
     logger.debug("N train : %d" % len(train_set))
     logger.debug("N valid : %d" % len(val_set))
-    logger.debug("N test : %d" % len(test_set))
+    # logger.debug("N test : %d" % len(test_set))
 
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,
                               num_workers=4) if train_set is not None else None
