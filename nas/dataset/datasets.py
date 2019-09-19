@@ -6,7 +6,6 @@ import torch.utils.data as data
 from torch.utils.data import DataLoader
 from torchvision import transforms, datasets
 from torchvision.datasets import MNIST, CIFAR10, SVHN, CIFAR100
-from nas.dataset.pascal_voc import *
 import numpy as np
 from nas.dataset.ext_transforms import *
 from nas.dataset.voc import VOCSegmentation
@@ -15,32 +14,36 @@ logger = logging.getLogger(__name__)
 
 
 def get_PASCAL2012_SEG(path, *args):
-    img_dim = 513
+    path = os.path.join(path, 'vision')
+    img_dim = 224
     in_channels = 3
-    out_size = (21, 513, 513)
+    out_size = (21, 224, 224)
 
     train_transform = ExtCompose([
         ExtRandomScale((0.5, 2.0)),
         ExtRandomCrop(size=(513, 513), pad_if_needed=True),
         ExtRandomHorizontalFlip(),
+        ExtResize((224,224)),
         ExtToTensor(),
         ExtNormalize(mean=[0.485, 0.456, 0.406],
                      std=[0.229, 0.224, 0.225]),
     ])
 
     val_transform = ExtCompose([
+        ExtResize((224,224)),
         ExtToTensor(),
         ExtNormalize(mean=[0.485, 0.456, 0.406],
                      std=[0.229, 0.224, 0.225]),
     ])
 
-    train_dst = VOCSegmentation(root=path, is_aug=True, image_set='train',
+    train_dst = VOCSegmentation(root=path, is_aug=False, image_set='train',
                                 transform=train_transform)
 
-    val_dst = VOCSegmentation(root=path, is_aug=True, image_set='val',
+    val_dst = VOCSegmentation(root=path, is_aug=False, image_set='val',
                               transform=val_transform)
+    test_dst = val_dst
 
-    return train_dst, val_dst, None, img_dim, in_channels, out_size
+    return train_dst, val_dst, test_dst, img_dim, in_channels, out_size
 
 
 def get_CIFAR10(path, *args):

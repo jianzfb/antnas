@@ -188,7 +188,9 @@ class StochasticSuperNetwork(SuperNetwork):
         #     key_map[node] = i
         #
         # params = torch.stack([self.sampling_parameters[key_map[order_name]] for order_name in self.traversal_order], dim=0)
+        # TODO temperature
         params = torch.stack([p for p in self.sampling_parameters], dim=0)
+        params = params.clamp(min=-1e+20, max=1e+20)
         probas_resized = params.softmax(dim=-1).expand(batch_size,
                                                        params.size(0),
                                                        params.size(1))

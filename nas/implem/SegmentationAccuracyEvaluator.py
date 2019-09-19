@@ -20,10 +20,11 @@ class SegmentationAccuracyEvaluator(AccuracyEvaluator):
 
     def accuracy(self, preditions, labels):
         # MeanIOU
+        labels = torch.where(labels==255, torch.full_like(labels, 0), labels)
         preditions = torch.nn.Softmax2d()(preditions)
         preditions_argmax = preditions.argmax(1, keepdim=True)
         preditions_argmax = make_one_hot(preditions_argmax, self.class_num)
-        labels_one_hot = make_one_hot(labels, self.class_num)
+        labels_one_hot = make_one_hot(labels.view(labels.size(0), 1, labels.size(1), labels.size(2)), self.class_num)
 
         eps = 1e-7
         bs = preditions.shape[0]
@@ -50,7 +51,9 @@ class SegmentationAccuracyEvaluator(AccuracyEvaluator):
                 scores += (intersection + eps) / union
                 scores_count += 1
 
-            scores = scores / scores_count
+            if scores_count > 0:
+                scores = scores / scores_count
+
             bs_score = bs_score + scores
 
         return bs_score

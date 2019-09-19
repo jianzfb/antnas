@@ -62,7 +62,7 @@ def argument_parser():
 
     parser.add_argument('-cuda', action='store', default='', type=str,
                         help='Enables cuda and select device')
-    parser.add_argument('-latency', action='store', default='./latency.lookuptable.json',type=str,
+    parser.add_argument('-latency', action='store', default='./latency.gpu.855.lookuptable.json',type=str,
                         help='latency lookup table')
 
     parser.add_argument('-lp', action='store', default=-1, type=int,
@@ -174,6 +174,7 @@ def main(args, plotter):
 
             # train and return predictions, loss, correct
             loss, model_accuracy = nas_model.train(x, y)
+            nas_model.save('./nas_%d' % (epoch % args['latest_num']))
 
             # model_sampled_cost = model_sampled_cost.mean()
             # model_pruned_cost = model_pruned_cost.mean()
@@ -190,6 +191,11 @@ def main(args, plotter):
             # update model parameter
             nas_model.optimizer.zero_grad()
             loss.backward()
+
+            # clip gradient （avoid exploding）
+            torch.nn.utils.clip_grad_value_(nas_model._model_cache.sampling_parameters.parameters(), 10)
+
+            # update parameter
             nas_model.optimizer.step()
 
             xp.train.timer.update()
@@ -201,8 +207,8 @@ def main(args, plotter):
 
                 progress = epoch + (i + 1) / len(train_loader)
                 val_score = nas_model.eval(x, y, val_loader, 'validation')
-                test_score = nas_model.eval(x, y, test_loader, 'test')
-
+                #test_score = nas_model.eval(x, y, test_loader, 'test')
+                test_score = 0.0
                 # record model accuracy on validation and test dataset
                 xp.val.accuracy.update(val_score)
                 xp.test.accuracy.update(test_score)

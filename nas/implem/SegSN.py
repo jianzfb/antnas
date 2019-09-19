@@ -27,11 +27,11 @@ class SegOutLayer(NetworkBlock):
     n_layers = 1
     n_comp_steps = 1
 
-    def __init__(self, in_chan, out_shape, bias=True):
+    def __init__(self, in_chan, out_shape):
         super(SegOutLayer, self).__init__()
-        self.conv_1 = nn.Conv2d(in_chan, out_shape[0], kernel_size=3, stride=1, padding=3//2, bias=bias)
-        self.conv_2 = nn.Conv2d(out_shape[0], out_shape[0], kernel_size=3, stride=1, padding=3//2, bias=bias)
-        self.conv_3 = nn.Conv2d(in_chan, out_shape[0], kernel_size=1, stride=1, padding=0, bias=bias)
+        self.conv_1 = nn.Conv2d(in_chan, out_shape[0], kernel_size=3, stride=1, padding=3//2, bias=True)
+        self.conv_2 = nn.Conv2d(out_shape[0], out_shape[0], kernel_size=3, stride=1, padding=3//2, bias=True)
+        self.conv_3 = nn.Conv2d(in_chan, out_shape[0], kernel_size=1, stride=1, padding=0, bias=True)
         self.out_shape = out_shape
         self.params = {
             'module_list': ['SegOutLayer'],
@@ -78,12 +78,12 @@ class SegSN(StochasticSuperNetwork):
         self.blocks = nn.ModuleList([])
         self.graph = nx.DiGraph()
         self.sampling_parameters = nn.ParameterList()
-        self._loss = segmentation_cross_entropy
+        self._loss = cross_entropy
         self._accuracy_evaluator = SegmentationAccuracyEvaluator(class_num=self.out_dim)
 
         # 1.step encoder
         # head (固定计算节点，对应激活参数不可学习)
-        in_module = ConvBn(self.in_chan, channels_per_block[0][0], k_size=3, padding=3//2, stride=2, relu=True, bias=True)
+        in_module = ConvBn(self.in_chan, channels_per_block[0][0], k_size=3, padding=3//2, stride=2, relu=True)
         in_name = self.add_aggregation((0, 0), module=in_module, node_format=self._INPUT_NODE_FORMAT)
 
         # search space（stage - block - cell）
@@ -100,7 +100,7 @@ class SegSN(StochasticSuperNetwork):
                 # cell transformation
                 self.add_transformation((0, offset_per_stage[stage_i-1]+sum(cells_per_block[stage_i-1])*2-1),
                                         (0, offset_per_stage[stage_i]),
-                                        CellBlock(channels_per_block[stage_i-1][-1], channels_per_block[stage_i][0], True),
+                                        ReductionCellBlock(channels_per_block[stage_i-1][-1], channels_per_block[stage_i][0]),
                                         self._CELL_NODE_FORMAT,
                                         self._AGGREGATION_NODE_FORMAT,
                                         self._TRANSFORMATION_FORMAT,
@@ -113,7 +113,7 @@ class SegSN(StochasticSuperNetwork):
 
         # 2.step decoder
         last_decoder_aggregation = None
-        for stage_i in range(len(blocks_per_stage)-1, -1, -1):
+        for stage_i in range(len(blocks_per_stage)-1, -1, -2):
             decoder_aggregation_node_pos = (1, stage_i)
             self.add_aggregation(decoder_aggregation_node_pos,
                                  AddBlock(),
@@ -122,7 +122,7 @@ class SegSN(StochasticSuperNetwork):
             encoder_branch = (0, offset_per_stage[stage_i] + sum(cells_per_block[stage_i]) * 2 - 1)
             self.add_transformation(encoder_branch,
                                     (1, stage_i),
-                                    ConvBn(channels_per_block[stage_i][-1], 64, True, 7, 1, 7//2, True),
+                                    ConvBn(channels_per_block[stage_i][-1], 64, True, 7, 1, 7//2),
                                     self._CELL_NODE_FORMAT,
                                     self._AGGREGATION_NODE_FORMAT,
                                     self._LINK_FORMAT,
@@ -131,7 +131,7 @@ class SegSN(StochasticSuperNetwork):
             if stage_i != len(blocks_per_stage) - 1:
                 self.add_transformation(last_decoder_aggregation,
                                         decoder_aggregation_node_pos,
-                                        ResizedBlock(64, 64, True, 3, True, 2),
+                                        ResizedBlock(64, 64, True, 3, 4),
                                         self._AGGREGATION_NODE_FORMAT,
                                         self._AGGREGATION_NODE_FORMAT,
                                         self._LINK_FORMAT,
@@ -139,8 +139,24 @@ class SegSN(StochasticSuperNetwork):
 
             last_decoder_aggregation = decoder_aggregation_node_pos
 
+        if stage_i != 0:
+            decoder_aggregation_node_pos = (1, 0)
+            self.add_aggregation(decoder_aggregation_node_pos,
+                                 AddBlock(),
+                                 node_format=self._AGGREGATION_NODE_FORMAT)
+
+            self.add_transformation(last_decoder_aggregation,
+                                    decoder_aggregation_node_pos,
+                                    ResizedBlock(64, 64, True, 3, 4),
+                                    self._AGGREGATION_NODE_FORMAT,
+                                    self._AGGREGATION_NODE_FORMAT,
+                                    self._LINK_FORMAT,
+                                    pos_shift=0)
+
+            last_decoder_aggregation = decoder_aggregation_node_pos
+
         # 3.step output(固定计算节点，对应激活参数不可学习)
-        out_module = SegOutLayer(64, data_prop['out_size'], True)
+        out_module = SegOutLayer(64, data_prop['out_size'])
         out_name = self._OUTPUT_NODE_FORMAT.format(*(0, offset_per_stage[-1]+sum(cells_per_block[-1])*2))
         sampling_param = self.sampling_param_generator(out_name)
 
@@ -185,8 +201,7 @@ class SegSN(StochasticSuperNetwork):
                                                      False,
                                                      3,
                                                      1,
-                                                     1,
-                                                     True)
+                                                     1)
                         self.add_transformation((0, offset_per_block[pre_block_i] + cells_per_block[pre_block_i] * 2 - 1),
                                                 (0, offset_per_block[block_i] + 0 * 2),
                                                 module,

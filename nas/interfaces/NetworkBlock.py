@@ -240,9 +240,9 @@ class ConvBn(NetworkBlock):
     n_layers = 1
     n_comp_steps = 1
 
-    def __init__(self, in_chan, out_chan, relu, k_size=3, stride=1, padding=1, bias=True):
+    def __init__(self, in_chan, out_chan, relu, k_size=3, stride=1, padding=1):
         super(ConvBn, self).__init__()
-        self.conv = nn.Conv2d(in_chan, out_chan, kernel_size=k_size, stride=stride, padding=padding, bias=bias)
+        self.conv = nn.Conv2d(in_chan, out_chan, kernel_size=k_size, stride=stride, padding=padding, bias=False)
         self.bn = nn.BatchNorm2d(out_chan)
         self.relu = relu
         self.out_chan = out_chan
@@ -252,8 +252,7 @@ class ConvBn(NetworkBlock):
             'ConvBn': {'stride': stride,
                        'out_chan': out_chan,
                        'k_size': k_size,
-                       'relu': relu,
-                       'bias': bias}
+                       'relu': relu}
         }
         self.switch = True
 
@@ -287,14 +286,27 @@ class SlimConvBN(NetworkBlock):
     n_layers = 1
     n_comp_steps = 1
 
-    def __init__(self, in_chan, out_chan, k_size=3, padding=1, bias=True):
+    def __init__(self, in_chan, out_chan, relu=True, k_size=3, bias=True):
         super(SlimConvBN, self).__init__()
 
-        self.left_conv1 = nn.Conv2d(in_chan, out_chan, kernel_size=[k_size,1], stride=1, padding=padding, bias=bias)
-        self.left_conv2 = nn.Conv2d(out_chan, out_chan, kernel_size=[1, k_size], stride=1, padding=padding, bias=bias)
+        self.params = {
+            'module_list': ['SlimConvBN'],
+            'name_list': ['SlimConvBN'],
+            'SlimConvBN': {'out_chan': out_chan,
+                       'k_size': k_size,
+                       'relu': relu,
+                       'bias': bias}
+        }
 
-        self.right_conv1 = nn.Conv2d(in_chan, out_chan, kernel_size=[1, k_size], stride=1, padding=padding, bias=bias)
-        self.right_conv2 = nn.Conv2d(out_chan, out_chan, kernel_size=[k_size,1], stride=1, padding=padding, bias=bias)
+        self.left_conv1 = nn.Conv2d(in_chan, out_chan, kernel_size=[k_size,1], stride=1, padding=[k_size//2,0], bias=bias)
+        self.left_conv2 = nn.Conv2d(out_chan, out_chan, kernel_size=[1, k_size], stride=1, padding=[0,k_size//2], bias=bias)
+
+        self.right_conv1 = nn.Conv2d(in_chan, out_chan, kernel_size=[1, k_size], stride=1, padding=[0,k_size//2], bias=bias)
+        self.right_conv2 = nn.Conv2d(out_chan, out_chan, kernel_size=[k_size,1], stride=1, padding=[k_size//2,0], bias=bias)
+
+        self.relu = relu
+        self.in_chan = in_chan
+        self.out_chan = out_chan
 
     def forward(self, x):
         left_x1 = self.left_conv1(x)
@@ -302,6 +314,8 @@ class SlimConvBN(NetworkBlock):
         right_x1 = self.right_conv1(x)
         right_x2 = self.right_conv2(right_x1)
         x = left_x2 + right_x2
+        if self.relu:
+            x = F.relu6(x)
 
         if self.get_sampling() is None:
             return x
@@ -314,49 +328,17 @@ class SlimConvBN(NetworkBlock):
 
         flops_1 = self.get_conv2d_flops(self.left_conv1, conv_in_data_size, conv_out_data_size)
         flops_2 = self.get_conv2d_flops(self.left_conv2, conv_out_data_size, conv_out_data_size)
-
         flops_3 = self.get_conv2d_flops(self.right_conv1, conv_in_data_size, conv_out_data_size)
         flops_4 = self.get_conv2d_flops(self.right_conv2, conv_out_data_size, conv_out_data_size)
-
         flops_5 = conv_out_data_size.numel() / conv_out_data_size[0]
 
-        flop_cost = flops_1+flops_2+flops_3+flops_4+flops_5
+        flops_6 = 0.0
+        if self.relu:
+            flops_6 = self.get_relu_flops(None, conv_out_data_size, conv_out_data_size)
+
+        flop_cost = flops_1+flops_2+flops_3+flops_4+flops_5+flops_6
 
         return [0] + [flop_cost] + [0]*(self.state_num - 2)
-
-
-# class BottleneckBlockSE(NetworkBlock):
-#     n_layers = 1
-#     n_comp_steps = 1
-#
-#     def __init__(self, in_chan, middle_chan, expansion=6, ratio=4, se=True, bias=True):
-#         super(BottleneckBlockSE, self).__init__()
-#         self.middle_chan = middle_chan
-#         self.conv1 = nn.Conv2d(in_chan, middle_chan, kernel_size=[1,1], stride=1, padding=0, bias=bias)
-#         self.conv2 = nn.Conv2d(middle_chan, middle_chan, kernel_size=[3,3], stride=1, padding=0, bias=bias)
-#         self.conv3 = nn.Conv2d(middle_chan, in_chan, kernel_size=[1,1],stride=1, padding=0, bias=bias)
-#
-#         # for se
-#         self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
-#         self.dense_layer_1 = torch.nn.Linear(in_chan * expansion, (in_chan * expansion) // ratio)
-#         self.dense_layer_2 = torch.nn.Linear((in_chan * expansion) // ratio, in_chan * expansion)
-#         self.ratio = ratio
-#         self.expansion = expansion
-#
-#     def forward(self, x):
-#         input = x
-#
-#         x = self.conv1(x)
-#         x = self.conv2(x)
-#         x = self.conv3(x)
-#
-#         if self.se:
-#
-#
-#         return x
-#
-#     def get_flop_cost(self, x):
-#         return 0
 
 
 class SepConvBN(NetworkBlock):
@@ -422,19 +404,17 @@ class ResizedBlock(NetworkBlock):
     n_layers = 1
     n_comp_steps = 1
 
-    def __init__(self, in_chan, out_chan, relu, k_size, bias, scale_factor=2):
+    def __init__(self, in_chan, out_chan, relu, k_size, scale_factor=2):
         super(ResizedBlock, self).__init__()
-        self.conv_layer = ConvBn(in_chan, out_chan, relu=relu, k_size=k_size, padding=k_size//2, bias=bias)
+        self.conv_layer = ConvBn(in_chan, out_chan, relu=relu, k_size=k_size, padding=k_size//2)
         self.scale_factor = scale_factor
 
         self.params = {
             'module_list': ['ResizedBlock'],
             'name_list': ['ResizedBlock'],
-            'ResizedBlock': {'in_chan': in_chan,
-                             'out_chan': out_chan,
+            'ResizedBlock': {'out_chan': out_chan,
                              'relu': relu,
                              'k_size': k_size,
-                             'bias': bias,
                              'scale_factor': scale_factor}
         }
 
@@ -550,7 +530,8 @@ class InvertedResidualBlock(NetworkBlock):
         self.conv1 = nn.Conv2d(in_chan,
                                in_chan*expansion,
                                kernel_size=1,
-                               stride=1)
+                               stride=1,
+                               bias=False)
         self.bn1 = nn.BatchNorm2d(in_chan*expansion)
         self.relu1 = F.relu6
 
@@ -559,14 +540,16 @@ class InvertedResidualBlock(NetworkBlock):
                                  kernel_size=kernel_size,
                                  groups=in_chan*expansion,
                                  stride=2 if reduction else 1,
-                                 padding=kernel_size // 2)
+                                 padding=kernel_size // 2,
+                                 bias=False)
         self.bn2 = nn.BatchNorm2d(in_chan*expansion)
         self.relu2 = F.relu6
 
         self.conv3 = nn.Conv2d(in_chan*expansion,
                                out_chan,
                                kernel_size=1,
-                               stride=1)
+                               stride=1,
+                               bias=False)
         self.bn3 = nn.BatchNorm2d(out_chan)
 
         self.skip = skip
@@ -677,7 +660,8 @@ class InvertedResidualBlockWithSE(NetworkBlock):
         self.conv1 = nn.Conv2d(in_chan,
                                in_chan * expansion,
                                kernel_size=1,
-                               stride=1)
+                               stride=1,
+                               bias=False)
         self.bn1 = nn.BatchNorm2d(in_chan * expansion)
         self.relu1 = F.relu6
 
@@ -686,14 +670,16 @@ class InvertedResidualBlockWithSE(NetworkBlock):
                                  kernel_size=kernel_size,
                                  groups=in_chan * expansion,
                                  stride=2 if reduction else 1,
-                                 padding=kernel_size // 2)
+                                 padding=kernel_size // 2,
+                                 bias=False)
         self.bn2 = nn.BatchNorm2d(in_chan * expansion)
 
         self.relu2 = F.relu6
         self.conv3 = nn.Conv2d(in_chan * expansion,
                                out_chan,
                                kernel_size=1,
-                               stride=1)
+                               stride=1,
+                               bias=False)
         self.bn3 = nn.BatchNorm2d(out_chan)
 
         # for se
@@ -838,7 +824,8 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
         self.conv1 = nn.Conv2d(in_chan,
                                in_chan * expansion,
                                kernel_size=1,
-                               stride=1)
+                               stride=1,
+                               bias=False)
         self.bn1 = nn.BatchNorm2d(in_chan * expansion)
 
         self.dwconv2 = nn.Conv2d(in_chan * expansion,
@@ -846,13 +833,15 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
                                  kernel_size=kernel_size,
                                  groups=in_chan * expansion,
                                  stride=2 if reduction else 1,
-                                 padding=kernel_size // 2)
+                                 padding=kernel_size // 2,
+                                 bias=False)
         self.bn2 = nn.BatchNorm2d(in_chan * expansion)
 
         self.conv3 = nn.Conv2d(in_chan * expansion,
                                out_chan,
                                kernel_size=1,
-                               stride=1)
+                               stride=1,
+                               bias=False)
         self.bn3 = nn.BatchNorm2d(out_chan)
 
         # for se
