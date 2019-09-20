@@ -18,40 +18,21 @@ class NasModel(object):
     def __init__(self, args, data_properties):
         self.args = args
         # 创建搜索空间
-        self._model = SearchSpace(arch=args['arch']).build(blocks_per_stage=[1, 1, 1, 3],
-                                                           cells_per_block=[[3], [3], [6], [6, 6, 3]],
-                                                           channels_per_block=[[16], [32], [64], [128, 256, 512]],
-                                                           data_prop=data_properties,
-                                                           **args)
+        # self._model = SearchSpace(arch=args['arch']).build(blocks_per_stage=[1, 1, 1, 3, 3],
+        #                                                    cells_per_block=[[3], [3], [3], [3, 3, 3], [3,3,3],[3,3,3]],
+        #                                                    channels_per_block=[[16], [32], [64], [128, 128, 128],[256,256,256]],
+        #                                                    data_prop=data_properties,
+        #                                                    **args)
 
-        # self._model = BaselineSN(blocks_per_stage=[1, 1, 1, 3],
-        #                          cells_per_block=[[3], [3], [6], [6, 6, 3]],
-        #                          channels_per_block=[[16], [32], [64], [128, 256, 512]],
-        #                          data_prop=data_properties,
-        #                          static_proba=static_node_proba,
-        #                          deter_eval=deter_eval,
-        #                          **args)
-        #
-        # self._model = SegSN(blocks_per_stage=[1, 1, 1, 3],
-        #                          cells_per_block=[[3], [3], [6], [6, 6, 3]],
-        #                          channels_per_block=[[16], [32], [64], [128, 256, 512]],
-        #                          data_prop=data_properties,
-        #                          static_node_proba=static_node_proba,
-        #                          deter_eval=deter_eval,
-        #                          **args)
-        #
-        #
-        # self._model._cost_optimization = args['cost_optimization']
-        # self._model._architecture_penalty = args['arch_penalty']
-        # self._model._objective_cost = args['objective_cost']
-        # self._model._objective_method = args['objective_method']
-        # self._model._architecture_lambda = args['lambda']
+        self._search_space = SearchSpace(arch=args['arch'])
+        assert(self._search_space is not None)
 
-        self._model_cache = self._model
+        self._model = None
+        self._model_cache = None
+        self._data_properties = data_properties
 
         # 模型优化器
         self._optimizer = None
-        self.initialize()
 
     def initialize_optimizer(self):
         if self._optimizer is not None:
@@ -87,6 +68,24 @@ class NasModel(object):
     @property
     def optimizer(self):
         return self._optimizer
+
+    def build(self, state_dict_path=None, **kwargs):
+        if self._model is not None:
+            return
+
+        # build model
+        search_space_args = self.args
+        search_space_args.update(kwargs)
+        search_space_args.update({'data_prop': self._data_properties})
+        self._model = self._search_space.build(**search_space_args)
+        self._model_cache = self._model
+
+        # initialize model
+        self.initialize()
+
+        # load checkpoint
+        if state_dict_path is not None:
+            self._model.load_state_dict(torch.load(state_dict_path, map_location='cpu'))
 
     def train(self, x, y):
         if not self.model.training:

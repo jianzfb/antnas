@@ -29,16 +29,15 @@ def argument_parser():
     # Experience
     parser.add_argument('-exp-name', action='store', default='', type=str, help='Experience Name')
     # Model
-    parser.add_argument('-arch', action='store', default='SegSN',
-                        type=restricted_str('BaselineSN','SegSN'))
+    parser.add_argument('-arch', action='store', default='ConvolutionalNeuralFabric', type=str)
     parser.add_argument('-deter_eval', action='store', default=True, type=bool,
                         help='Take blocks with probas >0.5 instead of sampling during evaluation')
 
     # Training
-    parser.add_argument('-path', default='/Users/jian/Downloads/pascal_voc/', type=str,
+    parser.add_argument('-path', default='/Users/jian/Downloads/pascal_voc/qianzhi', type=str,
                         help='path for the execution')
 
-    parser.add_argument('-dset', default='PASCAL2012SEG', type=str, help='Dataset')
+    parser.add_argument('-dset', default='PORTRAIT_SEG', type=str, help='Dataset')
     parser.add_argument('-bs', action='store', default=2, type=int, help='Size of each batch')
     parser.add_argument('-epochs', action='store', default=300, type=int,
                         help='Number of training epochs')
@@ -69,7 +68,7 @@ def argument_parser():
                         help='Number of iterations between two logging messages')
     parser.add_argument('-draw_env', default='test', type=str, help='Visdom drawing environment')
 
-    parser.add_argument('-regularizer', action='store', default=1,type=int, help='architecture regularizer')
+    parser.add_argument('-regularizer', action='store', default=0, type=int, help='architecture regularizer')
     parser.add_argument('-static_proba', action='store', default=-1, type=restricted_float(0, 1),
                         help='sample a static binary weight with given proba for each stochastic Node.')
 
@@ -105,6 +104,7 @@ def main(args, plotter):
 
     # 创建NAS模型
     nas_model = NasModel(args, data_properties)
+    nas_model.build(n_layer=3, n_chan=32)
     # nas_model.model.load_state_dict(torch.load('/Users/jian/Downloads/nas_0.model',map_location='cpu'))
 
     # logger initialize
@@ -174,7 +174,7 @@ def main(args, plotter):
 
             # train and return predictions, loss, correct
             loss, model_accuracy = nas_model.train(x, y)
-            nas_model.save('./nas_%d' % (epoch % args['latest_num']))
+            # nas_model.save('./nas_%d' % (epoch % args['latest_num']))
 
             # model_sampled_cost = model_sampled_cost.mean()
             # model_pruned_cost = model_pruned_cost.mean()
@@ -194,6 +194,7 @@ def main(args, plotter):
 
             # clip gradient （avoid exploding）
             torch.nn.utils.clip_grad_value_(nas_model._model_cache.sampling_parameters.parameters(), 10)
+            torch.nn.utils.clip_grad_value_(nas_model._model_cache.blocks.parameters(), 10)
 
             # update parameter
             nas_model.optimizer.step()

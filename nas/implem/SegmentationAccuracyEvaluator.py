@@ -7,6 +7,7 @@ from __future__ import unicode_literals
 from __future__ import print_function
 from nas.interfaces.AccuracyEvaluator import *
 from nas.utils.function import *
+import torch.nn.functional as F
 import torch
 
 
@@ -19,8 +20,11 @@ class SegmentationAccuracyEvaluator(AccuracyEvaluator):
         return 'SEGMENTATION'
 
     def accuracy(self, preditions, labels):
+        if (labels.shape[1] != preditions.shape[2]) or (labels.shape[2] != preditions.shape[3]):
+            preditions = F.upsample(preditions, size=(labels.shape[1], labels.shape[2]), mode='bilinear')
+
         # MeanIOU
-        labels = torch.where(labels==255, torch.full_like(labels, 0), labels)
+        labels = torch.where(labels == 255, torch.full_like(labels, 0), labels)
         preditions = torch.nn.Softmax2d()(preditions)
         preditions_argmax = preditions.argmax(1, keepdim=True)
         preditions_argmax = make_one_hot(preditions_argmax, self.class_num)

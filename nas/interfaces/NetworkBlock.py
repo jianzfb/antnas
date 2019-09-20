@@ -240,9 +240,9 @@ class ConvBn(NetworkBlock):
     n_layers = 1
     n_comp_steps = 1
 
-    def __init__(self, in_chan, out_chan, relu, k_size=3, stride=1, padding=1):
+    def __init__(self, in_chan, out_chan, relu, k_size=3, stride=1, dilation=1):
         super(ConvBn, self).__init__()
-        self.conv = nn.Conv2d(in_chan, out_chan, kernel_size=k_size, stride=stride, padding=padding, bias=False)
+        self.conv = nn.Conv2d(in_chan, out_chan, kernel_size=k_size, stride=stride, padding=k_size//2, bias=False, dilation=dilation)
         self.bn = nn.BatchNorm2d(out_chan)
         self.relu = relu
         self.out_chan = out_chan
@@ -252,7 +252,8 @@ class ConvBn(NetworkBlock):
             'ConvBn': {'stride': stride,
                        'out_chan': out_chan,
                        'k_size': k_size,
-                       'relu': relu}
+                       'relu': relu,
+                       'dilation': dilation}
         }
         self.switch = True
 
@@ -345,15 +346,17 @@ class SepConvBN(NetworkBlock):
     n_layers = 1
     n_comp_steps = 1
 
-    def __init__(self, in_chan, out_chan, relu, k_size=3, stride=1, bias=True):
+    def __init__(self, in_chan, out_chan, relu, k_size=3, stride=1,  dilation=1):
         super(SepConvBN, self).__init__()
         self.depthwise_conv = nn.Conv2d(in_chan,
                                         in_chan,
                                         kernel_size=k_size,
                                         groups=in_chan,
                                         stride=stride,
-                                        padding=k_size // 2)
-        self.pointwise_conv = nn.Conv2d(in_chan, out_chan, kernel_size=1, stride=1, padding=0)
+                                        padding=k_size // 2 + (dilation-1)*(k_size-1)//2,
+                                        dilation=dilation,
+                                        bias=False)
+        self.pointwise_conv = nn.Conv2d(in_chan, out_chan, kernel_size=1, stride=1, padding=0, bias=False)
         self.bn = nn.BatchNorm2d(out_chan)
         self.relu = relu
         self.out_chan = out_chan
@@ -365,7 +368,7 @@ class SepConvBN(NetworkBlock):
                           'out_chan': out_chan,
                           'k_size': k_size,
                           'relu': relu,
-                          'bias': bias}
+                          'dilation': dilation}
         }
         self.switch = True
 
@@ -404,9 +407,13 @@ class ResizedBlock(NetworkBlock):
     n_layers = 1
     n_comp_steps = 1
 
-    def __init__(self, in_chan, out_chan, relu, k_size, scale_factor=2):
+    def __init__(self, in_chan, out_chan, relu=True, k_size=3, scale_factor=2):
         super(ResizedBlock, self).__init__()
-        self.conv_layer = ConvBn(in_chan, out_chan, relu=relu, k_size=k_size, padding=k_size//2)
+        if out_chan > 0:
+            self.conv_layer = ConvBn(in_chan, out_chan, relu=relu, k_size=k_size)
+        else:
+            self.conv_layer = None
+
         self.scale_factor = scale_factor
 
         self.params = {
@@ -419,8 +426,9 @@ class ResizedBlock(NetworkBlock):
         }
 
     def forward(self, x):
-        x = F.upsample(x, scale_factor=self.scale_factor)
-        x = self.conv_layer(x)
+        x = F.upsample(x, scale_factor=self.scale_factor, mode='bilinear')
+        if self.conv_layer is not None:
+            x = self.conv_layer(x)
 
         if self.get_sampling() is None:
             return x
@@ -428,7 +436,9 @@ class ResizedBlock(NetworkBlock):
         return x * (self._sampling.value == 1).float()
 
     def get_flop_cost(self, x):
-        flops = self.conv_layer.get_flop_cost(x)[1]
+        flops = 0
+        if self.conv_layer is not None:
+            flops = self.conv_layer.get_flop_cost(x)[1]
         return [0] + [flops] + [0] * (NetworkBlock.state_num - 2)
 
 
@@ -455,6 +465,34 @@ class AddBlock(NetworkBlock):
         if not isinstance(x, list):
             return [0] * self.state_num
 
+        flop_cost = [0] + [x[0].size().numel()/x[0].size()[0] * (len(x) - 1)] * (self.state_num - 1)
+        return flop_cost
+
+
+class ConcatBlock(NetworkBlock):
+    n_layers = 0
+    n_comp_steps = 1
+
+    def __init__(self):
+        super(ConcatBlock, self).__init__()
+        self.params = {
+            'module_list': ['ConcatBlock'],
+            'name_list': ['ConcatBlock'],
+            'ConcatBlock': {}
+        }
+
+    def forward(self, x):
+        if not isinstance(x, list):
+            return x
+
+        assert isinstance(x, list)
+        return torch.cat(x, dim=1)
+
+    def get_flop_cost(self, x):
+        if not isinstance(x, list):
+            return [0] * self.state_num
+
+        # just use AddBlock flops (not precise)
         flop_cost = [0] + [x[0].size().numel()/x[0].size()[0] * (len(x) - 1)] * (self.state_num - 1)
         return flop_cost
 
@@ -559,6 +597,19 @@ class InvertedResidualBlock(NetworkBlock):
         self.out_chan = out_chan
         self.expansion = expansion
 
+        self.switch = True
+
+        self.params = {
+            'module_list': ['InvertedResidualBlock'],
+            'name_list': ['InvertedResidualBlock'],
+            'InvertedResidualBlock': {'in_chan':in_chan,
+                                      'expansion': expansion,
+                                      'kernel_size': kernel_size,
+                                      'out_chan': out_chan,
+                                      'skip': skip,
+                                      'reduction': reduction}
+        }
+
     def forward(self, input):
         x = input
         x = self.conv1(x)
@@ -575,7 +626,10 @@ class InvertedResidualBlock(NetworkBlock):
         if self.skip and self.in_chan == self.out_chan and (not self.reduction):
             x = x + input
 
-        return x
+        if self.get_sampling() is None:
+            return x
+
+        return x * (self._sampling.value == 1).float()
 
     def get_flop_cost(self, x):
         step_1_in_size = torch.Size([1, *x.shape[1:]])

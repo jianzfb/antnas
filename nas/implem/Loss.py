@@ -11,5 +11,8 @@ import torch
 
 
 def cross_entropy(predictions, labels):
+    if (labels.shape[1] != predictions.shape[2]) or (labels.shape[2] != predictions.shape[3]):
+        predictions = F.upsample(predictions, size=(labels.shape[1],labels.shape[2]), mode='bilinear')
+
     individual_losses = nn.CrossEntropyLoss(reduction='mean', ignore_index=255)(predictions, labels)
     return individual_losses

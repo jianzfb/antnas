@@ -9,6 +9,7 @@ from torchvision.datasets import MNIST, CIFAR10, SVHN, CIFAR100
 import numpy as np
 from nas.dataset.ext_transforms import *
 from nas.dataset.voc import VOCSegmentation
+from nas.dataset.portrait import PortraitSegmentation
 
 logger = logging.getLogger(__name__)
 
@@ -23,14 +24,14 @@ def get_PASCAL2012_SEG(path, *args):
         ExtRandomScale((0.5, 2.0)),
         ExtRandomCrop(size=(513, 513), pad_if_needed=True),
         ExtRandomHorizontalFlip(),
-        ExtResize((224,224)),
+        ExtResize((224, 224)),
         ExtToTensor(),
         ExtNormalize(mean=[0.485, 0.456, 0.406],
                      std=[0.229, 0.224, 0.225]),
     ])
 
     val_transform = ExtCompose([
-        ExtResize((224,224)),
+        ExtResize((224, 224)),
         ExtToTensor(),
         ExtNormalize(mean=[0.485, 0.456, 0.406],
                      std=[0.229, 0.224, 0.225]),
@@ -41,6 +42,39 @@ def get_PASCAL2012_SEG(path, *args):
 
     val_dst = VOCSegmentation(root=path, is_aug=False, image_set='val',
                               transform=val_transform)
+    test_dst = val_dst
+
+    return train_dst, val_dst, test_dst, img_dim, in_channels, out_size
+
+
+def get_Portrait_SEG(path, *args):
+    path = os.path.join(path, 'vision')
+    img_dim = 512
+    in_channels = 3
+    out_size = (2, 512, 512)
+
+    train_transform = ExtCompose([
+        ExtRandomHorizontalFlip(),
+        ExtResize((512, 512)),
+        ExtToTensor(),
+        ExtNormalize(mean=[0.485, 0.456, 0.406],
+                     std=[0.229, 0.224, 0.225]),
+    ])
+
+    val_transform = ExtCompose([
+        ExtResize((512, 512)),
+        ExtToTensor(),
+        ExtNormalize(mean=[0.485, 0.456, 0.406],
+                     std=[0.229, 0.224, 0.225]),
+    ])
+
+    train_dst = PortraitSegmentation(root=path,
+                                     image_set='train',
+                                     transform=train_transform)
+
+    val_dst = PortraitSegmentation(root=path,
+                                   image_set='val',
+                                   transform=val_transform)
     test_dst = val_dst
 
     return train_dst, val_dst, test_dst, img_dim, in_channels, out_size
@@ -197,7 +231,8 @@ sets = {
     'MNIST': get_MNIST,
     'SVHN': get_SVHN,
     'ImageNet': get_ImageNet,
-    'PASCAL2012SEG': get_PASCAL2012_SEG
+    'PASCAL2012SEG': get_PASCAL2012_SEG,
+    'PORTRAIT_SEG': get_Portrait_SEG
 }
 
 
