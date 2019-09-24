@@ -8,14 +8,8 @@ from __future__ import print_function
 import tensorflow as tf
 slim = tf.contrib.slim
 import networkx as nx
-
-
-class NasBlock(object):
-    def __init__(self):
-        pass
-
-    def __call__(self, *args, **kwargs):
-        raise NotImplementedError
+from nas.tools.nasblock import *
+from nas.tools.advancednasblock import *
 
 
 class InvertedResidualBlockWithSEHS(NasBlock):
@@ -54,12 +48,26 @@ class InvertedResidualBlockWithSEHS(NasBlock):
                                       normalizer_fn=slim.batch_norm,
                                       padding='SAME')
             if se:
-                se_x = tf.reduce_mean(x, axis=[1, 2], keep_dims=False)
-                se_x = slim.fully_connected(se_x, num_outputs=input_shape[3] * expansion // ratio, activation_fn=tf.nn.relu6)
-                se_x = slim.fully_connected(se_x, num_outputs=input_shape[3] * expansion, activation_fn=None)
+                se_x = tf.reduce_mean(x, axis=[1, 2], keep_dims=True)
+                se_x = slim.conv2d(se_x,
+                                   num_outputs=input_shape[3] * expansion // ratio,
+                                   kernel_size=1,
+                                   stride=1,
+                                   activation_fn=tf.nn.relu6,
+                                   normalizer_fn=None,
+                                   padding='SAME')
+                # se_x = slim.fully_connected(se_x, num_outputs=input_shape[3] * expansion // ratio, activation_fn=tf.nn.relu6, normalizer_fn=None)
+                se_x = slim.conv2d(se_x,
+                                   num_outputs=input_shape[3] * expansion,
+                                   kernel_size=1,
+                                   stride=1,
+                                   activation_fn=None,
+                                   normalizer_fn=None,
+                                   padding='SAME')
+                # se_x = slim.fully_connected(se_x, num_outputs=input_shape[3] * expansion, activation_fn=None, normalizer_fn=None)
                 se_x = (0.2 * se_x) + 0.5
                 se_x = tf.clip_by_value(se_x, 0.0, 1.0)
-                se_x = tf.reshape(se_x, shape=[input_shape[0], 1, 1, input_shape[3] * expansion])
+                # se_x = tf.reshape(se_x, shape=[input_shape[0], 1, 1, input_shape[3] * expansion])
                 x = tf.multiply(se_x, x)
 
             if hs:
@@ -80,6 +88,77 @@ class InvertedResidualBlockWithSEHS(NasBlock):
             return x
 
 
+class InvertedResidualBlock(NasBlock):
+    def __init__(self):
+        super(InvertedResidualBlock, self).__init__()
+
+    def __call__(self, inputs, expansion, kernel_size, out_chan, reduction, skip=True, scope=None):
+        with tf.variable_scope(scope, 'irb', [inputs]):
+            x = inputs
+            input_shape = inputs.get_shape().as_list()
+            # no bias
+            x = slim.conv2d(x,
+                            num_outputs=input_shape[3] * expansion,
+                            kernel_size=1,
+                            stride=1,
+                            activation_fn=tf.nn.relu6,
+                            normalizer_fn=slim.batch_norm,
+                            padding='SAME')
+
+            # no bias
+            x = slim.separable_conv2d(x,
+                                      num_outputs=None,
+                                      kernel_size=kernel_size,
+                                      stride=2 if reduction else 1,
+                                      activation_fn=tf.nn.relu6,
+                                      normalizer_fn=slim.batch_norm,
+                                      padding='SAME')
+
+            # no bias
+            x = slim.conv2d(x,
+                            num_outputs=out_chan,
+                            kernel_size=1,
+                            stride=1,
+                            activation_fn=None,
+                            normalizer_fn=slim.batch_norm,
+                            padding='SAME')
+
+            if skip and input_shape[0] == out_chan and (not reduction):
+                x = x + inputs
+            return x
+
+
+class ConcatBlock(NasBlock):
+    def __init__(self):
+        super(ConcatBlock, self).__init__()
+
+    def __call__(self, inputs, scope):
+        if not isinstance(inputs, list):
+            with tf.variable_scope('ConcatBlock_%s' % scope, 'ConcatBlock', [inputs]):
+                return inputs
+
+        with tf.variable_scope('ConcatBlock_%s' % scope, 'ConcatBlock', inputs):
+            return tf.concat(inputs, axis=3)
+
+
+class SepConvBN(NasBlock):
+    def __init__(self):
+        super(SepConvBN, self).__init__()
+
+    def __call__(self, inputs, out_chan, k_size, stride, relu, dilation, scope):
+        # in tensorflow, bn and bias couldnt exist in the same time
+        with tf.variable_scope('SepConvBN_%s' % scope, 'SepConvBN', [inputs]):
+            x = slim.separable_conv2d(inputs,
+                                      num_outputs=out_chan,
+                                      kernel_size=k_size,
+                                      stride=stride,
+                                      activation_fn=tf.nn.relu6 if relu else None,
+                                      normalizer_fn=slim.batch_norm,
+                                      rate=dilation,
+                                      padding='SAME')
+            return x
+
+
 class Identity(NasBlock):
     def __init__(self, ):
         super(Identity, self).__init__()
@@ -94,7 +173,7 @@ class ConvBn(NasBlock):
     def __init__(self):
         super(ConvBn, self).__init__()
 
-    def __call__(self, inputs, out_chan, k_size, stride, relu, scope):
+    def __call__(self, inputs, out_chan, k_size, stride, relu, dilation, scope):
         # in tensorflow, bn and bias couldnt exist in the same time
         with tf.variable_scope('ConvBn_%s' % scope, 'ConvBn', [inputs]):
             return slim.conv2d(inputs,
@@ -103,6 +182,7 @@ class ConvBn(NasBlock):
                                stride=stride,
                                activation_fn=tf.nn.relu6 if relu else None,
                                normalizer_fn=slim.batch_norm,
+                               rate=dilation,
                                padding='SAME')
 
 
@@ -131,7 +211,7 @@ class Skip(NasBlock):
                 inputs = tf.concat([inputs, pad], axis=-1)
 
             if reduction:
-                inputs = slim.avg_pool2d(inputs, kernel_size=2, stride=2, padding='VALID')
+                inputs = slim.avg_pool2d(inputs, kernel_size=2, stride=2, padding='SAME')
 
             return inputs
 
@@ -144,13 +224,14 @@ class ResizedBlock(NasBlock):
         with tf.variable_scope('Resized_%s' % scope, 'Resized', [inputs]):
             input_shape = inputs.get_shape()
             x = tf.image.resize_images(inputs, [int(input_shape[1]*scale_factor),int(input_shape[2]*scale_factor)], align_corners=True)
-            x = slim.conv2d(x,
-                             num_outputs=out_chan,
-                             kernel_size=k_size,
-                             stride=1,
-                             activation_fn=tf.nn.relu6 if relu else None,
-                             normalizer_fn=slim.batch_norm,
-                             padding='SAME')
+            if out_chan > 0:
+                x = slim.conv2d(x,
+                                num_outputs=out_chan,
+                                kernel_size=k_size,
+                                stride=1,
+                                activation_fn=tf.nn.relu6 if relu else None,
+                                normalizer_fn=slim.batch_norm,
+                                padding='SAME')
 
             return x
 

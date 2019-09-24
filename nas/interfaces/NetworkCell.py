@@ -107,50 +107,6 @@ class CellBlock(NetworkBlock):
                                                    se=False)
         self.op_list.append(IRB_k3e3_nose)
 
-        # IRB_k5e3 = InvertedResidualBlockWithSEHS(in_chan=channles,
-        #                                            expansion=3,
-        #                                            kernel_size=5,
-        #                                            out_chan=out_channels,
-        #                                            skip=True,
-        #                                            reduction=reduction)
-        # self.op_list.append(IRB_k5e3)
-        #
-        # self.IRB_k3e6 = InvertedResidualBlockWithSEHS(in_chan=channles,
-        #                                           expansion=6,
-        #                                           kernel_size=3,
-        #                                           out_chan=out_channels,
-        #                                           skip=True,
-        #                                           reduction=reduction)
-        # self.op_list.append(self.IRB_k3e6)
-        #
-        # self.IRB_k5e6 = InvertedResidualBlockWithSEHS(in_chan=channles,
-        #                                           expansion=6,
-        #                                           kernel_size=5,
-        #                                           out_chan=out_channels,
-        #                                           skip=True,
-        #                                           reduction=reduction)
-        # self.op_list.append(self.IRB_k5e6)
-
-        # self.IRB_k5e6_no_skip = InvertedResidualBlock(in_chan=channles,
-        #                                              expansion=6,
-        #                                              kernel_size=5,
-        #                                              out_chan=channles,
-        #                                              skip=False)
-        # self.op_list.append(self.IRB_k5e6_no_skip)
-        #
-        # # k3 with skip SepConv
-        # self.SC_k3_skip = SepConv(in_chan=channles, kernel_size=3, skip=True)
-        # self.op_list.append(self.SC_k3_skip)
-        #
-        # self.SC_k3_no_skip = SepConv(in_chan=channles, kernel_size=3, skip=False)
-        # self.op_list.append(self.SC_k3_no_skip)
-        #
-        # # k5 with skip SepConv
-        # self.SC_k5_skip = SepConv(in_chan=channles, kernel_size=5, skip=True)
-        # self.op_list.append(self.SC_k5_skip)
-        #
-        # self.SC_k5_no_skip = SepConv(in_chan=channles, kernel_size=5, skip=False)
-        # self.op_list.append(self.SC_k5_no_skip)
 
     def forward(self, input):
         last_cell_result = None
@@ -337,3 +293,5 @@ class ReductionCellBlock(NetworkBlock):
             cost_list.append(self.op_list[i + 1].get_latency(x)[1])
 
         return cost_list
+
+

@@ -37,10 +37,10 @@ def get_PASCAL2012_SEG(path, *args):
                      std=[0.229, 0.224, 0.225]),
     ])
 
-    train_dst = VOCSegmentation(root=path, is_aug=False, image_set='train',
+    train_dst = VOCSegmentation(root=path, is_aug=True, image_set='train',
                                 transform=train_transform)
 
-    val_dst = VOCSegmentation(root=path, is_aug=False, image_set='val',
+    val_dst = VOCSegmentation(root=path, is_aug=True, image_set='val',
                               transform=val_transform)
     test_dst = val_dst
 
@@ -249,7 +249,7 @@ def get_data(ds_name, batch_size, path, args=None):
     # logger.debug("N test : %d" % len(test_set))
 
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,
-                              num_workers=4) if train_set is not None else None
+                              num_workers=4, drop_last=True) if train_set is not None else None
     test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False,
                              num_workers=4) if test_set is not None else None
     val_loader = DataLoader(val_set, batch_size=1, shuffle=False,

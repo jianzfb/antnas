@@ -45,39 +45,63 @@ class NetworkBlock(nn.Module):
             return False
 
     @staticmethod
-    def proximate_latency(kernel_latency, kernel_profile):
-        if kernel_profile in kernel_latency:
-            return kernel_latency[kernel_profile]
+    def proximate_latency(kernel_latency, kernel_profile, approx, kernel_name):
+        # if kernel_profile in kernel_latency:
+        #     return kernel_latency[kernel_profile]
+        # assert(approx != 'same')
+        #
+        # latency_dict = {}
+        # for k, v in kernel_latency.items():
+        #     hw_in, hw_out, c_in, c_out, stride, dilation = k.split('x')
+        #     hw_in = int(hw_in)
+        #     c_in = int(c_in)
+        #     c_out = int(c_out)
+        #     stride = int(stride[1:])
+        #     dilation = int(dilation[1:])
+        #
+        #     # match h,w,s,d
+        #     if kernel_name.startswith('depthwise'):
+        #         latency_dict['%dxS%dxD%d'%(hw_in,stride,dilation)] = c_in
+        #     elif kernel_name.startswith('convbn'):
+        #         latency_dict['%dxS%dxD%d'%(hw_in,stride,dilation)] = c_in * c_out
+        #     elif kernel_name.startswith('resize'):
+        #         latency_dict[''%()] = c_in
+        #     elif kernel_name.startswith('se'):
+        #         latency_dict[int(hw_in / stride)] = hw_in * hw_in * c_in
+        #     else:
+        #         raise NotImplementedError
+        #
+        # kernel_hw_in, kernel_c_in, kernel_c_out, kernel_stride, kernel_dilation = kernel_profile.split('x')
+        # kernel_hw_in = int(kernel_hw_in)
+        # kernel_c_in = int(kernel_c_in)
+        # kernel_c_out = int(kernel_c_out)
+        # kernel_stride = int(kernel_stride[1:])
+        # kernel_dilation = int(kernel_dilation[1:])
+        # assert( int(kernel_hw_in/kernel_stride) in latency_dict)
+        return 0
 
-        name_list = []
-        latency_list = []
-        for k,v in kernel_latency.items():
-            a,b,c,d = k.split('x')
-            total = (int(a)*int(b)*int(c))/int(d[-1])
-            if total not in name_list:
-                name_list.append(total)
-                latency_list.append(v)
 
-        kernel_a,kernel_b,kernel_c,kernel_d = kernel_profile.split('x')
-        kernel_total = (int(kernel_a)*int(kernel_b)*int(kernel_c))/int(kernel_d[-1])
+        # kernel_a,kernel_b,kernel_c, kernel_d = kernel_profile.split('x')
+        # kernel_total = (int(kernel_a)*int(kernel_b)*int(kernel_c))/int(kernel_d[-1])
 
-        most_prox_index = 0
-        most_prox_val = 100000000000
-        for index in range(len(name_list)):
-            a = name_list[index] if name_list[index] > kernel_total else kernel_total
-            b = kernel_total if name_list[index] >= kernel_total else name_list[index]
-            ratio = float(a) / float(b)
+        # most_prox_index = 0
+        # most_prox_val = 100000000000
+        # for index in range(len(name_list)):
+        #     a = name_list[index] if name_list[index] > kernel_total else kernel_total
+        #     b = kernel_total if name_list[index] >= kernel_total else name_list[index]
+        #     ratio = float(a) / float(b)
+        #
+        #     if most_prox_val > ratio:
+        #         most_prox_val = ratio
+        #         most_prox_index = index
+        #
+        # prox_latency = 0.0
+        # if name_list[most_prox_index] > kernel_total:
+        #     prox_latency = latency_list[most_prox_index] / most_prox_val
+        # else:
+        #     prox_latency = latency_list[most_prox_index] * most_prox_val
+        # return prox_latency
 
-            if most_prox_val > ratio:
-                most_prox_val = ratio
-                most_prox_index = index
-
-        prox_latency = 0.0
-        if name_list[most_prox_index] > kernel_total:
-            prox_latency = latency_list[most_prox_index] / most_prox_val
-        else:
-            prox_latency = latency_list[most_prox_index] * most_prox_val
-        return prox_latency
 
     @staticmethod
     def get_conv2d_flops(m, x_size, y_size):
@@ -103,6 +127,7 @@ class NetworkBlock(nn.Module):
         # num_out_elements = y.numel()
         output_elements = batch_size * out_w * out_h * cout
         total_ops = output_elements * ops_per_element * cin // m.groups
+        total_ops += out_w*out_h*cout*(cin*kh*kw-1) // m.groups
         return total_ops
 
     @staticmethod
@@ -233,7 +258,10 @@ class Skip(NetworkBlock):
         return x_res * (self._sampling.value == 1).float()
 
     def get_flop_cost(self, x):
-        return [0] * self.state_num
+        return [0] * NetworkBlock.state_num
+
+    def get_latency(self, x):
+        return [0] * NetworkBlock.state_num
 
 
 class ConvBn(NetworkBlock):
@@ -270,7 +298,7 @@ class ConvBn(NetworkBlock):
 
     def get_flop_cost(self, x):
         conv_in_data_size = torch.Size([1, *x.shape[1:]])
-        conv_out_data_size = torch.Size([1, self.out_chan, x.shape[-1]//self.conv.stride[0],x.shape[-1]//self.conv.stride[1]])
+        conv_out_data_size = torch.Size([1, self.out_chan, x.shape[-1]//self.conv.stride[0], x.shape[-1]//self.conv.stride[1]])
 
         flops_1 = self.get_conv2d_flops(self.conv, conv_in_data_size, conv_out_data_size)
         flops_2 = self.get_bn_flops(self.bn, conv_out_data_size, conv_out_data_size)
@@ -282,64 +310,8 @@ class ConvBn(NetworkBlock):
         flop_cost = [0] + [total_flops] + [0] * (self.state_num - 2)
         return flop_cost
 
-
-class SlimConvBN(NetworkBlock):
-    n_layers = 1
-    n_comp_steps = 1
-
-    def __init__(self, in_chan, out_chan, relu=True, k_size=3, bias=True):
-        super(SlimConvBN, self).__init__()
-
-        self.params = {
-            'module_list': ['SlimConvBN'],
-            'name_list': ['SlimConvBN'],
-            'SlimConvBN': {'out_chan': out_chan,
-                       'k_size': k_size,
-                       'relu': relu,
-                       'bias': bias}
-        }
-
-        self.left_conv1 = nn.Conv2d(in_chan, out_chan, kernel_size=[k_size,1], stride=1, padding=[k_size//2,0], bias=bias)
-        self.left_conv2 = nn.Conv2d(out_chan, out_chan, kernel_size=[1, k_size], stride=1, padding=[0,k_size//2], bias=bias)
-
-        self.right_conv1 = nn.Conv2d(in_chan, out_chan, kernel_size=[1, k_size], stride=1, padding=[0,k_size//2], bias=bias)
-        self.right_conv2 = nn.Conv2d(out_chan, out_chan, kernel_size=[k_size,1], stride=1, padding=[k_size//2,0], bias=bias)
-
-        self.relu = relu
-        self.in_chan = in_chan
-        self.out_chan = out_chan
-
-    def forward(self, x):
-        left_x1 = self.left_conv1(x)
-        left_x2 = self.left_conv2(left_x1)
-        right_x1 = self.right_conv1(x)
-        right_x2 = self.right_conv2(right_x1)
-        x = left_x2 + right_x2
-        if self.relu:
-            x = F.relu6(x)
-
-        if self.get_sampling() is None:
-            return x
-
-        return x * (self._sampling.value == 1).float()
-
-    def get_flop_cost(self, x):
-        conv_in_data_size = torch.Size([1, *x.shape[1:]])
-        conv_out_data_size = torch.Size([1, self.out_chan, x.shape[-1], x.shape[-1]])
-
-        flops_1 = self.get_conv2d_flops(self.left_conv1, conv_in_data_size, conv_out_data_size)
-        flops_2 = self.get_conv2d_flops(self.left_conv2, conv_out_data_size, conv_out_data_size)
-        flops_3 = self.get_conv2d_flops(self.right_conv1, conv_in_data_size, conv_out_data_size)
-        flops_4 = self.get_conv2d_flops(self.right_conv2, conv_out_data_size, conv_out_data_size)
-        flops_5 = conv_out_data_size.numel() / conv_out_data_size[0]
-
-        flops_6 = 0.0
-        if self.relu:
-            flops_6 = self.get_relu_flops(None, conv_out_data_size, conv_out_data_size)
-
-        flop_cost = flops_1+flops_2+flops_3+flops_4+flops_5+flops_6
-
-        return [0] + [flop_cost] + [0]*(self.state_num - 2)
+    def get_latency(self, x):
+        pass
 
 
 class SepConvBN(NetworkBlock):
@@ -436,9 +408,10 @@ class ResizedBlock(NetworkBlock):
         return x * (self._sampling.value == 1).float()
 
     def get_flop_cost(self, x):
-        flops = 0
+        flops = 9 * (x.shape[2]*self.scale_factor)*(x.shape[3]*self.scale_factor) * x.shape[1]
         if self.conv_layer is not None:
-            flops = self.conv_layer.get_flop_cost(x)[1]
+            x = F.upsample(x, scale_factor=self.scale_factor, mode='bilinear')
+            flops += self.conv_layer.get_flop_cost(x)[1]
         return [0] + [flops] + [0] * (NetworkBlock.state_num - 2)
 
 
@@ -602,8 +575,7 @@ class InvertedResidualBlock(NetworkBlock):
         self.params = {
             'module_list': ['InvertedResidualBlock'],
             'name_list': ['InvertedResidualBlock'],
-            'InvertedResidualBlock': {'in_chan':in_chan,
-                                      'expansion': expansion,
+            'InvertedResidualBlock': {'expansion': expansion,
                                       'kernel_size': kernel_size,
                                       'out_chan': out_chan,
                                       'skip': skip,

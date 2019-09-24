@@ -68,7 +68,7 @@ class BaselineSN(StochasticSuperNetwork):
                  data_prop,
                  static_proba, *args, **kwargs):
         super(BaselineSN, self).__init__(*args, **kwargs)
-
+        NetworkBlock.state_num = 5
         self.in_chan = data_prop['in_channels']
         self.in_size = data_prop['img_dim']
         self.out_dim = data_prop['out_size'][0]
@@ -82,7 +82,7 @@ class BaselineSN(StochasticSuperNetwork):
         self._accuracy_evaluator = ClassificationAccuracyEvaluator()
 
         # head (固定计算节点，对应激活参数不可学习)
-        in_module = ConvBn(self.in_chan, channels_per_block[0][0], k_size=3, padding=3//2, stride=2, relu=True, bias=True)
+        in_module = ConvBn(self.in_chan, channels_per_block[0][0], k_size=3, stride=2, relu=True)
         in_name = self.add_aggregation((0, 0), module=in_module, node_format=self._INPUT_NODE_FORMAT)
 
         # search space（stage - block - cell）
@@ -159,10 +159,9 @@ class BaselineSN(StochasticSuperNetwork):
                         # 可学习连接
                         module = ConvBn(channles_per_block[pre_block_i + 1],
                                                      channles_per_block[block_i],
-                                                     False,
-                                                     3,
-                                                     1,
-                                                     True)
+                                                     relu=False,
+                                                     k_size=3,
+                                                     stride=1)
                         self.add_transformation((0, offset_per_block[pre_block_i] + cells_per_block[pre_block_i] * 2 - 1),
                                                 (0, offset_per_block[block_i] + 0 * 2),
                                                 module,

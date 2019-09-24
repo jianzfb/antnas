@@ -13,6 +13,7 @@ class ComputationalCostEvaluator(EdgeCostEvaluator):
             # set costs
             costs = torch.Tensor(graph.number_of_nodes(), NetworkBlock.state_num)
 
+            count = 0
             for node in model.traversal_order:
                 cur_node = graph.node[node]
                 # if isinstance(cur_node['module'], NetworkBlock):
@@ -31,4 +32,5 @@ class ComputationalCostEvaluator(EdgeCostEvaluator):
 
                 costs[self.model.architecture_node_index[node]] = torch.Tensor(cost)
 
+                count += 1
             return costs

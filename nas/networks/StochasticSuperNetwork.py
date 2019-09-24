@@ -174,7 +174,9 @@ class StochasticSuperNetwork(SuperNetwork):
         # 10.step total loss
         loss = indiv_loss.mean() + sampling_loss + 0.001 * regularizer_loss
 
-        return loss, model_accuracy
+        sampled_cost_ = torch.as_tensor(sampled_cost, device=loss.device)
+        pruned_cost_ = torch.as_tensor(pruned_cost, device=loss.device)
+        return loss, model_accuracy, sampled_cost_, pruned_cost_
 
     def _sample_archs(self, batch_size):
         batch_size = int(batch_size)

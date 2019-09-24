@@ -92,11 +92,11 @@ class NasModel(object):
             self.model.train()
 
         # 1.step forward model
-        loss, accuracy = self.model(Variable(x), Variable(y))
+        loss, accuracy, sample_cost, prune_cost = self.model(Variable(x), Variable(y))
         # 2.step get last sampling
         last_sampling = self._model_cache.path_recorder.get_and_reset()
         self._model_cache.last_sampling = last_sampling
-        return loss.mean(), accuracy.sum()
+        return loss.mean(), accuracy.sum(), sample_cost.mean(), prune_cost.mean()
 
     def eval(self, x, y, loader, name=''):
         if self.model.training:
@@ -109,7 +109,7 @@ class NasModel(object):
             y.resize_(labels.size()).copy_(labels)
 
             with torch.no_grad():
-                _, accuracy = self.model(Variable(x), Variable(y))
+                _, accuracy, _, _ = self.model(Variable(x), Variable(y))
 
             total_correct += accuracy.sum()
             total += labels.size(0)
