@@ -28,7 +28,7 @@ class NasModel(object):
         assert(self._search_space is not None)
 
         self._model = None
-        self._model_cache = None
+        self._supernetwork = None
         self._data_properties = data_properties
 
         # 模型优化器
@@ -78,7 +78,7 @@ class NasModel(object):
         search_space_args.update(kwargs)
         search_space_args.update({'data_prop': self._data_properties})
         self._model = self._search_space.build(**search_space_args)
-        self._model_cache = self._model
+        self._supernetwork = self._model
 
         # initialize model
         self.initialize()
@@ -94,8 +94,8 @@ class NasModel(object):
         # 1.step forward model
         loss, accuracy, sample_cost, prune_cost = self.model(Variable(x), Variable(y))
         # 2.step get last sampling
-        last_sampling = self._model_cache.path_recorder.get_and_reset()
-        self._model_cache.last_sampling = last_sampling
+        last_sampling = self.supernetwork.path_recorder.get_and_reset()
+        self.supernetwork.last_sampling = last_sampling
         return loss.mean(), accuracy.sum(), sample_cost.mean(), prune_cost.mean()
 
     def eval(self, x, y, loader, name=''):
@@ -118,10 +118,10 @@ class NasModel(object):
 
     def save(self, path):
         # 1.step save model
-        torch.save(self._model_cache.state_dict(), '%s.model'%path)
+        torch.save(self.supernetwork.state_dict(), '%s.model'%path)
 
         # 2.step save architecture
-        self._model_cache.save_architecture(path)
+        self.supernetwork.save_architecture(path)
 
     @property
     def model(self):
@@ -129,6 +129,10 @@ class NasModel(object):
     @model.setter
     def model(self, val):
         self._model = val
+
+    @property
+    def supernetwork(self):
+        return self._supernetwork
 
     def adjust_lr(self, epoch, tresh, val, logger=None, except_groups=None):
         if except_groups is None:

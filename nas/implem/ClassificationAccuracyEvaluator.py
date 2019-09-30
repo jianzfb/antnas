@@ -18,5 +18,5 @@ class ClassificationAccuracyEvaluator(AccuracyEvaluator):
 
     def accuracy(self, preditions, labels):
         _, predicted = torch.max(preditions.data, 1)
-        correct = (predicted == labels).sum()
+        correct = (predicted == labels).float()
         return correct

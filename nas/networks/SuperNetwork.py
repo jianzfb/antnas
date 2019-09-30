@@ -49,6 +49,8 @@ class SuperNetwork(nn.Module):
         # global configure
         self.kwargs = kwargs
 
+        self._epoch = 0
+
     def set_graph(self, network, in_node, out_node):
         self.net = network
         if not nx.is_directed_acyclic_graph(self.net):
@@ -144,3 +146,11 @@ class SuperNetwork(nn.Module):
     @last_sampling.setter
     def last_sampling(self, val):
         self._last_sampling = val
+
+    @property
+    def epoch(self):
+        return self._epoch
+
+    @epoch.setter
+    def epoch(self, val):
+        self._epoch = val

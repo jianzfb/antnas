@@ -181,7 +181,7 @@ class SegLargeKernelSN(StochasticSuperNetwork):
 
             self.add_transformation(last_decoder_aggregation,
                                     decoder_aggregation_node_pos,
-                                    ResizedBlock(21, 21, relu=True, k_size=3, scale_factor=4),
+                                    ResizedBlock(21, 21, relu=True, k_size=3, scale_factor=2),
                                     self._AGGREGATION_NODE_FORMAT,
                                     self._AGGREGATION_NODE_FORMAT,
                                     self._LINK_FORMAT,

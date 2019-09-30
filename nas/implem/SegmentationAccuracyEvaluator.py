@@ -33,7 +33,7 @@ class SegmentationAccuracyEvaluator(AccuracyEvaluator):
         eps = 1e-7
         bs = preditions.shape[0]
 
-        bs_score = 0.0
+        bs_score = []
         for index in range(bs):
             pr = preditions_argmax[index].float()
             gt = labels_one_hot[index].float()
@@ -58,6 +58,8 @@ class SegmentationAccuracyEvaluator(AccuracyEvaluator):
             if scores_count > 0:
                 scores = scores / scores_count
 
-            bs_score = bs_score + scores
+            # bs_score = bs_score + scores
+            bs_score.append(scores)
 
+        bs_score = torch.Tensor(bs_score, device=preditions.device)
         return bs_score

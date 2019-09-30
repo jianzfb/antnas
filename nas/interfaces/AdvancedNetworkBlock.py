@@ -110,12 +110,17 @@ class GCN(NetworkBlock):
         self.out_chan = out_chan
         self.boundary_refinement = boundary_refinement
 
+        self.switch = True
+
     def forward(self, x):
         left_x1 = self.left_conv1(x)
         left_x2 = self.left_conv2(left_x1)
         right_x1 = self.right_conv1(x)
         right_x2 = self.right_conv2(right_x1)
         x = left_x2 + right_x2
+
+        if self.boundary_refinement:
+            x = self.br(x)
 
         if self.get_sampling() is None:
             return x
@@ -146,7 +151,9 @@ class BoundaryRefinement(NetworkBlock):
 
     def __init__(self, in_chan, out_chan):
         super(BoundaryRefinement, self).__init__()
+        self.bn1 = nn.BatchNorm2d(in_chan)
         self.conv1 = nn.Conv2d(in_chan, out_chan, kernel_size=3, padding=1, bias=True)
+        self.bn2 = nn.BatchNorm2d(out_chan)
         self.conv2 = nn.Conv2d(out_chan, out_chan, kernel_size=3, padding=1, bias=True)
         self.params = {
             'module_list': ['BoundaryRefinement'],
@@ -158,10 +165,12 @@ class BoundaryRefinement(NetworkBlock):
         self.switch = True
 
     def forward(self, x):
-        x_res = self.conv1(x)
+        x_res = self.bn1(x)
+        x_res = F.relu6(x_res)
+        x_res = self.conv1(x_res)
+        x_res = self.bn2(x_res)
         x_res = F.relu6(x_res)
         x_res = self.conv2(x_res)
-
         x = x + x_res
         if self.get_sampling() is None:
             return x
@@ -289,6 +298,7 @@ class FocusBlock(NetworkBlock):
             'name_list': ['FocusBlock'],
             'FocusBlock': {'in_chan': in_chan, 'out_chan': out_chan},
         }
+        self.switch = True
 
     def forward(self, x):
         y1 = self.sep_conv1(x)

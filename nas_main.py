@@ -29,15 +29,15 @@ def argument_parser():
     # Experience
     parser.add_argument('-exp-name', action='store', default='', type=str, help='Experience Name')
     # Model
-    parser.add_argument('-arch', action='store', default='SegLargeKernelSN', type=str)
+    parser.add_argument('-arch', action='store', default='BaselineSN', type=str)
     parser.add_argument('-deter_eval', action='store', default=True, type=bool,
                         help='Take blocks with probas >0.5 instead of sampling during evaluation')
 
     # Training
-    parser.add_argument('-path', default='/Users/jian/Downloads/pascal_voc/', type=str,
+    parser.add_argument('-path', default='./dataset/', type=str,
                         help='path for the execution')
 
-    parser.add_argument('-dset', default='PASCAL2012SEG', type=str, help='Dataset')
+    parser.add_argument('-dset', default='CIFAR10', type=str, help='Dataset')
     parser.add_argument('-bs', action='store', default=2, type=int, help='Size of each batch')
     parser.add_argument('-epochs', action='store', default=300, type=int,
                         help='Number of training epochs')
@@ -109,13 +109,21 @@ def main(args, plotter):
     #                 cells_per_block=[[3], [3], [3], [3, 3, 3], [3,3,3],[3,3,3]],
     #                 channels_per_block=[[16], [32], [64], [128, 128, 128],[256,256,256]],
     #                )
+
+    # SegSN and SegAsppSN
     # nas_model.build(blocks_per_stage=[1, 1, 1, 3],
     #                 cells_per_block=[[3], [3], [6], [6, 6, 3]],
     #                 channels_per_block=[[16], [32], [64], [128, 256, 512]])
 
-    nas_model.build(blocks_per_stage=[1, 1, 1, 2, 2],
-                    cells_per_block=[[2], [3], [4], [4, 4], [4, 4]],
-                    channels_per_block=[[16], [24], [40], [80, 112], [160, 960]])
+    # SegLargeKernelSN
+    # nas_model.build(blocks_per_stage=[1, 1, 1, 2, 1],
+    #                 cells_per_block=[[2], [3], [4], [4, 4], [4]],
+    #                 channels_per_block=[[16], [24], [40], [80, 112], [160]])
+
+    # BiSegSN
+    nas_model.build(blocks_per_stage=[1, 1, 1, 2],
+                    cells_per_block=[[2], [3], [4], [4, 4]],
+                    channels_per_block=[[16], [24], [40], [80, 112]])
 
     # nas_model.model.load_state_dict(torch.load('/Users/jian/Downloads/nas_0.model',map_location='cpu'))
 
@@ -178,6 +186,7 @@ def main(args, plotter):
         # lr_pol_tresh,lr_pol_val 负责网络参数学习率调整
         # path_lr 负责网络架构参数学习率调整
         nas_model.adjust_lr(epoch, args['lr_pol_tresh'], args['lr_pol_val'], logger, ['path'])
+        nas_model.supernetwork.epoch = epoch
 
         for i, (inputs, labels) in enumerate(tqdm(train_loader, desc='Train', ascii=True)):
             # set model status (train)
@@ -186,7 +195,6 @@ def main(args, plotter):
 
             # train and return predictions, loss, correct
             loss, model_accuracy, model_sampled_cost,model_pruned_cost = nas_model.train(x, y)
-            # nas_model.save('./nas_%d' % (epoch % args['latest_num']))
 
             model_sampled_cost = model_sampled_cost.mean()
             model_pruned_cost = model_pruned_cost.mean()
@@ -205,8 +213,8 @@ def main(args, plotter):
             loss.backward()
 
             # clip gradient （avoid exploding）
-            torch.nn.utils.clip_grad_value_(nas_model._model_cache.sampling_parameters.parameters(), 10)
-            torch.nn.utils.clip_grad_value_(nas_model._model_cache.blocks.parameters(), 10)
+            torch.nn.utils.clip_grad_value_(nas_model.supernetwork.sampling_parameters.parameters(), 10)
+            torch.nn.utils.clip_grad_value_(nas_model.supernetwork.blocks.parameters(), 10)
 
             # update parameter
             nas_model.optimizer.step()

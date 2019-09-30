@@ -149,7 +149,7 @@ class BiSegSN(StochasticSuperNetwork):
 
         middle_branch_decoder_pos = (1, last_stage_index-2)
         self.add_aggregation(middle_branch_decoder_pos,
-                             ConvBn(channels_per_block[last_stage_index-2][-1], 32, True, k_size=3),
+                             ConvBn(channels_per_block[last_stage_index-2][-1], 32, relu=True, k_size=3),
                              node_format=self._FIXED_NODE_FORMAT)
         self.graph.add_edge(self._CELL_NODE_FORMAT.format(*middle_branch_pos),
                             self._FIXED_NODE_FORMAT.format(*middle_branch_decoder_pos),
@@ -170,7 +170,7 @@ class BiSegSN(StochasticSuperNetwork):
 
         decoder_aggregation_conv_1_node_pos = (3, last_stage_index-2)
         self.add_aggregation(decoder_aggregation_conv_1_node_pos,
-                             SepConvBN(256+32, 64, True, k_size=3),
+                             SepConvBN(256+32, 64, relu=True, k_size=3),
                              node_format=self._FIXED_NODE_FORMAT)
 
         self.graph.add_edge(self._AGGREGATION_NODE_FORMAT.format(*decoder_aggregation_node_pos),
@@ -189,7 +189,7 @@ class BiSegSN(StochasticSuperNetwork):
         # 2.3.step bibranch decoder
         bibranch_decoder_pos = (1, last_stage_index - 4)
         self.add_aggregation(bibranch_decoder_pos,
-                             ResizedBlock(64, -1, scale_factor=4),
+                             ResizedBlock(64, -1, scale_factor=2),
                              node_format=self._FIXED_NODE_FORMAT)
 
         self.graph.add_edge(self._FIXED_NODE_FORMAT.format(*decoder_aggregation_conv_2_node_pos),

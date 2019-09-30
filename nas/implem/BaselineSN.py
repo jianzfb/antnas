@@ -14,7 +14,8 @@ from torch import nn
 import torch
 from nas.interfaces.NetworkBlock import *
 from nas.interfaces.NetworkCell import *
-from nas.networks.StochasticSuperNetwork import StochasticSuperNetwork
+# from nas.networks.StochasticSuperNetwork import StochasticSuperNetwork
+from nas.networks.EvolutionSuperNetwork import EvolutionSuperNetwork
 from nas.utils.drawers.BSNDrawer import BSNDrawer
 from nas.implem.Loss import *
 from nas.implem.ClassificationAccuracyEvaluator import *
@@ -27,7 +28,8 @@ class OutLayer(NetworkBlock):
 
     def __init__(self, in_chan, out_shape, bias=True):
         super(OutLayer, self).__init__()
-        self.avg_global_pool = nn.AvgPool2d(kernel_size=[2,2], stride=[2,2])
+        self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
+
         self.conv_1 = nn.Conv2d(in_chan, in_chan, kernel_size=1, stride=1, padding=0, bias=bias)
         self.bn = nn.BatchNorm2d(in_chan)
 
@@ -45,7 +47,7 @@ class OutLayer(NetworkBlock):
         x = self.bn(x)
         x = F.relu6(x)
 
-        x = self.avg_global_pool(x)
+        x = self.global_pool(x)
         x = self.conv(x)
         return x.view(-1, *self.out_shape)
 
@@ -53,7 +55,7 @@ class OutLayer(NetworkBlock):
         return [0] + [0] * (self.state_num - 1)
 
 
-class BaselineSN(StochasticSuperNetwork):
+class BaselineSN(EvolutionSuperNetwork):
     _INPUT_NODE_FORMAT = 'I_{}_{}'              # 不可学习
     _OUTPUT_NODE_FORMAT = 'O_{}_{}'             # 不可学习
     _AGGREGATION_NODE_FORMAT = 'A_{}_{}'        # 不可学习
@@ -90,25 +92,22 @@ class BaselineSN(StochasticSuperNetwork):
         offset_per_stage = []
         for stage_i in range(len(blocks_per_stage)):
             offset_per_stage.append(pos_offset)
-            if stage_i < len(blocks_per_stage) - 1:
-                pos_offset = self.add_stage(pos_offset,
-                                            blocks_per_stage[stage_i],
-                                            cells_per_block[stage_i],
-                                            channels_per_block[stage_i],
-                                            channels_per_block[stage_i+1][0])
-            else:
-                pos_offset = self.add_stage(pos_offset,
-                                            blocks_per_stage[stage_i],
-                                            cells_per_block[stage_i],
-                                            channels_per_block[stage_i], is_last_stage=True)
+            pos_offset = self.add_stage(pos_offset,
+                                        blocks_per_stage[stage_i],
+                                        cells_per_block[stage_i],
+                                        channels_per_block[stage_i])
 
             # simple connection between stage
             # TODO dense connection among stages
             if stage_i > 0:
-                # 固定连接
-                self.graph.add_edge(self._CELL_NODE_FORMAT.format(0, offset_per_stage[stage_i-1]+sum(cells_per_block[stage_i-1])*2-1),
-                                    self._AGGREGATION_NODE_FORMAT.format(0, offset_per_stage[stage_i]),
-                                    width_node=self._AGGREGATION_NODE_FORMAT.format(0, offset_per_stage[stage_i]))
+                # cell transformation
+                self.add_transformation((0, offset_per_stage[stage_i-1]+sum(cells_per_block[stage_i-1])*2-1),
+                                        (0, offset_per_stage[stage_i]),
+                                        ReductionCellBlock(channels_per_block[stage_i-1][-1], channels_per_block[stage_i][0]),
+                                        self._CELL_NODE_FORMAT,
+                                        self._AGGREGATION_NODE_FORMAT,
+                                        self._TRANSFORMATION_FORMAT,
+                                        pos_shift=0,)
 
         # link head to search space
         self.graph.add_edge(self._INPUT_NODE_FORMAT.format(0, 0),
@@ -120,7 +119,6 @@ class BaselineSN(StochasticSuperNetwork):
         out_module = OutLayer(channels_per_block[-1][-1], data_prop['out_size'], True)
         out_name = self._OUTPUT_NODE_FORMAT.format(*(0, offset_per_stage[-1]+sum(cells_per_block[-1])*2))
         sampling_param = self.sampling_param_generator(out_name)
-
         self.graph.add_node(out_name,
                             module=len(self.blocks),
                             module_params=out_module.params,
@@ -135,7 +133,7 @@ class BaselineSN(StochasticSuperNetwork):
         # set graph
         self.set_graph(self.graph, in_name, out_name)
 
-    def add_stage(self, pos_offset, block_num, cells_per_block, channles_per_block, next_stage_channels=None, is_last_stage=False):
+    def add_stage(self, pos_offset, block_num, cells_per_block, channles_per_block):
         stage_offset = pos_offset
         offset_per_block = []
         for block_i in range(block_num):
@@ -144,7 +142,7 @@ class BaselineSN(StochasticSuperNetwork):
             if block_i < block_num - 1:
                 self.add_block(stage_offset, cells_per_block[block_i], channles_per_block[block_i], channles_per_block[block_i + 1])
             else:
-                self.add_block(stage_offset, cells_per_block[block_i], channles_per_block[block_i], next_stage_channels, reduction=True if not is_last_stage else False)
+                self.add_block(stage_offset, cells_per_block[block_i], channles_per_block[block_i], None)
             stage_offset += cells_per_block[block_i] * 2
 
             # dense connection among blocks
