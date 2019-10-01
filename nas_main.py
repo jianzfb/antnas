@@ -82,7 +82,7 @@ def argument_parser():
 
     parser.add_argument('-lambda', dest='lambda', action='store', default=1e-7, type=float,
                         help='Constant balancing the ratio classifier loss/architectural loss')
-    parser.add_argument('-oc', dest='objective_cost', action='store', default=0, type=float,
+    parser.add_argument('-oc', dest='objective_cost', action='store', default=6000000, type=float,
                         help='Maximum allowed cost for architecture')
     parser.add_argument('-om', dest='objective_method', action='store', default='max',
                         type=restricted_str('max', 'abs'), help='Method used to compute the cost of an architecture')
@@ -194,7 +194,7 @@ def main(args, plotter):
             y.resize_(labels.size()).copy_(labels)
 
             # train and return predictions, loss, correct
-            loss, model_accuracy, model_sampled_cost,model_pruned_cost = nas_model.train(x, y)
+            loss, model_accuracy, model_sampled_cost, model_pruned_cost = nas_model.train(x, y)
 
             model_sampled_cost = model_sampled_cost.mean()
             model_pruned_cost = model_pruned_cost.mean()
@@ -252,6 +252,7 @@ def main(args, plotter):
             plotter.update_plots()
 
         # save model state
+        nas_model.supernetwork.plot('./')
         nas_model.save('./nas_%d'%(epoch%args['latest_num']))
 
 

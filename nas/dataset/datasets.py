@@ -252,7 +252,7 @@ def get_data(ds_name, batch_size, path, args=None):
                               num_workers=4, drop_last=True) if train_set is not None else None
     test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False,
                              num_workers=4) if test_set is not None else None
-    val_loader = DataLoader(val_set, batch_size=1, shuffle=False,
+    val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False,
                             num_workers=4) if val_set is not None else None
 
     data_properties = {

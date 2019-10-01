@@ -154,3 +154,12 @@ class SuperNetwork(nn.Module):
     @epoch.setter
     def epoch(self, val):
         self._epoch = val
+
+    def preprocess(self):
+        pass
+
+    def afterprocess(self):
+        pass
+
+    def plot(self, path=None):
+        pass

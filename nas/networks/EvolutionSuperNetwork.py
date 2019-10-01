@@ -25,17 +25,21 @@ population_lock = threading.Lock()
 
 
 class ModelProblem(Problem):
-  def __init__(self, goal='MAXIMIZE'):
+  def __init__(self, goal='MAXIMIZE', alpha=0.7, beta=0.7, threshold=0):
     super(ModelProblem, self).__init__()
     self.max_objectives = [None, None]
     self.min_objectives = [None, None]
     self.goal = goal
+    self.alpha = alpha
+    self.beta = beta
+    self.T = threshold
 
   def generateIndividual(self):
     individual = Individual()
     individual.features = []
     individual.dominates = functools.partial(self.__dominates, individual1=individual)
     individual.objectives = [None, None]
+    individual.values = [None, None]
     return individual
 
   def calculateObjectives(self, individual):
@@ -62,12 +66,13 @@ class ModelProblem(Problem):
       return worse_than_other and better_than_other
 
   def __f1(self, m):
-    # model performance
-    return m.objectives[0]
+    # model accuracy
+    w = self.alpha if m.values[0] <= self.T else self.beta
+    return m.values[0] * float(np.power(m.values[1]/self.T, w))
 
   def __f2(self, m):
-    # model flops
-    return 1.0/m.objectives[1]
+    # model flops/latency
+    return 1.0/m.values[1]
 
 
 class EvolutionSuperNetwork(SuperNetwork):
@@ -76,12 +81,9 @@ class EvolutionSuperNetwork(SuperNetwork):
         self.nodes_param = None
 
         self.max_generation = 100
-        self.current_genration = 0
-
         self.epoch_num_every_generation = 5
         self.current_population = None
         self.population_size = 100
-        self.update_population_flag = True
 
         # build nsga2 evolution algorithm
         mutation_control = EvolutionMutation(multi_points=-1,
@@ -95,7 +97,10 @@ class EvolutionSuperNetwork(SuperNetwork):
                                                k0=1.0,
                                                k1=0.8,
                                                method='based_matrices')
-        self.evolution_control = Nsga2(ModelProblem('MAXIMIZE'),
+        self.evolution_control = Nsga2(ModelProblem('MAXIMIZE',
+                                                    alpha=0.7,
+                                                    beta=0.7,
+                                                    threshold=self.architecture_objective_cost),
                                        mutation_control,
                                        crossover_control)
 
@@ -177,15 +182,17 @@ class EvolutionSuperNetwork(SuperNetwork):
             if cost == self.architecture_cost_optimization:
                 optim_cost = sampled_cost
 
-        # 更新个体信息
-        population_lock.acquire()
-        for arch_index, sample_index in zip(batched_archs_index, list(range(batch_size))):
-            selected_count = self.current_population.population[arch_index].selected_count
-            pre_accuracy = self.current_population.population[arch_index].objectives[0]
-            self.current_population.population[arch_index].objectives[0] = (pre_accuracy * (selected_count-1) + model_accuracy[sample_index].item())/float(selected_count)
-            self.current_population.population[arch_index].objectives[1] = sampled_cost[sample_index].item()
-            self.evolution_control.problem.calculateObjectives(self.current_population.population[arch_index])
-        population_lock.release()
+        # evaluate every individual performance in population (only in Evaluation Stage)
+        if not self.training:
+            # 使用验证集进行评估个体优劣
+            population_lock.acquire()
+            for arch_index, sample_index in zip(batched_archs_index, list(range(batch_size))):
+                evaluation_count = self.current_population.population[arch_index].evaluation_count
+                pre_accuracy = self.current_population.population[arch_index].values[0]
+                self.current_population.population[arch_index].values[0] = (pre_accuracy * (evaluation_count-1) + model_accuracy[sample_index].item())/float(evaluation_count)
+                self.current_population.population[arch_index].values[1] = sampled_cost[sample_index].item()
+                self.evolution_control.problem.calculateObjectives(self.current_population.population[arch_index])
+            population_lock.release()
 
         # 9.step compute regularizer loss
         regularizer_loss = 0.0
@@ -224,7 +231,7 @@ class EvolutionSuperNetwork(SuperNetwork):
                 graph.node[node]['sampled'] = int(node_sampling_val)
 
             # 3.step save architecture
-            architecture_path = '%s_epoch_%d_accuray_%0.2f_flops_%0.15f.architecture'%(path, self.epoch, individual.objectives[0], 1.0/individual.objectives[1])
+            architecture_path = '%s_epoch_%d_accuray_%0.2f_flops_%0.15f.architecture'%(path, self.epoch, individual.values[0], individual.values[1])
             nx.write_gpickle(graph, architecture_path)
 
     def sampling_param_generator(self, node_name):
@@ -265,48 +272,46 @@ class EvolutionSuperNetwork(SuperNetwork):
     def _sample_archs(self, batch_size, device):
         batch_size = int(batch_size)
 
-        # 决定是否需要启动产生新种群
+        # 决定是否需要启动产生新种群(仅在训练阶段，进行新种群产生)
         mini_population = []
         population_lock.acquire()
-        if self.epoch % self.epoch_num_every_generation == 0 and self.update_population_flag:
-            if self.current_population is None:
-                # 随机产生初代种群
-                self.current_genration = 0
-                self.current_population = Population()
-                for index in range(self.population_size):
-                    me = self.evolution_control.problem.generateIndividual()
-                    me.id = index
-                    me.features = self.randomSamplingArchitecture()
-                    me.objectives[0] = 0
-                    me.objectives[1] = 0
-                    me.is_selected = False
-                    me.selected_count = 0
-                    self.current_population.population.append(me)
-            else:
-                # 产生下一代精英种群
-                self.current_genration = self.epoch // self.epoch_num_every_generation
-                self.evolution_control.mutation_controler.generation = self.current_genration
-                self.evolution_control.crossover_controler.generation = self.current_genration
+        if self.epoch % self.epoch_num_every_generation == 0 and \
+                self.current_population.update_population_flag and \
+                self.training:
+            print('generate elite population')
+            # 产生下一代精英种群
+            self.current_population.current_genration = self.epoch // self.epoch_num_every_generation
+            self.evolution_control.mutation_controler.generation = self.current_population.current_genration
+            self.evolution_control.crossover_controler.generation = self.current_population.current_genration
 
-                self.current_population = self.evolution_control.evolve(self.current_population,
-                                                                        self.net,
-                                                                        self.blocks,
-                                                                        self.architecture_node_index,
-                                                                        self.architecture_cost_evaluators[self.architecture_cost_optimization].get_cost,
-                                                                        device=device)
-                # 重新对下一代精英种群初始化
-                for individual in self.current_population.population:
-                    individual.is_selected = False
-                    individual.selected_count = 0
-                    individual.objectives[0] = 0
-                    individual.objectives[1] = 0
+            elite_population = self.evolution_control.evolve(self.current_population,
+                                                             self.net,
+                                                             self.blocks,
+                                                             self.architecture_node_index,
+                                                             self.architecture_cost_evaluators[self.architecture_cost_optimization].get_cost,
+                                                             device=device)
+            self.current_population.population = elite_population.population
+            self.current_population.fronts = []
 
-            self.update_population_flag = False
+            # 重新对下一代精英种群初始化
+            for individual in self.current_population.population:
+                individual.is_selected = False
+                individual.selected_count = 0
+                individual.evaluation_count = 0
+                individual.objectives[0] = 0
+                individual.objectives[1] = 0
+                individual.values[0] = 0
+                individual.values[1] = 0
+
+            self.current_population.update_population_flag = False
 
         # next epoch, whether need to update population
-        if (self.epoch + 1) % self.epoch_num_every_generation == 0:
-            self.update_population_flag = True
+        if (self.epoch + 1) % self.epoch_num_every_generation == 0 and \
+                not self.current_population.update_population_flag and \
+                self.training:
+            self.current_population.update_population_flag = True
 
+        # 从种群中采样当前批次的个体
         # 1.step 从未被选中的个体中挑选
         candidate_individual_index = [individual.id for individual in self.current_population.population if not individual.is_selected]
         if len(candidate_individual_index) > batch_size:
@@ -316,16 +321,32 @@ class EvolutionSuperNetwork(SuperNetwork):
 
         for individual_index in candidate_individual_index:
             self.current_population.population[individual_index].is_selected = True
-            self.current_population.population[individual_index].selected_count += 1
+            if self.training:
+                self.current_population.population[individual_index].selected_count += 1
+            else:
+                self.current_population.population[individual_index].evaluation_count += 1
+
             mini_population.append(self.current_population.population[individual_index])
 
         # 2.step 随机挑选
         if len(mini_population) < batch_size:
-            mini_population.extend(np.random.choice(self.current_population.population,
-                                                    batch_size - len(mini_population),
-                                                    replace=False).flatten().tolist())
+            remained_num = batch_size-len(mini_population)
+            while remained_num > len(self.current_population.population):
+                mini_population.extend(np.random.choice(self.current_population.population,
+                                                        len(self.current_population.population),
+                                                        replace=False).flatten().tolist())
+                remained_num = remained_num - len(self.current_population.population)
+
+            if remained_num > 0:
+                mini_population.extend(np.random.choice(self.current_population.population,
+                                                        remained_num,
+                                                        replace=False).flatten().tolist())
+
             for individual in mini_population:
-                individual.selected_count += 1
+                if self.training:
+                    individual.selected_count += 1
+                else:
+                    individual.evaluation_count += 1
 
         population_lock.release()
 
@@ -347,6 +368,60 @@ class EvolutionSuperNetwork(SuperNetwork):
                 else:
                     feature[cur_node['sampling_param']] = int(np.random.randint(0, NetworkBlock.state_num))
         return feature
+
+    def preprocess(self):
+        if self.current_population is None:
+            # 随机产生初代种群
+            self.current_population = Population()
+            self.current_population.current_genration = 0
+            for index in range(self.population_size):
+                me = self.evolution_control.problem.generateIndividual()
+                me.id = index
+                me.features = self.randomSamplingArchitecture()
+                me.values[0] = 0
+                me.values[1] = 0
+                me.is_selected = False
+                me.selected_count = 0
+                me.evaluation_count = 0
+                self.current_population.population.append(me)
+
+            self.current_population.update_population_flag = False
+
+    def plot(self, path=None):
+        # pareto optimal
+        # axis x (flops/latency)
+        if self.epoch % self.epoch_num_every_generation == 0:
+            x = [individual.values[1] for individual in self.current_population.population]
+            if self.architecture_cost_optimization == 'comp':
+                x = [v / 1000000 for v in x]
+            elif self.architecture_cost_optimization == 'param':
+                x = [v / 1000000 for v in x]
+
+            # axis y (objective)
+            y = [individual.objectives[0] for individual in self.current_population.population]
+
+            x_min = np.min(x)
+            x_max = np.max(x) + 1
+            plt.xlim((x_min, x_max))
+            plt.ylim((0, 1))
+
+            if self.architecture_cost_optimization == 'comp':
+                plt.xlabel('MULADD/FLOPS (M - 10e6)')
+            elif self.architecture_cost_optimization == 'latency':
+                plt.xlabel('LATENCY (ms)')
+            else:
+                plt.xlabel("PARAMETER (M - 10e6)")
+
+            plt.ylabel('ACCURACY')
+            plt.scatter(x=x, y=y, c='r', marker='o')
+
+            for x_p, y_p, individual in zip(x,y, self.current_population.population):
+                plt.text(x_p, y_p, '%0.2f'%individual.values[0])
+
+            if path is None:
+                path = './'
+
+            plt.savefig(os.path.join(path, 'generation_%d_pareto_optimal.png'%(self.epoch//self.epoch_num_every_generation)))
 
     def __str__(self):
         model_descr = 'Model:{}\n\t{} nodes\n\t{} blocks\n\t{} parametrized layers\n\t{} computation steps\n\t{} parameters\n\t{} meta-params'

@@ -289,6 +289,9 @@ class StochasticSuperNetwork(SuperNetwork):
 
         return nn.Parameter(torch.Tensor(param_value), requires_grad=trainable)
 
+    def plot(self, path=None):
+        pass
+
     def __str__(self):
         model_descr = 'Model:{}\n\t{} nodes\n\t{} blocks\n\t{} parametrized layers\n\t{} computation steps\n\t{} parameters\n\t{} meta-params'
         return model_descr.format(type(self).__name__,

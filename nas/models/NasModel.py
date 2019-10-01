@@ -91,8 +91,12 @@ class NasModel(object):
         if not self.model.training:
             self.model.train()
 
+        # 0.step before process
+        self.supernetwork.preprocess()
+
         # 1.step forward model
         loss, accuracy, sample_cost, prune_cost = self.model(Variable(x), Variable(y))
+
         # 2.step get last sampling
         last_sampling = self.supernetwork.path_recorder.get_and_reset()
         self.supernetwork.last_sampling = last_sampling
