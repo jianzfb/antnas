@@ -81,7 +81,7 @@ class EvolutionSuperNetwork(SuperNetwork):
         self.nodes_param = None
 
         self.max_generation = 100
-        self.epoch_num_every_generation = 5
+        self.epoch_num_every_generation = 3
         self.current_population = None
         self.population_size = 100
         assert(self.epoch_num_every_generation > 2)
@@ -93,7 +93,7 @@ class EvolutionSuperNetwork(SuperNetwork):
                                              k1=0.8,
                                              method='based_matrices',
                                              adaptive=True)
-        crossover_control = EvolutionCrossover(multi_points=10,
+        crossover_control = EvolutionCrossover(multi_points=-1,
                                                max_generation=self.max_generation,
                                                k0=1.0,
                                                k1=0.8,
