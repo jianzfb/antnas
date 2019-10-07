@@ -28,8 +28,9 @@ class CellBlock(NetworkBlock):
                           'IRB_k3e3_nohs_nose',
                           'IRB_k3e3',
                           'IRB_k3e3_nose'],
-            'Skip': {'out_chan': out_channels, 'reduction': reduction},
-            'IRB_k3e3_nohs': {'kernel_size': 3,
+            'Skip': {'in_chan': channles, 'out_chan': out_channels, 'reduction': reduction},
+            'IRB_k3e3_nohs': {'in_chan': channles,
+                              'kernel_size': 3,
                               'expansion': 3,
                               'out_chan': out_channels,
                               'reduction': reduction,
@@ -37,23 +38,26 @@ class CellBlock(NetworkBlock):
                               'ratio': 4,
                               'hs': False,
                               'se': True},
-            'IRB_k3e3_nohs_nose': {'kernel_size': 3,
-                              'expansion': 3,
-                              'out_chan': out_channels,
-                              'reduction': reduction,
-                              'skip': True,
-                              'ratio': 4,
-                              'hs': False,
-                              'se': False},
-            'IRB_k3e3': {'kernel_size': 3,
-                              'expansion': 3,
-                              'out_chan': out_channels,
-                              'reduction': reduction,
-                              'skip': True,
-                              'ratio': 4,
-                              'hs': True,
-                              'se': True},
-            'IRB_k3e3_nose': {'kernel_size': 3,
+            'IRB_k3e3_nohs_nose': {'in_chan': channles,
+                                   'kernel_size': 3,
+                                   'expansion': 3,
+                                   'out_chan': out_channels,
+                                   'reduction': reduction,
+                                   'skip': True,
+                                   'ratio': 4,
+                                   'hs': False,
+                                   'se': False},
+            'IRB_k3e3': {'in_chan': channles,
+                         'kernel_size': 3,
+                         'expansion': 3,
+                         'out_chan': out_channels,
+                         'reduction': reduction,
+                         'skip': True,
+                         'ratio': 4,
+                         'hs': True,
+                         'se': True},
+            'IRB_k3e3_nose': {'in_chan': channles,
+                              'kernel_size': 3,
                               'expansion': 3,
                               'out_chan': out_channels,
                               'reduction': reduction,
@@ -63,50 +67,8 @@ class CellBlock(NetworkBlock):
                               'se': False}
         }
 
-        # op 1: skip
-        skip = Skip(channles, out_channels, reduction=reduction)
-        self.op_list.append(skip)
-
-        # op 2: IRB with no HS
-        IRB_k3e3_nohs = InvertedResidualBlockWithSEHS(in_chan=channles,
-                                                      expansion=3,
-                                                      kernel_size=3,
-                                                      out_chan=out_channels,
-                                                      skip=True,
-                                                      reduction=reduction,
-                                                      hs=False)
-        self.op_list.append(IRB_k3e3_nohs)
-
-        # op 3: IRB with no SE and no HS
-        IRB_k3e3_nohs_nose = InvertedResidualBlockWithSEHS(in_chan=channles,
-                                                      expansion=3,
-                                                      kernel_size=3,
-                                                      out_chan=out_channels,
-                                                      skip=True,
-                                                      reduction=reduction,
-                                                      hs=False,
-                                                      se=False)
-        self.op_list.append(IRB_k3e3_nohs_nose)
-
-        # op 4: IRB
-        IRB_k3e3 = InvertedResidualBlockWithSEHS(in_chan=channles,
-                                                   expansion=3,
-                                                   kernel_size=3,
-                                                   out_chan=out_channels,
-                                                   skip=True,
-                                                   reduction=reduction)
-        self.op_list.append(IRB_k3e3)
-
-        # op 5: IRB with no SE
-        IRB_k3e3_nose = InvertedResidualBlockWithSEHS(in_chan=channles,
-                                                   expansion=3,
-                                                   kernel_size=3,
-                                                   out_chan=out_channels,
-                                                   skip=True,
-                                                   reduction=reduction,
-                                                   se=False)
-        self.op_list.append(IRB_k3e3_nose)
-
+        self.op_list = self.build()
+        assert(len(self.op_list) == NetworkBlock.state_num)
 
     def forward(self, input):
         last_cell_result = None
@@ -166,7 +128,8 @@ class ReductionCellBlock(NetworkBlock):
                           'IRB_k3e3_nohs_nose',
                           'IRB_k3e3',
                           'IRB_k3e3_nose'],
-            'IRB_k5e3_nose': {'kernel_size': 5,
+            'IRB_k5e3_nose': {'in_chan': channles,
+                              'kernel_size': 5,
                               'expansion': 3,
                               'out_chan': out_channels,
                               'reduction': True,
@@ -174,7 +137,8 @@ class ReductionCellBlock(NetworkBlock):
                               'ratio': 4,
                               'hs': True,
                               'se': False},
-            'IRB_k3e3_nohs': {'kernel_size': 3,
+            'IRB_k3e3_nohs': {'in_chan': channles,
+                              'kernel_size': 3,
                               'expansion': 3,
                               'out_chan': out_channels,
                               'reduction': True,
@@ -182,7 +146,8 @@ class ReductionCellBlock(NetworkBlock):
                               'ratio': 4,
                               'hs': False,
                               'se': True},
-            'IRB_k3e3_nohs_nose': {'kernel_size': 3,
+            'IRB_k3e3_nohs_nose': {'in_chan': channles,
+                                   'kernel_size': 3,
                                    'expansion': 3,
                                    'out_chan': out_channels,
                                    'reduction': True,
@@ -190,7 +155,8 @@ class ReductionCellBlock(NetworkBlock):
                                    'ratio': 4,
                                    'hs': False,
                                    'se': False},
-            'IRB_k3e3': {'kernel_size': 3,
+            'IRB_k3e3': {'in_chan': channles,
+                         'kernel_size': 3,
                          'expansion': 3,
                          'out_chan': out_channels,
                          'reduction': True,
@@ -198,7 +164,8 @@ class ReductionCellBlock(NetworkBlock):
                          'ratio': 4,
                          'hs': True,
                          'se': True},
-            'IRB_k3e3_nose': {'kernel_size': 3,
+            'IRB_k3e3_nose': {'in_chan': channles,
+                              'kernel_size': 3,
                               'expansion': 3,
                               'out_chan': out_channels,
                               'reduction': True,
@@ -208,53 +175,8 @@ class ReductionCellBlock(NetworkBlock):
                               'se': False}
         }
 
-        # op 1: IRB with no se
-        IRB_k5e3_nose = InvertedResidualBlockWithSEHS(in_chan=channles,
-                                                      expansion=3,
-                                                      kernel_size=5,
-                                                      out_chan=out_channels,
-                                                      skip=True,
-                                                      reduction=True,
-                                                      se=False)
-        self.op_list.append(IRB_k5e3_nose)
-
-        # op 2: IRB with no HS
-        IRB_k3e3_nohs = InvertedResidualBlockWithSEHS(in_chan=channles,
-                                                      expansion=3,
-                                                      kernel_size=3,
-                                                      out_chan=out_channels,
-                                                      skip=True,
-                                                      reduction=True,
-                                                      hs=False)
-        self.op_list.append(IRB_k3e3_nohs)
-
-        # op 3: IRB with no SE and no HS
-        IRB_k3e3_nohs_nose = InvertedResidualBlockWithSEHS(in_chan=channles,
-                                                      expansion=3,
-                                                      kernel_size=3,
-                                                      out_chan=out_channels,
-                                                      skip=True,
-                                                      reduction=True)
-        self.op_list.append(IRB_k3e3_nohs_nose)
-
-        # op 4: IRB
-        IRB_k3e3 = InvertedResidualBlockWithSEHS(in_chan=channles,
-                                                   expansion=3,
-                                                   kernel_size=3,
-                                                   out_chan=out_channels,
-                                                   skip=True,
-                                                   reduction=True)
-        self.op_list.append(IRB_k3e3)
-
-        # op 5: IRB with no SE
-        IRB_k3e3_nose = InvertedResidualBlockWithSEHS(in_chan=channles,
-                                                   expansion=3,
-                                                   kernel_size=3,
-                                                   out_chan=out_channels,
-                                                   skip=True,
-                                                   reduction=True,
-                                                   se=False)
-        self.op_list.append(IRB_k3e3_nose)
+        self.op_list = self.build()
+        assert(len(self.op_list) == NetworkBlock.state_num)
 
     def forward(self, input):
         last_cell_result = None

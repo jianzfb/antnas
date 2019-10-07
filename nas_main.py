@@ -116,10 +116,15 @@ def main(args, plotter):
     #                 cells_per_block=[[2], [3], [4], [4, 4], [4]],
     #                 channels_per_block=[[16], [24], [40], [80, 112], [160]])
 
-    # BiSegSN
-    nas_model.build(blocks_per_stage=[1, 1, 1, 2],
-                    cells_per_block=[[2], [3], [4], [4, 4]],
-                    channels_per_block=[[16], [24], [40], [80, 112]])
+    # # BiSegSN
+    # nas_model.build(blocks_per_stage=[1, 1, 1, 2],
+    #                 cells_per_block=[[2], [3], [4], [4, 4]],
+    #                 channels_per_block=[[16], [24], [40], [80, 112]])
+
+    # TFSN
+    nas_model.build(blocks_per_stage=[1, 1, 1, 2, 2],
+                    cells_per_block=[[2], [3], [3], [4, 4], [2, 2]],
+                    channels_per_block=[[16], [24], [40], [80, 112], [160, 180]])
 
     # nas_model.model.load_state_dict(torch.load('/Users/jian/Downloads/nas_0.model',map_location='cpu'))
 

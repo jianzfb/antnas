@@ -167,6 +167,7 @@ def get_SVHN(path, *args):
 
 
 def get_MNIST(path, *args):
+    path = os.path.join(path, 'vision')
     img_dim = 32
     in_channels = 1
     out_size = (10,)
@@ -197,7 +198,8 @@ def get_MNIST(path, *args):
 
 
 def get_ImageNet(path, *args):
-    img_dim = 256
+    path = os.path.join(path, 'vision')
+    img_dim = 224
     in_channels = 3
     out_size = (1000,)
 
@@ -207,8 +209,8 @@ def get_ImageNet(path, *args):
                                      std=[0.229, 0.224, 0.225])
 
     train_set = datasets.ImageFolder(traindir, transforms.Compose([
+        transforms.Scale(256),
         transforms.RandomSizedCrop(224),
-        transforms.Pad(16),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         normalize,
@@ -217,7 +219,6 @@ def get_ImageNet(path, *args):
     val_set = datasets.ImageFolder(valdir, transforms.Compose([
         transforms.Scale(256),
         transforms.CenterCrop(224),
-        transforms.Pad(16),
         transforms.ToTensor(),
         normalize,
     ]))

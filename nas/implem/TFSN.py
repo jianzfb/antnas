@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*-
-# @Time    : 2019-07-24 11:39
-# @File    : BaselineSN.py
+# @Time    : 2019-10-07 09:32
+# @File    : TFSN.py
 # @Author  : jian<jian@mltalker.com>
 from __future__ import division
 from __future__ import unicode_literals
@@ -13,14 +13,13 @@ import torch.nn.functional as F
 from torch import nn
 import torch
 from nas.interfaces.NetworkBlock import *
-from nas.interfaces.NetworkCell import *
-# from nas.networks.StochasticSuperNetwork import StochasticSuperNetwork
+from nas.interfaces.TFNetworkCell import *
 from nas.networks.EvolutionSuperNetwork import EvolutionSuperNetwork
 from nas.utils.drawers.BSNDrawer import BSNDrawer
 from nas.implem.Loss import *
 from nas.implem.ClassificationAccuracyEvaluator import *
 
-__all__ = ['BaselineSN']
+__all__ = ['TFSN']
 
 
 class OutLayer(NetworkBlock):
@@ -31,10 +30,12 @@ class OutLayer(NetworkBlock):
         super(OutLayer, self).__init__()
         self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
 
-        self.conv_1 = nn.Conv2d(in_chan, in_chan, kernel_size=1, stride=1, padding=0, bias=bias)
-        self.bn = nn.BatchNorm2d(in_chan)
+        self.conv_1 = nn.Conv2d(in_chan, 960, kernel_size=1, stride=1, padding=0, bias=False)
+        self.bn = nn.BatchNorm2d(960)
 
-        self.conv = nn.Conv2d(in_chan, out_shape[0], 1, bias=bias)
+        self.conv_2 = nn.Conv2d(960, 1280, kernel_size=1, stride=1, padding=0, bias=True)
+        self.conv_3 = nn.Conv2d(1280, out_shape[0], kernel_size=1, stride=1, padding=0, bias=True)
+
         self.out_shape = out_shape
         self.params = {
             'module_list': ['OutLayer'],
@@ -46,17 +47,20 @@ class OutLayer(NetworkBlock):
     def forward(self, x):
         x = self.conv_1(x)
         x = self.bn(x)
-        x = F.relu6(x)
-
+        x = x * (F.relu6(x + 3.0) / 6.0)
         x = self.global_pool(x)
-        x = self.conv(x)
+
+        x = self.conv_2(x)
+        x = x * (F.relu6(x + 3.0) / 6.0)
+
+        x = self.conv_3(x)
         return x.view(-1, *self.out_shape)
 
     def get_flop_cost(self, x):
         return [0] + [0] * (self.state_num - 1)
 
 
-class BaselineSN(EvolutionSuperNetwork):
+class TFSN(EvolutionSuperNetwork):
     _INPUT_NODE_FORMAT = 'I_{}_{}'              # 不可学习
     _OUTPUT_NODE_FORMAT = 'O_{}_{}'             # 不可学习
     _AGGREGATION_NODE_FORMAT = 'A_{}_{}'        # 不可学习
@@ -70,8 +74,8 @@ class BaselineSN(EvolutionSuperNetwork):
                  channels_per_block,
                  data_prop,
                  static_proba, *args, **kwargs):
-        super(BaselineSN, self).__init__(*args, **kwargs)
-        NetworkBlock.state_num = 5
+        super(TFSN, self).__init__(*args, **kwargs)
+        NetworkBlock.state_num = 8
         self.in_chan = data_prop['in_channels']
         self.in_size = data_prop['img_dim']
         self.out_dim = data_prop['out_size'][0]
@@ -104,7 +108,7 @@ class BaselineSN(EvolutionSuperNetwork):
                 # cell transformation
                 self.add_transformation((0, offset_per_stage[stage_i-1]+sum(cells_per_block[stage_i-1])*2-1),
                                         (0, offset_per_stage[stage_i]),
-                                        ReductionCellBlock(channels_per_block[stage_i-1][-1], channels_per_block[stage_i][0]),
+                                        TFReductionCellBlock(channels_per_block[stage_i-1][-1], channels_per_block[stage_i][0]),
                                         self._CELL_NODE_FORMAT,
                                         self._AGGREGATION_NODE_FORMAT,
                                         self._TRANSFORMATION_FORMAT,
@@ -176,13 +180,13 @@ class BaselineSN(EvolutionSuperNetwork):
             self.add_aggregation((0, pos_offset+cell_i*2), AddBlock(), self._AGGREGATION_NODE_FORMAT)
             if cell_i != cells - 1:
                 self.add_cell((0, pos_offset+cell_i*2+1),
-                              CellBlock(channles, channles),
+                              TFCellBlock(channles, channles),
                               self._CELL_NODE_FORMAT)
             else:
                 if next_block_channels is None:
                     next_block_channels = channles
                 self.add_cell((0, pos_offset + cell_i * 2 + 1),
-                              CellBlock(channles, next_block_channels, reduction=reduction),
+                              TFCellBlock(channles, next_block_channels, reduction=reduction),
                               self._CELL_NODE_FORMAT)
 
             # 固定连接
@@ -198,15 +202,6 @@ class BaselineSN(EvolutionSuperNetwork):
                         self.graph.add_edge(self._CELL_NODE_FORMAT.format(0, pos_offset+pre_cell_i*2+1),
                                             self._AGGREGATION_NODE_FORMAT.format(0, pos_offset+cell_i*2),
                                             width_node=self._AGGREGATION_NODE_FORMAT.format(0, pos_offset+cell_i*2))
-                    else:
-                        # 可学习连接
-                        self.add_transformation((0, pos_offset+pre_cell_i*2+1),
-                                                (0, pos_offset+cell_i*2),
-                                                Identity(),
-                                                self._CELL_NODE_FORMAT,
-                                                self._AGGREGATION_NODE_FORMAT,
-                                                self._TRANSFORMATION_FORMAT,
-                                                pos_shift=2)
 
     def add_aggregation(self, pos, module, node_format):
         agg_node_name = node_format.format(*pos)

@@ -18,6 +18,8 @@ class NetworkBlock(nn.Module):
         self.node_regularizer = threading.local()
         self._is_switch = False
 
+        self._params = {}
+
     @property
     def switch(self):
         return self._is_switch
@@ -25,6 +27,24 @@ class NetworkBlock(nn.Module):
     @switch.setter
     def switch(self, val):
         self._is_switch = val
+
+    @property
+    def params(self):
+        return self._params
+
+    @params.setter
+    def params(self, val):
+        self._params = val
+
+    def build(self, *args, **kwargs):
+        op_list = nn.ModuleList()
+        module_list = self.params['module_list']
+        name_list = self.params['name_list']
+        for block_name, block_module in zip(name_list, module_list):
+            block_param = self.params[block_name]
+            op_list.append(globals()[block_module](**block_param))
+
+        return op_list
 
     def get_latency(self, x):
         return [0.0] * NetworkBlock.state_num
@@ -101,7 +121,6 @@ class NetworkBlock(nn.Module):
         # else:
         #     prox_latency = latency_list[most_prox_index] * most_prox_val
         # return prox_latency
-
 
     @staticmethod
     def get_conv2d_flops(m, x_size, y_size):
@@ -227,10 +246,10 @@ class Skip(NetworkBlock):
     n_layers = 0
     n_comp_steps = 0
 
-    def __init__(self, in_channels, out_channels, reduction):
+    def __init__(self, in_chan, out_chan, reduction):
         super(Skip, self).__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
+        self.in_channels = in_chan
+        self.out_channels = out_chan
         self.reduction = reduction
         self.pool2d = torch.nn.AvgPool2d(2, 2)
 
@@ -239,7 +258,7 @@ class Skip(NetworkBlock):
         self.params = {
             'module_list': ['Skip'],
             'name_list': ['Skip'],
-            'Skip': {'out_chan': out_channels, 'reduction': reduction},
+            'Skip': {'out_chan': out_chan, 'reduction': reduction},
         }
 
     def forward(self, x):
