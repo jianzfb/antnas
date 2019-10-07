@@ -252,11 +252,19 @@ class StochasticSuperNetwork(SuperNetwork):
         sampling_loss_val = (-batched_log_probas * rewards.unsqueeze(dim=1)).sum()
         return sampling_loss_val
 
-    def save_architecture(self, path=None):
-        # 0.step sampling network
+    def save_architecture(self, folder=None, name=None):
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+
+        path = os.path.join(folder, name)
+        # 1.step save model
+        torch.save(self.state_dict(), '%s.model'%path)
+
+        # 2.step save architecture
+        # 2.0.step sampling network
         batched_sampling, _ = self._sample_archs(1)
 
-        # 1.step prune sampling network
+        # 2.1.step prune sampling network
         sampling = torch.Tensor()
         active = torch.Tensor()
 
@@ -269,12 +277,12 @@ class StochasticSuperNetwork(SuperNetwork):
 
         _, pruned_architecture = self.architecture(sampling, active)
 
-        # 2.step write to graph
+        # 2.2.step write to graph
         for node in self.traversal_order:
             node_sampling_val = torch.squeeze(pruned_architecture[self.path_recorder.node_index[node]]).item()
             self.net.node[node]['sampled'] = int(node_sampling_val)
 
-        # 3.step save architecture
+        # 2.3.step save architecture
         architecture_path = '%s.architecture'%path
         nx.write_gpickle(self.net, architecture_path)
 

@@ -64,13 +64,16 @@ class Mutation(object):
     # which position in chromosome i should mutation
     sigma = np.sum(np.power(A - np.mean(A, 0), 2.0) * C, 0) / np.sum(C)
     position_sigma = np.where(sigma > 0.00001)
+    if position_sigma[0].size == 0:
+        print('couldnt finding mutation locs because of sigma')
+        return []
+
     probability_sigma = sigma[position_sigma]
     probability_sigma = np.power(probability_sigma, gamma)
     probability_sigma = probability_sigma / (np.sum(probability_sigma) + 0.000000001)
 
     mutation_result = []
     for f in fitness_values:
-        # all individual should participate mutation process
         # mutation points number
         multi_points = self.multi_points if self.multi_points > 0 else int(alpha[f[0]] * len(position_sigma[0].flatten().tolist()))
         if multi_points > 0:

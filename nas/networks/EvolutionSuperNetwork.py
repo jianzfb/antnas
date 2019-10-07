@@ -67,12 +67,12 @@ class ModelProblem(Problem):
 
   def __f1(self, m):
     # model accuracy
-    w = self.alpha if m.values[0] <= self.T else self.beta
+    w = self.alpha if m.values[1] <= self.T else self.beta
     return m.values[0] * float(np.power(m.values[1]/self.T, w))
 
   def __f2(self, m):
     # model flops/latency
-    return 1.0/m.values[1]
+    return m.values[1]
 
 
 class EvolutionSuperNetwork(SuperNetwork):
@@ -84,9 +84,10 @@ class EvolutionSuperNetwork(SuperNetwork):
         self.epoch_num_every_generation = 5
         self.current_population = None
         self.population_size = 100
+        assert(self.epoch_num_every_generation > 2)
 
         # build nsga2 evolution algorithm
-        mutation_control = EvolutionMutation(multi_points=-1,
+        mutation_control = EvolutionMutation(multi_points=20,
                                              max_generation=self.max_generation,
                                              k0=1.0,
                                              k1=0.8,
@@ -96,10 +97,11 @@ class EvolutionSuperNetwork(SuperNetwork):
                                                max_generation=self.max_generation,
                                                k0=1.0,
                                                k1=0.8,
-                                               method='based_matrices')
+                                               method='based_matrices',
+                                               size=self.population_size)
         self.evolution_control = Nsga2(ModelProblem('MAXIMIZE',
-                                                    alpha=0.7,
-                                                    beta=0.7,
+                                                    alpha=-0.07,
+                                                    beta=-0.07,
                                                     threshold=self.architecture_objective_cost),
                                        mutation_control,
                                        crossover_control)
@@ -206,8 +208,11 @@ class EvolutionSuperNetwork(SuperNetwork):
         pruned_cost_ = torch.as_tensor(pruned_cost, device=loss.device)
         return loss, model_accuracy, sampled_cost_, pruned_cost_
 
-    def save_architecture(self, path=None):
-        # save current population
+    def save_architecture(self, folder=None, name=None):
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+
+        # 1.step save current population
         for individual in self.current_population.population:
             batched_sampling = torch.Tensor(individual.features).view(1, len(individual.features))
             graph = copy.deepcopy(self.net)
@@ -231,7 +236,10 @@ class EvolutionSuperNetwork(SuperNetwork):
                 graph.node[node]['sampled'] = int(node_sampling_val)
 
             # 3.step save architecture
-            architecture_path = '%s_epoch_%d_accuray_%0.2f_flops_%0.15f.architecture'%(path, self.epoch, individual.values[0], individual.values[1])
+            architecture_path = os.path.join(folder,
+                                             'epoch_%d_accuray_%0.2f_flops_%0.15f.architecture'%(self.epoch,
+                                                                                                 individual.values[0],
+                                                                                                 individual.values[1]))
             nx.write_gpickle(graph, architecture_path)
 
     def sampling_param_generator(self, node_name):
@@ -278,23 +286,44 @@ class EvolutionSuperNetwork(SuperNetwork):
         if self.epoch % self.epoch_num_every_generation == 0 and \
                 self.current_population.update_population_flag and \
                 self.training:
-            print('generate elite population')
-            # 产生下一代精英种群
+            # update population generation
             self.current_population.current_genration = self.epoch // self.epoch_num_every_generation
             self.evolution_control.mutation_controler.generation = self.current_population.current_genration
             self.evolution_control.crossover_controler.generation = self.current_population.current_genration
 
-            elite_population = self.evolution_control.evolve(self.current_population,
-                                                             self.net,
-                                                             self.blocks,
-                                                             self.architecture_node_index,
-                                                             self.architecture_cost_evaluators[self.architecture_cost_optimization].get_cost,
-                                                             device=device)
-            self.current_population.population = elite_population.population
-            self.current_population.fronts = []
+            print('generate pareto front')
+            self.current_population.pareto_front = \
+                self.evolution_control.evolve(self.current_population,
+                                              target_size=self.population_size,
+                                              children_population=None).population
+            print('pareto front size %d'%(len(self.current_population.pareto_front)))
 
-            # 重新对下一代精英种群初始化
-            for individual in self.current_population.population:
+            print('generate population for generation %d'%(self.current_population.current_genration))
+            # 产生新种群 (crossover and mutation)
+            candidate_elite_population = Population()
+            candidate_elite_population.population = copy.deepcopy(self.current_population.pareto_front)
+
+            # 交叉
+            candidate_elite_population = \
+                self.evolution_control.crossover_controler.population_crossover(
+                    population=candidate_elite_population,
+                    graph=self.net,
+                    blocks=self.blocks)
+
+            # 变异
+            candidate_elite_population = \
+                self.evolution_control.mutation_controler.population_mutate(
+                    population=candidate_elite_population,
+                    graph=self.net,
+                    blocks=self.blocks)
+
+            self.current_population.population = candidate_elite_population.population
+            self.current_population.population.extend(copy.deepcopy(self.current_population.pareto_front))
+            print('population size %d for generation %d'%(len(self.current_population.population), self.current_population.current_genration))
+
+            # 候选精英种群初始化
+            for individual_index, individual in enumerate(self.current_population.population):
+                individual.id = individual_index
                 individual.is_selected = False
                 individual.selected_count = 0
                 individual.evaluation_count = 0
@@ -302,10 +331,11 @@ class EvolutionSuperNetwork(SuperNetwork):
                 individual.objectives[1] = 0
                 individual.values[0] = 0
                 individual.values[1] = 0
+                individual.type = 'children'
 
             self.current_population.update_population_flag = False
 
-        # next epoch, whether need to update population
+        # next epoch, check whether need to update population
         if (self.epoch + 1) % self.epoch_num_every_generation == 0 and \
                 not self.current_population.update_population_flag and \
                 self.training:
@@ -383,22 +413,29 @@ class EvolutionSuperNetwork(SuperNetwork):
                 me.is_selected = False
                 me.selected_count = 0
                 me.evaluation_count = 0
+                me.type = 'parent'
                 self.current_population.population.append(me)
 
             self.current_population.update_population_flag = False
 
     def plot(self, path=None):
+        if not os.path.exists(path):
+            os.makedirs(path)
+
+        plt.figure()
+        plt.title('PARETO OPTIMAL for %d GENERATION'%(self.current_population.current_genration))
         # pareto optimal
         # axis x (flops/latency)
-        if self.epoch % self.epoch_num_every_generation == 0:
-            x = [individual.values[1] for individual in self.current_population.population]
+        if self.epoch % self.epoch_num_every_generation == 0 and \
+                len(self.current_population.pareto_front) > 0:
+            x = [individual.values[1] for individual in self.current_population.pareto_front]
             if self.architecture_cost_optimization == 'comp':
                 x = [v / 1000000 for v in x]
             elif self.architecture_cost_optimization == 'param':
                 x = [v / 1000000 for v in x]
 
             # axis y (objective)
-            y = [individual.objectives[0] for individual in self.current_population.population]
+            y = [individual.objectives[0] for individual in self.current_population.pareto_front]
 
             x_min = np.min(x)
             x_max = np.max(x) + 1
@@ -415,13 +452,14 @@ class EvolutionSuperNetwork(SuperNetwork):
             plt.ylabel('ACCURACY')
             plt.scatter(x=x, y=y, c='r', marker='o')
 
-            for x_p, y_p, individual in zip(x,y, self.current_population.population):
+            for x_p, y_p, individual in zip(x, y, self.current_population.pareto_front):
                 plt.text(x_p, y_p, '%0.2f'%individual.values[0])
 
             if path is None:
                 path = './'
 
             plt.savefig(os.path.join(path, 'generation_%d_pareto_optimal.png'%(self.epoch//self.epoch_num_every_generation)))
+            plt.close()
 
     def __str__(self):
         model_descr = 'Model:{}\n\t{} nodes\n\t{} blocks\n\t{} parametrized layers\n\t{} computation steps\n\t{} parameters\n\t{} meta-params'

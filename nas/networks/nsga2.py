@@ -25,6 +25,7 @@ class Population(object):
     self.fronts = []
     self.current_genration = 0
     self.update_population_flag = True
+    self.pareto_front = []
 
   def __len__(self):
     return len(self.population)
@@ -57,6 +58,7 @@ class Individual(object):
     self.is_selected = False
     self.selected_count = 0
     self.evaluation_count = 0
+
 
   def set_objectives(self, objectives):
     self.objectives = objectives
@@ -149,7 +151,7 @@ class Nsga2(object):
           front[index].crowding_distance += (front[index + 1].objectives[m] - front[index - 1].objectives[m]) / (
                     self.problem.max_objectives[m] - self.problem.min_objectives[m])
 
-  def create_children(self, population, graph, blocks, architecture_index, architecture_cost_func, device):
+  def create_children(self, population, graph, blocks, architecture_index, architecture_cost_func):
     # gp model building
     x = []
     y = []
@@ -161,6 +163,10 @@ class Nsga2(object):
     gp.fit(x, y)
 
     population_clone = copy.deepcopy(population)
+    # set individual tag (children)
+    for individual in population_clone.population:
+      individual.type = 'children'
+
     if self.crossover_controler is not None:
       # 交叉
       population_clone = \
@@ -198,9 +204,14 @@ class Nsga2(object):
     # return children population
     return population_clone
 
-  def evolve(self, population, graph=None, blocks=None, architecture_index=None, architecture_cost_func=None, device=None):
-    # get population size
-    population_size = len(population)
+  def evolve(self,
+             population,
+             target_size,
+             graph=None,
+             blocks=None,
+             architecture_index=None,
+             architecture_cost_func=None,
+             children_population=None):
     # 1.step compute nondominated_sort and crowding distance
     self.fast_nondominated_sort(population)
     for front in population.fronts:
@@ -210,11 +221,14 @@ class Nsga2(object):
     expand_population = population
 
     # 2.step generate next children generation
-    children = self.create_children(population, graph, blocks, architecture_index, architecture_cost_func,device)
+    children = children_population
+    if children is None and graph is not None:
+      children = self.create_children(population, graph, blocks, architecture_index, architecture_cost_func)
 
     # 3.step environment pooling
     # 3.1.step expand population
-    expand_population.extend(children)
+    if children is not None:
+      expand_population.extend(children)
 
     # 3.2.step re-fast-nondominated-sort
     self.fast_nondominated_sort(expand_population)
@@ -223,110 +237,115 @@ class Nsga2(object):
     front_num = 0
     # next elite population
     new_population = Population()
-    while len(new_population) + len(expand_population.fronts[front_num]) <= population_size:
+    while len(new_population) + len(expand_population.fronts[front_num]) <= target_size:
       new_population.extend(expand_population.fronts[front_num])
       front_num += 1
       if front_num == len(expand_population.fronts):
         break
 
-    if len(new_population) < population_size and front_num == len(expand_population.fronts):
-      return None
+    if front_num == len(expand_population.fronts):
+      return new_population
 
-    if len(new_population) + len(expand_population.fronts[front_num]) < population_size:
-      return None
-
-    if len(new_population) < population_size:
+    if len(new_population) < target_size:
       self.calculate_crowding_distance(expand_population.fronts[front_num])
       expand_population.fronts[front_num] = sorted(expand_population.fronts[front_num],
                                                  key=functools.cmp_to_key(self.crowding_operator),
                                             reverse=True)
-      new_population.extend(expand_population.fronts[front_num][0:population_size - len(new_population)])
+      new_population.extend(expand_population.fronts[front_num][0:target_size - len(new_population)])
     return new_population
 
 
-# # test nsga2
-# class ZDT1(Problem):
-#   def __init__(self, goal='MAXIMIZE'):
-#     super(ZDT1, self).__init__()
-#     self.max_objectives = [None, None]
-#     self.min_objectives = [None, None]
-#     self.goal = goal
-#
-#   def generateIndividual(self):
-#     individual = Individual()
-#     individual.features = []
-#
-#     min_x = -10
-#     max_x = 10
-#
-#     individual.features.append(min_x + (max_x - min_x) * random.random())
-#     individual.features.append(None)
-#     individual.objectives = [None, None]
-#     individual.dominates = functools.partial(self.__dominates, individual1=individual)
-#     return individual
-#
-#   def calculateObjectives(self, individual):
-#     individual.objectives[0] = self.__f1(individual)
-#     individual.objectives[1] = self.__f2(individual)
-#     for i in range(2):
-#       if self.min_objectives[i] is None or individual.objectives[i] < self.min_objectives[i]:
-#         self.min_objectives[i] = individual.objectives[i]
-#       if self.max_objectives[i] is None or individual.objectives[i] > self.max_objectives[i]:
-#         self.max_objectives[i] = individual.objectives[i]
-#
-#   def __dominates(self, individual2, individual1):
-#     if self.goal == 'MAXIMIZE':
-#       worse_than_other = self.__f1(individual1) >= self.__f1(individual2) and self.__f2(individual1) >= self.__f2(
-#         individual2)
-#       better_than_other = self.__f1(individual1) > self.__f1(individual2) or self.__f2(individual1) > self.__f2(
-#         individual2)
-#       return worse_than_other and better_than_other
-#     else:
-#       worse_than_other = self.__f1(individual1) <= self.__f1(individual2) and self.__f2(individual1) <= self.__f2(
-#         individual2)
-#       better_than_other = self.__f1(individual1) < self.__f1(individual2) or self.__f2(individual1) < self.__f2(
-#         individual2)
-#       return worse_than_other and better_than_other
-#
-#   def __f1(self, m):
-#     return m.features[0]**2
-#
-#   def __f2(self, m):
-#     value = (m.features[0]-2)**2
-#     return value
-#
-#
-# if __name__ == '__main__':
-#   class _ZDT1Mutation(object):
-#     def __init__(self):
-#       pass
-#
-#     def mutate(self):
-#       min_x = -10
-#       max_x = 10
-#       v = min_x+(max_x-min_x)*random.random()
-#       return v
-#
-#   problem = ZDT1('MINIMIZE')
-#   ss = Nsga2(problem, _ZDT1Mutation(), None)
-#
-#   population = Population()
-#   num_of_individuals = 20
-#   for _ in range(num_of_individuals):
-#     individual = problem.generateIndividual()
-#     problem.calculateObjectives(individual)
-#     population.population.append(individual)
-#
-#   new_population = population
-#   for index in range(46):
-#     new_population = ss.evolve(new_population)
-#
-#     function1_values = [m.objectives[0] for m in new_population.population]
-#     function2_values = [m.objectives[1] for m in new_population.population]
-#     function1 = [i  for i in function1_values]
-#     function2 = [j  for j in function2_values]
-#     plt.xlabel('Function 1', fontsize=15)
-#     plt.ylabel('Function 2', fontsize=15)
-#     plt.scatter(function1, function2, c='r')
-#     # plt.savefig('aa.png')
-#     plt.show()
+# test nsga2
+class ZDT1(Problem):
+  def __init__(self, goal='MAXIMIZE'):
+    super(ZDT1, self).__init__()
+    self.max_objectives = [None, None]
+    self.min_objectives = [None, None]
+    self.goal = goal
+
+  def generateIndividual(self):
+    individual = Individual()
+    individual.features = []
+
+    min_x = -10
+    max_x = 10
+
+    individual.features.append(min_x + (max_x - min_x) * random.random())
+    individual.features.append(None)
+    individual.objectives = [None, None]
+    individual.dominates = functools.partial(self.__dominates, individual1=individual)
+    return individual
+
+  def calculateObjectives(self, individual):
+    individual.objectives[0] = self.__f1(individual)
+    individual.objectives[1] = self.__f2(individual)
+    for i in range(2):
+      if self.min_objectives[i] is None or individual.objectives[i] < self.min_objectives[i]:
+        self.min_objectives[i] = individual.objectives[i]
+      if self.max_objectives[i] is None or individual.objectives[i] > self.max_objectives[i]:
+        self.max_objectives[i] = individual.objectives[i]
+
+  def __dominates(self, individual2, individual1):
+    if self.goal == 'MAXIMIZE':
+      worse_than_other = self.__f1(individual1) >= self.__f1(individual2) and self.__f2(individual1) >= self.__f2(
+        individual2)
+      better_than_other = self.__f1(individual1) > self.__f1(individual2) or self.__f2(individual1) > self.__f2(
+        individual2)
+      return worse_than_other and better_than_other
+    else:
+      worse_than_other = self.__f1(individual1) <= self.__f1(individual2) and self.__f2(individual1) <= self.__f2(
+        individual2)
+      better_than_other = self.__f1(individual1) < self.__f1(individual2) or self.__f2(individual1) < self.__f2(
+        individual2)
+      return worse_than_other and better_than_other
+
+  def __f1(self, m):
+    return m.features[0]**2
+
+  def __f2(self, m):
+    value = (m.features[0]-2)**2
+    return value
+
+
+if __name__ == '__main__':
+  class _ZDT1Mutation(object):
+    def __init__(self):
+      pass
+
+    def mutate(self):
+      min_x = -10
+      max_x = 10
+      v = min_x+(max_x-min_x)*random.random()
+      return v
+
+  problem = ZDT1('MAXIMIZE')
+  ss = Nsga2(problem, _ZDT1Mutation(), None)
+
+
+  population = Population()
+  num_of_individuals = 20
+  for _ in range(num_of_individuals):
+    individual = problem.generateIndividual()
+    problem.calculateObjectives(individual)
+    population.population.append(individual)
+
+  new_population = population
+  for index in range(46):
+    if index > 0:
+      children_population = Population()
+      for _ in range(num_of_individuals):
+        individual = problem.generateIndividual()
+        problem.calculateObjectives(individual)
+        children_population.population.append(individual)
+
+      new_population = ss.evolve(new_population, children_population=None)
+
+    function1_values = [m.objectives[0] for m in new_population.population]
+    function2_values = [m.objectives[1] for m in new_population.population]
+    function1 = [i  for i in function1_values]
+    function2 = [j  for j in function2_values]
+    plt.xlabel('Function 1', fontsize=15)
+    plt.ylabel('Function 2', fontsize=15)
+    plt.scatter(function1, function2, c='r')
+    # plt.savefig('aa.png')
+    plt.show()

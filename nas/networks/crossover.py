@@ -8,6 +8,8 @@ from __future__ import print_function
 import numpy as np
 import random
 import networkx as nx
+from nas.networks.nsga2 import *
+import copy
 
 
 class CrossOver(object):
@@ -20,6 +22,7 @@ class CrossOver(object):
     self.max_generation = kwargs.get('max_generation', 1)
     self.k0 = kwargs.get('k0', 0.2)
     self.k1 = kwargs.get('k1', 1.0)
+    self.size = kwargs.get('size', 0)
 
   @property
   def generation(self):
@@ -55,6 +58,10 @@ class CrossOver(object):
       sigma = np.sum(np.power(A - np.mean(A, 0), 2.0) * C, 0) / np.sum(C)
       # remove those fixed position
       position_contribution = np.where(sigma > 0.00001)
+      if position_contribution[0].size == 0:
+          print('couldnt finding crossover locs because of sigma')
+          return []
+
       probability_contribution = 1.0 - sigma[position_contribution] / (np.sum(sigma[position_contribution]) + 0.000000001)
       probability_contribution = probability_contribution / np.sum(probability_contribution)
 
@@ -72,7 +79,8 @@ class CrossOver(object):
                 H[ii, jj] = (np.array(fitness_values[ii][2], dtype=np.int) != np.array(fitness_values[jj][2], dtype=np.int)).sum()
 
       crossover_result = []
-      for _ in range(N//2):
+      crossover_num = self.size if self.size > 0 else N//2
+      for _ in range(crossover_num):
         # selecting first chromosome
         first_chromosome_index = np.random.choice(list(range(N)), p=chromosome_probability)
 
@@ -85,7 +93,12 @@ class CrossOver(object):
                                          size=self.multi_points,
                                          p=probability_contribution,
                                          replace=False)
-        crossover_result.append((first_chromosome_index, second_chromosome_index, crossover_pos.tolist()))
+        if len(crossover_pos) > 0:
+            crossover_result.append((first_chromosome_index, second_chromosome_index, crossover_pos.tolist()))
+
+      if len(crossover_result) == 0:
+          print('couldnt finding crossover locs because of others')
+
       return crossover_result
 
   def _crossover_simple(self, *args, **kwargs):
@@ -121,13 +134,15 @@ class EvolutionCrossover(CrossOver):
                max_generation,
                k0,
                k1,
-               method='simple'):
+               method='simple',
+               size=0):
     super(EvolutionCrossover, self).__init__(method,
                                              multi_points,
                                              adaptive=True,
                                              max_generation=max_generation,
                                              k0=k0,
-                                             k1=k1)
+                                             k1=k1,
+                                             size=size)
 
   def population_crossover(self, *args, **kwargs):
     population = kwargs['population']
@@ -143,12 +158,13 @@ class EvolutionCrossover(CrossOver):
     crossover_individuals = self.adaptive_crossover(fitness_values=fitness_values)
 
     # cross gene infomation
+    crossover_population = Population()
     for crossover_suggestion in crossover_individuals:
         first_individual_index, second_individual_index, crossover_region = crossover_suggestion
+        individual_clone = copy.deepcopy(population.population[first_individual_index])
 
         for loc in crossover_region:
-            ss = population.population[first_individual_index].features[loc]
-            population.population[first_individual_index].features[loc] = population.population[second_individual_index].features[loc]
-            population.population[second_individual_index].features[loc] = ss
+            individual_clone.features[loc] = population.population[second_individual_index].features[loc]
+        crossover_population.population.append(individual_clone)
 
-    return population
+    return crossover_population

@@ -120,13 +120,6 @@ class NasModel(object):
 
         return 100 * total_correct.float().item() / total
 
-    def save(self, path):
-        # 1.step save model
-        torch.save(self.supernetwork.state_dict(), '%s.model'%path)
-
-        # 2.step save architecture
-        self.supernetwork.save_architecture(path)
-
     @property
     def model(self):
         return self._model

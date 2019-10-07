@@ -61,5 +61,5 @@ class SegmentationAccuracyEvaluator(AccuracyEvaluator):
             # bs_score = bs_score + scores
             bs_score.append(scores)
 
-        bs_score = torch.Tensor(bs_score, device=preditions.device)
+        bs_score = torch.as_tensor(bs_score, device=preditions.device)
         return bs_score

@@ -133,7 +133,7 @@ class SuperNetwork(nn.Module):
     def architecture_node_index(self):
         return self.path_recorder.node_index
 
-    def save_architecture(self, path=None):
+    def save_architecture(self, folder=None, name=None):
         pass
 
     def get_path_recorder(self):

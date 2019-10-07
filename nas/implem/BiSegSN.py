@@ -20,6 +20,7 @@ from nas.utils.drawers.BSNDrawer import BSNDrawer
 from nas.implem.Loss import *
 from nas.implem.SegmentationAccuracyEvaluator import *
 from nas.interfaces.AdvancedNetworkBlock import *
+from nas.networks.EvolutionSuperNetwork import *
 
 __all__ = ['BiSegSN']
 
@@ -53,7 +54,7 @@ class SegOutLayer(NetworkBlock):
         return [0] + [0] * (self.state_num - 1)
 
 
-class BiSegSN(StochasticSuperNetwork):
+class BiSegSN(EvolutionSuperNetwork):
     _INPUT_NODE_FORMAT = 'I_{}_{}'              # 不可学习
     _OUTPUT_NODE_FORMAT = 'O_{}_{}'             # 不可学习
     _AGGREGATION_NODE_FORMAT = 'A_{}_{}'        # 不可学习

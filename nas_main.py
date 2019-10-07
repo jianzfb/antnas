@@ -64,8 +64,6 @@ def argument_parser():
     parser.add_argument('-latency', action='store', default='./latency.gpu.855.lookuptable.json',type=str,
                         help='latency lookup table')
 
-    parser.add_argument('-lp', action='store', default=-1, type=int,
-                        help='Number of iterations between two logging messages')
     parser.add_argument('-draw_env', default='test', type=str, help='Visdom drawing environment')
 
     parser.add_argument('-regularizer', action='store', default=0, type=int, help='architecture regularizer')
@@ -98,9 +96,7 @@ def main(args, plotter):
 
     # 获得数据集
     train_loader, val_loader, test_loader, data_properties = get_data(args['dset'], args['bs'], args['path'], args)
-
-    if args['lp'] == -1:
-        args['lp'] = len(train_loader)
+    lp = len(train_loader)
 
     # 创建NAS模型
     nas_model = NasModel(args, data_properties)
@@ -223,7 +219,7 @@ def main(args, plotter):
             for metric in xp.train.metrics():
                 metric.log()
 
-            if (i + 1) % args['lp'] == 0:
+            if (i + 1) % lp == 0:
                 logger.info('\nEvaluation')
 
                 progress = epoch + (i + 1) / len(train_loader)
@@ -252,8 +248,9 @@ def main(args, plotter):
             plotter.update_plots()
 
         # save model state
-        nas_model.supernetwork.plot('./')
-        nas_model.save('./nas_%d'%(epoch%args['latest_num']))
+        nas_model.supernetwork.plot('./sn/')
+        nas_model.supernetwork.save_architecture('./sn/',
+                                                 'nas_%d'%(epoch%args['latest_num']))
 
 
 if __name__ == '__main__':
