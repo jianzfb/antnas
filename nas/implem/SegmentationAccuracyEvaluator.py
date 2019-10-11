@@ -39,7 +39,6 @@ class SegmentationAccuracyEvaluator(AccuracyEvaluator):
             gt = labels_one_hot[index].float()
 
             scores = 0.0
-            scores_count = 0
             for c in range(self.class_num):
                 if c == 0:
                     continue
@@ -53,12 +52,8 @@ class SegmentationAccuracyEvaluator(AccuracyEvaluator):
                 intersection = torch.sum(pr_c * gt_c)
                 union = torch.sum(gt_c) + torch.sum(pr_c) - intersection + eps
                 scores += (intersection + eps) / union
-                scores_count += 1
 
-            if scores_count > 0:
-                scores = scores / scores_count
-
-            # bs_score = bs_score + scores
+            scores = scores / self.class_num
             bs_score.append(scores)
 
         bs_score = torch.as_tensor(bs_score, device=preditions.device)

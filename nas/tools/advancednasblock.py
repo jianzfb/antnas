@@ -5,7 +5,7 @@
 from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
-from nas.tools.nasblock import *
+from nasblock import *
 import tensorflow as tf
 slim = tf.contrib.slim
 
@@ -15,7 +15,7 @@ class ASPPBlock(NasBlock):
         super(ASPPBlock, self).__init__()
 
     def __call__(self, inputs, in_chan, depth, atrous_rates, scope):
-        with tf.variable_scope('ASPP_%s' % scope, 'ASPP', [inputs]):
+        with tf.variable_scope(scope, 'ASPP', [inputs]):
             input_shape = inputs.get_shape().as_list()
 
             part_list = []
@@ -54,7 +54,7 @@ class ASPPBlock(NasBlock):
                 part_list.append(part_i)
 
             # concat all parts
-            part = tf.concat(part_list, 3)
+            part = tf.concat(part_list, axis=3)
             res = slim.conv2d(part,
                               num_outputs=depth,
                               kernel_size=1,
@@ -69,7 +69,7 @@ class FocusBlock(NasBlock):
         super(FocusBlock, self).__init__()
 
     def __call__(self, inputs, in_chan, out_chan, scope):
-        with tf.variable_scope('Focus_%s' % scope, 'Focus', [inputs]):
+        with tf.variable_scope(scope, 'Focus', [inputs]):
             sep_conv1 = slim.separable_conv2d(inputs,
                                               num_outputs=out_chan,
                                               kernel_size=3,
@@ -103,31 +103,31 @@ class GCN(NasBlock):
     def __init__(self):
         super(GCN, self).__init__()
 
-    def __call__(self, inputs, out_chan, k_size, bias, scope):
-        with tf.variable_scope('GCN_%s' % scope, 'GCN', [inputs]):
-            left_conv1 = slim.conv2d(inputs,
-                                 num_outputs=out_chan,
-                                 kernel_size=[k_size, 1],
-                                 stride=1,
-                                 activation_fn=None,
-                                 normalizer_fn=None,
-                                 padding='SAME')
-            left_conv2 = slim.conv2d(left_conv1,
+    def __call__(self, inputs, out_chan,k_size,bias,boundary_refinement, scope):
+        with tf.variable_scope(scope, 'GCN', [inputs]):
+            left_x = slim.conv2d(inputs,
+                            num_outputs=out_chan,
+                            kernel_size=[k_size, 1],
+                            stride=1,
+                            activation_fn=None,
+                            normalizer_fn=None,
+                            padding='SAME')
+            left_x = slim.conv2d(left_x,
+                            num_outputs=out_chan,
+                            kernel_size=[1, k_size],
+                            stride=1,
+                            activation_fn=None,
+                            normalizer_fn=None,
+                            padding='SAME')
+
+            right_x = slim.conv2d(inputs,
                                  num_outputs=out_chan,
                                  kernel_size=[1, k_size],
                                  stride=1,
                                  activation_fn=None,
                                  normalizer_fn=None,
                                  padding='SAME')
-
-            right_conv1 = slim.conv2d(inputs,
-                                 num_outputs=out_chan,
-                                 kernel_size=[1, k_size],
-                                 stride=1,
-                                 activation_fn=None,
-                                 normalizer_fn=None,
-                                 padding='SAME')
-            right_conv2 = slim.conv2d(right_conv1,
+            right_x = slim.conv2d(right_x,
                                  num_outputs=out_chan,
                                  kernel_size=[k_size, 1],
                                  stride=1,
@@ -135,51 +135,45 @@ class GCN(NasBlock):
                                  normalizer_fn=None,
                                  padding='SAME')
 
-            x = left_conv2 + right_conv2
+            x = left_x + right_x
 
-            x_res = slim.conv2d(x,
-                                 num_outputs=out_chan,
-                                 kernel_size=[3,3],
-                                 stride=1,
-                                 activation_fn=tf.nn.relu6,
-                                 normalizer_fn=None,
-                                 padding='SAME')
-            x_res = slim.conv2d(x_res,
-                                num_outputs=out_chan,
-                                kernel_size=[3, 3],
-                                stride=1,
-                                activation_fn=None,
-                                normalizer_fn=None,
-                                padding='SAME'
-                                )
+            br_x = slim.conv2d(x,
+                               num_outputs=out_chan,
+                               kernel_size=3,
+                               stride=1,
+                               activation_fn=tf.nn.relu6,
+                               normalizer_fn=None,
+                               padding='SAME')
 
-            x_res = x_res + x
-            return x_res
+            br_x = slim.conv2d(br_x,
+                               num_outputs=out_chan,
+                               kernel_size=3,
+                               stride=1,
+                               activation_fn=None,
+                               normalizer_fn=None,
+                               padding='SAME')
+
+            return tf.add(x, br_x)
 
 
 class BoundaryRefinement(NasBlock):
     def __init__(self):
         super(BoundaryRefinement, self).__init__()
 
-    def __call__(self, inputs, out_chan, scope):
-        with tf.variable_scope('BoundaryRefinement_%s' % scope, 'BoundaryRefinement', [inputs]):
-            x_res = slim.conv2d(inputs,
-                                 num_outputs=out_chan,
-                                 kernel_size=[3,3],
-                                 stride=1,
-                                 activation_fn=tf.nn.relu6,
-                                 normalizer_fn=None,
-                                 padding='SAME')
-            x_res = slim.conv2d(x_res,
-                                num_outputs=out_chan,
-                                kernel_size=[3, 3],
-                                stride=1,
-                                activation_fn=None,
-                                normalizer_fn=None,
-                                padding='SAME'
-                                )
-
-            x_res = x_res + inputs
-            return x_res
-
-
+    def __call__(self, inputs, out_chan,scope):
+        with tf.variable_scope(scope, 'BR', [inputs]):
+            br_x = slim.conv2d(inputs,
+                               num_outputs=out_chan,
+                               kernel_size=3,
+                               stride=1,
+                               activation_fn=tf.nn.relu6,
+                               normalizer_fn=None,
+                               padding='SAME')
+            br_x = slim.conv2d(br_x,
+                               num_outputs=out_chan,
+                               kernel_size=3,
+                               stride=1,
+                               activation_fn=None,
+                               normalizer_fn=None,
+                               padding='SAME')
+            return tf.add(br_x, inputs)

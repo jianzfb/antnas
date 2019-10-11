@@ -87,13 +87,13 @@ class EvolutionSuperNetwork(SuperNetwork):
         assert(self.epoch_num_every_generation > 2)
 
         # build nsga2 evolution algorithm
-        mutation_control = EvolutionMutation(multi_points=20,
+        mutation_control = EvolutionMutation(multi_points=-1,
                                              max_generation=self.max_generation,
                                              k0=1.0,
                                              k1=0.8,
                                              method='based_matrices',
                                              adaptive=True)
-        crossover_control = EvolutionCrossover(multi_points=-1,
+        crossover_control = EvolutionCrossover(multi_points=5,
                                                max_generation=self.max_generation,
                                                k0=1.0,
                                                k1=0.8,
@@ -304,6 +304,7 @@ class EvolutionSuperNetwork(SuperNetwork):
             candidate_elite_population.population = copy.deepcopy(self.current_population.pareto_front)
 
             # 交叉
+            print('crossover process')
             candidate_elite_population = \
                 self.evolution_control.crossover_controler.population_crossover(
                     population=candidate_elite_population,
@@ -311,6 +312,7 @@ class EvolutionSuperNetwork(SuperNetwork):
                     blocks=self.blocks)
 
             # 变异
+            print('mutation process')
             candidate_elite_population = \
                 self.evolution_control.mutation_controler.population_mutate(
                     population=candidate_elite_population,

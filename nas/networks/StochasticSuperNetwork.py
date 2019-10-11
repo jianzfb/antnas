@@ -15,7 +15,7 @@ from nas.interfaces.PathRecorder import PathRecorder
 import copy
 import networkx as nx
 import threading
-
+import pickle
 
 class StochasticSuperNetwork(SuperNetwork):
     INIT_NODE_PARAM = 3
@@ -36,8 +36,13 @@ class StochasticSuperNetwork(SuperNetwork):
         :param out: Tensor on which the sampling will be applied
         :return: A Variable brodcastable to out's size, with all dimensions equals to one except the first one (batch)
         """
-
         sampling_dim = [batch_size] + [1] * 3
+
+        if self.use_preload_architecture:
+            val = self.net.node[node_name]['sampled']
+            node_sampling = torch.Tensor().resize_(*sampling_dim).fill_(val)
+            node_sampling = Variable(node_sampling, requires_grad=False)
+            return node_sampling
 
         static_sampling = self._get_node_static_sampling(node_name)
         if static_sampling is not None:
@@ -66,8 +71,10 @@ class StochasticSuperNetwork(SuperNetwork):
 
         if not self.training and self.deter_eval:
             # Model is in deterministic evaluation mode
-            if not isinstance(node['sampling_param'], int):
-                return (F.sigmoid(self.sampling_parameters[node['sampling_param']]) > 0.5).item()
+            sampling_distribution = torch.nn.Softmax2d()(self.sampling_parameters[node['sampling_param']].view(1, NetworkBlock.state_num,1,1))
+            sampling_distribution = torch.squeeze(sampling_distribution)
+            preditions_argmax = sampling_distribution.argmax(0)
+            return preditions_argmax
 
         return None
 
@@ -285,6 +292,138 @@ class StochasticSuperNetwork(SuperNetwork):
         # 2.3.step save architecture
         architecture_path = '%s.architecture'%path
         nx.write_gpickle(self.net, architecture_path)
+
+        # 2.4.step save model weight
+        def _extract_params_func(layer, prefix, sub_prefix, conv_count, depthconv_count, is_conv2d):
+            has_childre_num = 0
+            for _ in layer.children():
+                has_childre_num += 1
+
+            param_dict = {}
+            if has_childre_num > 0:
+                for sub_layer in layer.children():
+                    local_param, prefix, conv_count, depthconv_count, is_conv2d = _extract_params_func(sub_layer, prefix, layer._get_name(), conv_count, depthconv_count, is_conv2d)
+                    param_dict.update(local_param)
+            else:
+                if isinstance(layer, torch.nn.modules.conv.Conv2d):
+                    if layer.groups > 1:
+                        # depthwise conv
+                        param_dict['%s/%s/SeparableConv2d%s/depthwise_weights' % (self.__class__.__name__,
+                                                             prefix,
+                                                             '_%d'%depthconv_count if depthconv_count > 0 else '')] = layer.weight.cpu().data.numpy().transpose(2, 3, 0, 1)
+
+                        print('%s/%s/SeparableConv2d%s/depthwise_weights' % (self.__class__.__name__,
+                                                             prefix,
+                                                             '_%d'%depthconv_count if depthconv_count > 0 else ''))
+                        print(param_dict['%s/%s/SeparableConv2d%s/depthwise_weights' % (self.__class__.__name__,
+                                                             prefix,
+                                                             '_%d'%depthconv_count if depthconv_count > 0 else '')].shape)
+
+                        if layer.bias is not None:
+                            param_dict['%s/%s/SeparableConv2d%s/biases' % (
+                                self.__class__.__name__, prefix, '_%d'%depthconv_count if depthconv_count > 0 else '')] = layer.bias.cpu().data.numpy()
+
+                        is_conv2d = False
+                        depthconv_count += 1
+                    else:
+                        if sub_prefix.startswith('SepConvBN'):
+                            # pointwise conv
+                            depthconv_count = depthconv_count - 1
+                            param_dict['%s/%s/SeparableConv2d%s/pointwise_weights' % (self.__class__.__name__,
+                                                                                      prefix,
+                                                                                      '_%d' % depthconv_count if depthconv_count > 0 else '')] = layer.weight.cpu().data.numpy().transpose(
+                                2, 3, 1, 0)
+
+                            print('%s/%s/SeparableConv2d%s/pointwise_weights' % (self.__class__.__name__,
+                                                                                 prefix,
+                                                                                 '_%d' % depthconv_count if depthconv_count > 0 else ''))
+                            print(param_dict['%s/%s/SeparableConv2d%s/pointwise_weights' % (self.__class__.__name__,
+                                                                                            prefix,
+                                                                                            '_%d' % depthconv_count if depthconv_count > 0 else '')].shape)
+                            is_conv2d = False
+                            depthconv_count = depthconv_count + 1
+                        else:
+                            # conv
+                            param_dict['%s/%s/Conv%s/weights' % (self.__class__.__name__,
+                                                                 prefix,
+                                                                 '_%d'%conv_count if conv_count > 0 else '')] = layer.weight.cpu().data.numpy().transpose(2, 3, 1, 0)
+
+                            print('%s/%s/Conv%s/weights' % (self.__class__.__name__,
+                                                                 prefix,
+                                                                 '_%d'%conv_count if conv_count > 0 else ''))
+                            print(param_dict['%s/%s/Conv%s/weights' % (self.__class__.__name__,
+                                                                 prefix,
+                                                                 '_%d'%conv_count if conv_count > 0 else '')].shape)
+                            if layer.bias is not None:
+                                param_dict['%s/%s/Conv%s/biases' % (
+                                    self.__class__.__name__, prefix, '_%d'%conv_count if conv_count > 0 else '')] = layer.bias.cpu().data.numpy()
+
+                            is_conv2d = True
+                            conv_count += 1
+                elif isinstance(layer, torch.nn.modules.batchnorm.BatchNorm2d):
+                    if is_conv2d:
+                        conv_count = conv_count - 1
+                        param_dict['%s/%s/Conv%s/BatchNorm/moving_mean' % (self.__class__.__name__,
+                                                                           prefix,
+                                                                           '_%d'%conv_count if conv_count > 0 else '')] = layer.running_mean.cpu().numpy()
+                        param_dict['%s/%s/Conv%s/BatchNorm/moving_variance' % (self.__class__.__name__,
+                                                                               prefix,
+                                                                               '_%d'%conv_count if conv_count > 0 else '')] = layer.running_var.cpu().numpy()
+                        param_dict['%s/%s/Conv%s/BatchNorm/gamma' % (self.__class__.__name__,
+                                                                     prefix,
+                                                                     '_%d'%conv_count if conv_count > 0 else '')] = layer.weight.cpu().data.numpy()
+                        param_dict['%s/%s/Conv%s/BatchNorm/beta' % (self.__class__.__name__,
+                                                                    prefix,
+                                                                    '_%d'%conv_count if conv_count > 0 else '')] = layer.bias.cpu().data.numpy()
+                        conv_count = conv_count + 1
+                    else:
+                        depthconv_count = depthconv_count - 1
+                        param_dict['%s/%s/SeparableConv2d%s/BatchNorm/moving_mean' % (self.__class__.__name__,
+                                                                           prefix,
+                                                                           '_%d'%depthconv_count if depthconv_count > 0 else '')] = layer.running_mean.cpu().numpy()
+                        param_dict['%s/%s/SeparableConv2d%s/BatchNorm/moving_variance' % (self.__class__.__name__,
+                                                                               prefix,
+                                                                               '_%d'%depthconv_count if depthconv_count > 0 else '')] = layer.running_var.cpu().numpy()
+                        param_dict['%s/%s/SeparableConv2d%s/BatchNorm/gamma' % (self.__class__.__name__,
+                                                                     prefix,
+                                                                     '_%d'%depthconv_count if depthconv_count > 0 else '')] = layer.weight.cpu().data.numpy()
+                        param_dict['%s/%s/SeparableConv2d%s/BatchNorm/beta' % (self.__class__.__name__,
+                                                                    prefix,
+                                                                    '_%d'%depthconv_count if depthconv_count > 0 else '')] = layer.bias.cpu().data.numpy()
+
+                        depthconv_count = depthconv_count + 1
+                else:
+                    print('why im here')
+                    print(layer)
+
+            return param_dict, prefix, conv_count, depthconv_count, is_conv2d
+
+        param_dict = {}
+        for node_index, node_name in enumerate(self.traversal_order):
+            node = self.net.node[node_name]
+            node_params = self.blocks[node['module']].params
+            node_sampled = node['sampled']
+            prefix = ''
+            if len(node_params['module_list']) == 1:
+                prefix = '%s_%s'%(node_params['name_list'][0], str(node_index))
+            else:
+                prefix = '%s_%s'%(node_params['name_list'][node_sampled], str(node_index))
+
+            if prefix.startswith('GCN'):
+                print(node_name)
+
+            models_sampled = []
+            if len(node_params['module_list']) == 1:
+                models_sampled = self.blocks[self.net.node[node_name]['module']]
+            else:
+                models_sampled = self.blocks[self.net.node[node_name]['module']].op_list[node_sampled]
+
+            mm, _, _, _, _ = _extract_params_func(models_sampled, prefix, '', 0, 0, False)
+            param_dict.update(mm)
+
+        f = open('%s.weight'%path, "wb")
+        pickle.dump(param_dict, f)
+        f.close()
 
     def sampling_param_generator(self, node_name):
         if not (node_name.startswith('CELL') or node_name.startswith('T')):

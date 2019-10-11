@@ -104,7 +104,17 @@ class GCN(NetworkBlock):
                                      stride=1,
                                      padding=[k_size//2, 0],
                                      bias=True)
-        self.br = BoundaryRefinement(out_chan, out_chan)
+
+        self.conv1 = nn.Conv2d(out_chan,
+                               out_chan,
+                               kernel_size=3,
+                               padding=1,
+                               bias=True)
+        self.conv2 = nn.Conv2d(out_chan,
+                               out_chan,
+                               kernel_size=3,
+                               padding=1,
+                               bias=True)
 
         self.in_chan = in_chan
         self.out_chan = out_chan
@@ -119,8 +129,11 @@ class GCN(NetworkBlock):
         right_x2 = self.right_conv2(right_x1)
         x = left_x2 + right_x2
 
-        if self.boundary_refinement:
-            x = self.br(x)
+        x_res = self.conv1(x)
+        x_res = F.relu6(x_res)
+        x_res = self.conv2(x_res)
+
+        x = x + x_res
 
         if self.get_sampling() is None:
             return x
@@ -138,8 +151,8 @@ class GCN(NetworkBlock):
         flops_5 = conv_out_data_size.numel() / conv_out_data_size[0]
 
         flops_6 = 0.0
-        if self.boundary_refinement:
-            flops_6 = self.br.get_flop_cost(torch.zeros(1, self.out_chan, x.shape[2], x.shape[3]))[1]
+        # if self.boundary_refinement:
+        #     flops_6 = self.br.get_flop_cost(torch.zeros(1, self.out_chan, x.shape[2], x.shape[3]))[1]
 
         flop_cost = flops_1+flops_2+flops_3+flops_4+flops_5+flops_6
         return [0] + [flop_cost] + [0]*(self.state_num - 2)
@@ -151,10 +164,9 @@ class BoundaryRefinement(NetworkBlock):
 
     def __init__(self, in_chan, out_chan):
         super(BoundaryRefinement, self).__init__()
-        self.bn1 = nn.BatchNorm2d(in_chan)
-        self.conv1 = nn.Conv2d(in_chan, out_chan, kernel_size=3, padding=1, bias=True)
-        self.bn2 = nn.BatchNorm2d(out_chan)
+        self.conv1 = nn.Conv2d(out_chan, out_chan, kernel_size=3, padding=1, bias=True)
         self.conv2 = nn.Conv2d(out_chan, out_chan, kernel_size=3, padding=1, bias=True)
+
         self.params = {
             'module_list': ['BoundaryRefinement'],
             'name_list': ['BoundaryRefinement'],
@@ -165,12 +177,10 @@ class BoundaryRefinement(NetworkBlock):
         self.switch = True
 
     def forward(self, x):
-        x_res = self.bn1(x)
-        x_res = F.relu6(x_res)
-        x_res = self.conv1(x_res)
-        x_res = self.bn2(x_res)
+        x_res = self.conv1(x)
         x_res = F.relu6(x_res)
         x_res = self.conv2(x_res)
+
         x = x + x_res
         if self.get_sampling() is None:
             return x
@@ -198,11 +208,11 @@ class ASPPBlock(NetworkBlock):
         self.atrous_rates = atrous_rates
         self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
         # 1.step
-        self.conv_1_step = nn.Conv2d(in_chan, depth, kernel_size=1)
+        self.conv_1_step = nn.Conv2d(in_chan, depth, kernel_size=1, bias=False)
         self.bn1 = nn.BatchNorm2d(depth)
 
         # 2.step
-        self.conv_2_step = nn.Conv2d(in_chan, depth, kernel_size=1)
+        self.conv_2_step = nn.Conv2d(in_chan, depth, kernel_size=1, bias=False)
         self.bn2 = nn.BatchNorm2d(depth)
 
         # 3.step
@@ -211,7 +221,7 @@ class ASPPBlock(NetworkBlock):
             self.atrous_conv_list.append(SepConvBN(in_chan, depth, relu=True, k_size=3, dilation=rate))
 
         # 5.step
-        self.conv_5_step = nn.Conv2d((len(self.atrous_rates)+2)*depth, depth, kernel_size=1)
+        self.conv_5_step = nn.Conv2d((len(self.atrous_rates)+2)*depth, depth, kernel_size=1, bias=False)
         self.bn5 = nn.BatchNorm2d(depth)
 
         self.params = {

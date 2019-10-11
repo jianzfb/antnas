@@ -51,6 +51,8 @@ class SuperNetwork(nn.Module):
 
         self._epoch = 0
 
+        self.use_preload_architecture = False
+
     def set_graph(self, network, in_node, out_node):
         self.net = network
         if not nx.is_directed_acyclic_graph(self.net):
@@ -163,3 +165,12 @@ class SuperNetwork(nn.Module):
 
     def plot(self, path=None):
         pass
+
+    def load_static_architecture(self, architecture_path):
+        graph = nx.read_gpickle(architecture_path)
+        travel = list(nx.topological_sort(graph))
+
+        for node_index, node_name in enumerate(travel):
+            self.net.node[node_name]['sampled'] = graph.node[node_name]['sampled']
+
+        self.use_preload_architecture = True
