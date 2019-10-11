@@ -198,9 +198,6 @@ def main(args, plotter):
             # train and return predictions, loss, correct
             loss, model_accuracy, model_sampled_cost, model_pruned_cost = nas_model.train(x, y)
 
-            nas_model.supernetwork.save_architecture('./sn/',
-                                                     'nas_%d' % (epoch % args['latest_num']))
-
             model_sampled_cost = model_sampled_cost.mean()
             model_pruned_cost = model_pruned_cost.mean()
 
