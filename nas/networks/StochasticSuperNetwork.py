@@ -17,6 +17,7 @@ import networkx as nx
 import threading
 import pickle
 
+
 class StochasticSuperNetwork(SuperNetwork):
     INIT_NODE_PARAM = 3
 
@@ -434,6 +435,8 @@ class StochasticSuperNetwork(SuperNetwork):
             param_value = [0] + [np.log(0.9526 * (CellBlock.state_num - 1) / 0.0474)] + [0] * (CellBlock.state_num - 2)
             trainable = True
 
+        # param_value = [0] + [1000000000000000] + [0] * (CellBlock.state_num - 2)
+        # trainable = False
         return nn.Parameter(torch.Tensor(param_value), requires_grad=trainable)
 
     def plot(self, path=None):

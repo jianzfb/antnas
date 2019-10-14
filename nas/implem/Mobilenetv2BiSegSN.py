@@ -9,7 +9,7 @@ from __future__ import print_function
 from nas.interfaces.NetworkBlock import *
 from nas.interfaces.NetworkCell import *
 from nas.networks.StochasticSuperNetwork import StochasticSuperNetwork
-from nas.networks.EvolutionSuperNetwork import EvolutionSuperNetwork
+
 import networkx as nx
 import numpy as np
 import torch.nn.functional as F
@@ -21,7 +21,7 @@ from nas.implem.Loss import *
 from nas.implem.SegmentationAccuracyEvaluator import *
 from nas.interfaces.AdvancedNetworkBlock import *
 
-__all__ = ['BiSegSN']
+__all__ = ['Mobilenetv2BiSegSN']
 
 
 class SegOutLayer(NetworkBlock):
@@ -42,14 +42,10 @@ class SegOutLayer(NetworkBlock):
         }
 
     def forward(self, input):
-        # resized to original size
-        resized_input = F.upsample(input, scale_factor=2.0, mode='bilinear')
-
-        # conv
-        x = self.conv_1(resized_input)
+        x = self.conv_1(input)
         x = F.relu6(x)
         x = self.conv_2(x)
-        y = self.conv_3(resized_input)
+        y = self.conv_3(input)
         x = x + y
         return x
 
@@ -57,7 +53,7 @@ class SegOutLayer(NetworkBlock):
         return [0] + [0] * (self.state_num - 1)
 
 
-class BiSegSN(EvolutionSuperNetwork):
+class Mobilenetv2BiSegSN(StochasticSuperNetwork):
     _INPUT_NODE_FORMAT = 'I_{}_{}'              # 不可学习
     _OUTPUT_NODE_FORMAT = 'O_{}_{}'             # 不可学习
     _AGGREGATION_NODE_FORMAT = 'A_{}_{}'        # 不可学习
@@ -72,8 +68,8 @@ class BiSegSN(EvolutionSuperNetwork):
                  channels_per_block,
                  data_prop,
                  static_proba, *args, **kwargs):
-        super(BiSegSN, self).__init__(*args, **kwargs)
-        NetworkBlock.state_num = 5
+        super(Mobilenetv2BiSegSN, self).__init__(*args, **kwargs)
+        NetworkBlock.state_num = 2
         self.in_chan = data_prop['in_channels']
         self.in_size = data_prop['img_dim']
         self.out_dim = data_prop['out_size'][0]
@@ -351,3 +347,9 @@ class BiSegSN(EvolutionSuperNetwork):
 
     def accuray(self, predictions, labels):
         return self._accuracy_evaluator.accuracy(predictions, labels)
+
+    def sampling_param_generator(self, node_name):
+        # 不可学习，处于永远激活状态
+        param_value = [0] + [1000000000000000] + [0] * (CellBlock.state_num - 2)
+        trainable = False
+        return nn.Parameter(torch.Tensor(param_value), requires_grad=trainable)

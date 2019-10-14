@@ -584,18 +584,18 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
         # for se
         if se:
             self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
-            self.dense_layer_1 = nn.Conv2d(in_chan * expansion,
-                                           (in_chan * expansion) // ratio,
-                                           kernel_size=1,
-                                           bias=True,
-                                           stride=1,
-                                           padding=0)
-            self.dense_layer_2 = nn.Conv2d((in_chan * expansion)//ratio,
-                                           in_chan * expansion,
-                                           kernel_size=1,
-                                           bias=True,
-                                           stride=1,
-                                           padding=0)
+            self.se_conv_layer_1 = nn.Conv2d(in_chan * expansion,
+                                             (in_chan * expansion) // ratio,
+                                             kernel_size=1,
+                                             bias=True,
+                                             stride=1,
+                                             padding=0)
+            self.se_conv_layer_2 = nn.Conv2d((in_chan * expansion) // ratio,
+                                             in_chan * expansion,
+                                             kernel_size=1,
+                                             bias=True,
+                                             stride=1,
+                                             padding=0)
 
         self.conv3 = nn.Conv2d(in_chan * expansion,
                                out_chan,
@@ -619,7 +619,7 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
         x = self.conv1(x)
         x = self.bn1(x)
         if self.hs:
-            x = x * (F.relu6(x+3.0) / 6.0)
+            x = x * (F.relu6(x + 3.0) / 6.0)
         else:
             x = F.relu6(x)
 
@@ -628,13 +628,10 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
 
         if self.se:
             se_x = self.global_pool(x)
-            se_x = self.dense_layer_1(se_x)
+            se_x = self.se_conv_layer_1(se_x)
             se_x = F.relu6(se_x)
-            se_x = self.dense_layer_2(se_x)
-
-            se_x = (0.2 * se_x) + 0.5
-            se_x = F.threshold(-se_x, -1, -1)
-            se_x = F.threshold(-se_x, 0, 0)
+            se_x = self.se_conv_layer_2(se_x)
+            se_x = F.relu6(se_x + 3.0) / 6.0
             x = torch.mul(se_x, x)
 
         if self.hs:
@@ -684,17 +681,18 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
         flops_8 = self.get_bn_flops(self.bn3, step_3_out_size, step_3_out_size)
 
         flops_se = 0.0
-        # if self.se:
-        #     step_2_1_size = torch.Size([1, self.in_chan*self.expansion])
-        #     step_2_2_size = torch.Size([1, (self.in_chan * self.expansion)//self.ratio])
-        #     step_2_3_size = torch.Size([1, self.in_chan * self.expansion])
-        #     flops_se_1 = self.get_avgglobalpool_flops(self.global_pool, step_2_out_size, step_2_1_size)
-        #     flops_se_2 = self.get_linear_flops(self.dense_layer_1, step_2_1_size, step_2_2_size)
-        #     flops_se_3 = self.get_relu_flops(F.relu6, step_2_2_size, step_2_2_size)
-        #     flops_se_4 = self.get_linear_flops(self.dense_layer_2, step_2_2_size, step_2_3_size)
-        #     flops_se_5 = 1 * step_2_3_size[1] * 2
-        #     flops_se_6 = 1 * step_2_out_size[1] * step_2_out_size[2] * step_2_out_size[3]
-        #     flops_se = flops_se_1 + flops_se_2 + flops_se_3 + flops_se_4 + flops_se_5 + flops_se_6
+        if self.se:
+            step_2_1_size = torch.Size([1, 1, 1, self.in_chan*self.expansion])
+            step_2_2_size = torch.Size([1, 1, 1, (self.in_chan * self.expansion)//self.ratio])
+            step_2_3_size = torch.Size([1, 1, 1, self.in_chan * self.expansion])
+            flops_se_1 = self.get_avgglobalpool_flops(self.global_pool, step_2_out_size, step_2_1_size)
+            flops_se_2 = self.get_conv2d_flops(self.se_conv_layer_1, step_2_out_size, step_2_1_size)
+            flops_se_3 = self.get_relu_flops(F.relu6, step_2_2_size, step_2_2_size)
+            flops_se_4 = self.get_conv2d_flops(self.se_conv_layer_2, step_2_2_size, step_2_3_size)
+
+            flops_se_5 = 1 * step_2_3_size[1] * 2
+            flops_se_6 = 1 * step_2_out_size[1] * step_2_out_size[2] * step_2_out_size[3]
+            flops_se = flops_se_1 + flops_se_2 + flops_se_3 + flops_se_4 + flops_se_5 + flops_se_6
 
         flops_9 = 0
         if self.skip and self.in_chan == self.out_chan and (not self.reduction):

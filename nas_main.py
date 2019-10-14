@@ -29,7 +29,7 @@ def argument_parser():
     # Experience
     parser.add_argument('-exp-name', action='store', default='', type=str, help='Experience Name')
     # Model
-    parser.add_argument('-arch', action='store', default='SegLargeKernelSN', type=str)
+    parser.add_argument('-arch', action='store', default='BiSegSN', type=str)
     parser.add_argument('-deter_eval', action='store', default=False, type=bool,
                         help='Take blocks with probas >0.5 instead of sampling during evaluation')
 
@@ -117,9 +117,14 @@ def main(args, plotter):
     #                 channels_per_block=[[16], [24], [40], [80, 112], [160]])
 
     # BiSegSN
-    nas_model.build(blocks_per_stage=[1, 1, 1, 2],
-                    cells_per_block=[[2], [3], [4], [4, 4]],
-                    channels_per_block=[[32], [48], [64], [112, 160]])
+    nas_model.build(blocks_per_stage=[1, 1, 1, 3],
+                    cells_per_block=[[1], [3], [3], [3, 3, 2]],
+                    channels_per_block=[[32], [48], [64], [96, 160, 320]])
+
+    # # Mobilenetv2BiSegSN
+    # nas_model.build(blocks_per_stage=[1, 1, 1, 3],
+    #                 cells_per_block=[[2], [3], [3], [3, 3, 2]],
+    #                 channels_per_block=[[32], [48], [64], [96, 160, 320]])
 
     # # TFSN
     # nas_model.build(blocks_per_stage=[1, 1, 1, 2, 2],

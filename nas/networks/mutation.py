@@ -154,9 +154,9 @@ class EvolutionMutation(Mutation):
 
     fitness_values = []
     for individual_index, individual in enumerate(population.population):
-      fitness_values.append((individual_index,
-                             individual.objectives[0],
-                             individual.features,
+      fitness_values.append((individual_index,                      # index
+                             1.0-individual.objectives[0],          # accuracy
+                             individual.features,                   # feature
                              None))
 
     mutation_individuals = self.adaptive_mutate(fitness_values=fitness_values)
@@ -172,8 +172,8 @@ class EvolutionMutation(Mutation):
             node = graph.node[node_name]
 
             if node_name.startswith("CELL") or node_name.startswith('T'):
-                mutated_val = 0
                 if blocks[node['module']].switch:
+                    mutated_val = 0
                     before_val = population.population[individual_index].features[pos]
                     if before_val == 0:
                         mutated_val = 1

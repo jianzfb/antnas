@@ -149,9 +149,9 @@ class EvolutionCrossover(CrossOver):
 
     fitness_values = []
     for individual_index, individual in enumerate(population.population):
-      fitness_values.append((individual_index,            # index
-                             individual.objectives[0],    # accuracy
-                             individual.features,         # feature
+      fitness_values.append((individual_index,                  # index
+                             1.0-individual.objectives[0],      # accuracy
+                             individual.features,               # feature
                              None))
 
     # finding crossover region
@@ -161,10 +161,20 @@ class EvolutionCrossover(CrossOver):
     crossover_population = Population()
     for crossover_suggestion in crossover_individuals:
         first_individual_index, second_individual_index, crossover_region = crossover_suggestion
-        individual_clone = copy.deepcopy(population.population[first_individual_index])
+
+        first_individual_clone = copy.deepcopy(population.population[first_individual_index])
+        second_individual_clone = copy.deepcopy(population.population[second_individual_index])
 
         for loc in crossover_region:
-            individual_clone.features[loc] = population.population[second_individual_index].features[loc]
-        crossover_population.population.append(individual_clone)
+            first_individual_clone.features[loc] = population.population[second_individual_index].features[loc]
+            second_individual_clone.features[loc] = population.population[first_individual_index].features[loc]
+
+        crossover_population.population.append(first_individual_clone)
+        if len(crossover_population.population) == self.size:
+            break
+
+        crossover_population.population.append(second_individual_clone)
+        if len(crossover_population.population) == self.size:
+            break
 
     return crossover_population

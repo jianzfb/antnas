@@ -67,8 +67,12 @@ class ModelProblem(Problem):
 
   def __f1(self, m):
     # model accuracy
-    w = self.alpha if m.values[1] <= self.T else self.beta
-    return m.values[0] * float(np.power(m.values[1]/self.T, w))
+    # from mnas
+    #w = self.alpha if m.values[1] <= self.T else self.beta
+    #return m.values[0] * float(np.power(m.values[1]/self.T, w))
+
+    # minimize model error
+    return 1.0 - m.values[0]
 
   def __f2(self, m):
     # model flops/latency
@@ -81,7 +85,7 @@ class EvolutionSuperNetwork(SuperNetwork):
         self.nodes_param = None
 
         self.max_generation = 100
-        self.epoch_num_every_generation = 3
+        self.epoch_num_every_generation = 10
         self.current_population = None
         self.population_size = 100
         assert(self.epoch_num_every_generation > 2)
@@ -99,7 +103,7 @@ class EvolutionSuperNetwork(SuperNetwork):
                                                k1=0.8,
                                                method='based_matrices',
                                                size=self.population_size)
-        self.evolution_control = Nsga2(ModelProblem('MAXIMIZE',
+        self.evolution_control = Nsga2(ModelProblem('MINIMIZE',
                                                     alpha=-0.07,
                                                     beta=-0.07,
                                                     threshold=self.architecture_objective_cost),
@@ -292,8 +296,9 @@ class EvolutionSuperNetwork(SuperNetwork):
             self.evolution_control.crossover_controler.generation = self.current_population.current_genration
 
             print('generate pareto front')
+            parent_population = copy.deepcopy(self.current_population)
             self.current_population.pareto_front = \
-                self.evolution_control.evolve(self.current_population,
+                self.evolution_control.evolve(parent_population,
                                               target_size=self.population_size,
                                               children_population=None).population
             print('pareto front size %d'%(len(self.current_population.pareto_front)))
@@ -319,8 +324,9 @@ class EvolutionSuperNetwork(SuperNetwork):
                     graph=self.net,
                     blocks=self.blocks)
 
+            # parent + offsprings
             self.current_population.population = candidate_elite_population.population
-            self.current_population.population.extend(copy.deepcopy(self.current_population.pareto_front))
+            self.current_population.population.extend(copy.deepcopy(parent_population.population))
             print('population size %d for generation %d'%(len(self.current_population.population), self.current_population.current_genration))
 
             # 候选精英种群初始化
