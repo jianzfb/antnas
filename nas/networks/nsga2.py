@@ -59,7 +59,6 @@ class Individual(object):
     self.selected_count = 0
     self.evaluation_count = 0
 
-
   def set_objectives(self, objectives):
     self.objectives = objectives
 

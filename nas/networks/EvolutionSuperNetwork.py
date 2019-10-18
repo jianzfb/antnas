@@ -85,7 +85,7 @@ class EvolutionSuperNetwork(SuperNetwork):
         self.nodes_param = None
 
         self.max_generation = 100
-        self.epoch_num_every_generation = 10
+        self.epoch_num_every_generation = 50
         self.current_population = None
         self.population_size = 100
         assert(self.epoch_num_every_generation > 2)
@@ -126,6 +126,7 @@ class EvolutionSuperNetwork(SuperNetwork):
 
         # 3.step get sampling architecture of
         batched_sampling, batched_archs_index = self._sample_archs(input[0].size(0), x.device)
+        # batched_sampling = None
 
         # 4.step forward network
         # 4.1.step set the input of network graph
@@ -217,34 +218,36 @@ class EvolutionSuperNetwork(SuperNetwork):
             os.makedirs(folder)
 
         # 1.step save current population
-        for individual in self.current_population.population:
-            batched_sampling = torch.Tensor(individual.features).view(1, len(individual.features))
-            graph = copy.deepcopy(self.net)
+        if self.epoch % self.epoch_num_every_generation == 0 and \
+                len(self.current_population.pareto_front) > 0:
+            for individual in self.current_population.pareto_front:
+                batched_sampling = torch.Tensor(individual.features).view(1, len(individual.features))
+                graph = copy.deepcopy(self.net)
 
-            # 1.step prune sampling network
-            sampling = torch.Tensor()
-            active = torch.Tensor()
+                # 1.step prune sampling network
+                sampling = torch.Tensor()
+                active = torch.Tensor()
 
-            for node in self.traversal_order:
-                cur_node = graph.node[node]
-                node_sampling = self.get_node_sampling(node, 1, batched_sampling)
+                for node in self.traversal_order:
+                    cur_node = graph.node[node]
+                    node_sampling = self.get_node_sampling(node, 1, batched_sampling)
 
-                # notify path recorder to add sampling
-                sampling, active = self.add_sampling(node, node_sampling, sampling, active, self.blocks[cur_node['module']].switch)
+                    # notify path recorder to add sampling
+                    sampling, active = self.add_sampling(node, node_sampling, sampling, active, self.blocks[cur_node['module']].switch)
 
-            _, pruned_architecture = self.architecture(sampling, active)
+                _, pruned_architecture = self.architecture(sampling, active)
 
-            # 2.step write to graph
-            for node in self.traversal_order:
-                node_sampling_val = torch.squeeze(pruned_architecture[self.path_recorder.node_index[node]]).item()
-                graph.node[node]['sampled'] = int(node_sampling_val)
+                # 2.step write to graph
+                for node in self.traversal_order:
+                    node_sampling_val = torch.squeeze(pruned_architecture[self.path_recorder.node_index[node]]).item()
+                    graph.node[node]['sampled'] = int(node_sampling_val)
 
-            # 3.step save architecture
-            architecture_path = os.path.join(folder,
-                                             'epoch_%d_accuray_%0.2f_flops_%0.15f.architecture'%(self.epoch,
-                                                                                                 individual.values[0],
-                                                                                                 individual.values[1]))
-            nx.write_gpickle(graph, architecture_path)
+                # 3.step save architecture
+                architecture_path = os.path.join(folder,
+                                                 'epoch_%d_accuray_%0.2f_flops_%f.architecture'%(self.epoch,
+                                                                                                     individual.values[0],
+                                                                                                     individual.values[1]))
+                nx.write_gpickle(graph, architecture_path)
 
     def sampling_param_generator(self, node_name):
         if not (node_name.startswith('CELL') or node_name.startswith('T')):
@@ -275,6 +278,12 @@ class EvolutionSuperNetwork(SuperNetwork):
         """
 
         sampling_dim = [batch_size] + [1] * 3
+
+        # if self.use_preload_architecture:
+        #     val = self.net.node[node_name]['sampled']
+        #     node_sampling = torch.Tensor().resize_(*sampling_dim).fill_(val)
+        #     node_sampling = Variable(node_sampling, requires_grad=False)
+        #     return node_sampling
 
         node = self.net.node[node_name]
         node_sampling = batched_sampling[:, node['sampling_param']].contiguous().view(sampling_dim)
@@ -447,8 +456,12 @@ class EvolutionSuperNetwork(SuperNetwork):
 
             x_min = np.min(x)
             x_max = np.max(x) + 1
+
+            y_min = np.min(y)
+            y_max = np.max(y)
+
             plt.xlim((x_min, x_max))
-            plt.ylim((0, 1))
+            plt.ylim((y_min, y_max))
 
             if self.architecture_cost_optimization == 'comp':
                 plt.xlabel('MULADD/FLOPS (M - 10e6)')

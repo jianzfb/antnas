@@ -31,10 +31,11 @@ class OutLayer(NetworkBlock):
         super(OutLayer, self).__init__()
         self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
 
-        self.conv_1 = nn.Conv2d(in_chan, in_chan, kernel_size=1, stride=1, padding=0, bias=bias)
-        self.bn = nn.BatchNorm2d(in_chan)
+        self.conv_1 = nn.Conv2d(in_chan, 960, kernel_size=1, stride=1, padding=0, bias=bias)
+        self.bn = nn.BatchNorm2d(960)
 
-        self.conv = nn.Conv2d(in_chan, out_shape[0], 1, bias=bias)
+        self.conv_2 = nn.Conv2d(960, 1280, kernel_size=1, stride=1, padding=0, bias=bias)
+        self.conv_3 = nn.Conv2d(1280, out_shape[0], kernel_size=1, stride=1, padding=0, bias=bias)
         self.out_shape = out_shape
         self.params = {
             'module_list': ['OutLayer'],
@@ -49,7 +50,10 @@ class OutLayer(NetworkBlock):
         x = F.relu6(x)
 
         x = self.global_pool(x)
-        x = self.conv(x)
+        x = self.conv_2(x)
+        x = F.relu6(x)
+
+        x = self.conv_3(x)
         return x.view(-1, *self.out_shape)
 
     def get_flop_cost(self, x):
@@ -89,6 +93,7 @@ class BaselineSN(EvolutionSuperNetwork):
         in_name = self.add_aggregation((0, 0), module=in_module, node_format=self._INPUT_NODE_FORMAT)
 
         # search space（stage - block - cell）
+        # backbone
         pos_offset = 1
         offset_per_stage = []
         for stage_i in range(len(blocks_per_stage)):
@@ -96,19 +101,15 @@ class BaselineSN(EvolutionSuperNetwork):
             pos_offset = self.add_stage(pos_offset,
                                         blocks_per_stage[stage_i],
                                         cells_per_block[stage_i],
-                                        channels_per_block[stage_i])
+                                        channels_per_block[stage_i],
+                                        channels_per_block[stage_i+1][0] if stage_i != len(blocks_per_stage) - 1 else None,
+                                        stage_i)
 
-            # simple connection between stage
-            # TODO dense connection among stages
             if stage_i > 0:
-                # cell transformation
-                self.add_transformation((0, offset_per_stage[stage_i-1]+sum(cells_per_block[stage_i-1])*2-1),
-                                        (0, offset_per_stage[stage_i]),
-                                        ReductionCellBlock(channels_per_block[stage_i-1][-1], channels_per_block[stage_i][0]),
-                                        self._CELL_NODE_FORMAT,
-                                        self._AGGREGATION_NODE_FORMAT,
-                                        self._TRANSFORMATION_FORMAT,
-                                        pos_shift=0,)
+                # add stage edge
+                self.graph.add_edge(self._CELL_NODE_FORMAT.format(*(0, offset_per_stage[stage_i-1]+sum(cells_per_block[stage_i-1])*2-1)),
+                                    self._AGGREGATION_NODE_FORMAT.format(*(0, offset_per_stage[stage_i])),
+                                    width_node=self._AGGREGATION_NODE_FORMAT.format(*(0, offset_per_stage[stage_i])))
 
         # link head to search space
         self.graph.add_edge(self._INPUT_NODE_FORMAT.format(0, 0),
@@ -134,16 +135,23 @@ class BaselineSN(EvolutionSuperNetwork):
         # set graph
         self.set_graph(self.graph, in_name, out_name)
 
-    def add_stage(self, pos_offset, block_num, cells_per_block, channles_per_block):
+    def add_stage(self, pos_offset, block_num, cells_per_block, channles_per_block, next_stage_channels, stage_index):
         stage_offset = pos_offset
         offset_per_block = []
         for block_i in range(block_num):
             offset_per_block.append(stage_offset)
-
             if block_i < block_num - 1:
-                self.add_block(stage_offset, cells_per_block[block_i], channles_per_block[block_i], channles_per_block[block_i + 1])
+                self.add_block(stage_offset,
+                               cells_per_block[block_i],
+                               channles_per_block[block_i],
+                               channles_per_block[block_i + 1],
+                               True if block_i == 0 and stage_index != 0 else False)
             else:
-                self.add_block(stage_offset, cells_per_block[block_i], channles_per_block[block_i], None)
+                self.add_block(stage_offset,
+                               cells_per_block[block_i],
+                               channles_per_block[block_i],
+                               next_stage_channels,
+                               True if block_i == 0 and stage_index != 0 else False)
             stage_offset += cells_per_block[block_i] * 2
 
             # dense connection among blocks
@@ -154,35 +162,24 @@ class BaselineSN(EvolutionSuperNetwork):
                         self.graph.add_edge(self._CELL_NODE_FORMAT.format(0, offset_per_block[pre_block_i] + cells_per_block[pre_block_i] * 2 - 1),
                                             self._AGGREGATION_NODE_FORMAT.format(0, offset_per_block[block_i] + 0 * 2),
                                             width_node=self._AGGREGATION_NODE_FORMAT.format(0, offset_per_block[block_i] + 0 * 2))
-                    else:
-                        # 可学习连接
-                        module = ConvBn(channles_per_block[pre_block_i + 1],
-                                                     channles_per_block[block_i],
-                                                     relu=False,
-                                                     k_size=3,
-                                                     stride=1)
-                        self.add_transformation((0, offset_per_block[pre_block_i] + cells_per_block[pre_block_i] * 2 - 1),
-                                                (0, offset_per_block[block_i] + 0 * 2),
-                                                module,
-                                                self._CELL_NODE_FORMAT,
-                                                self._AGGREGATION_NODE_FORMAT,
-                                                self._TRANSFORMATION_FORMAT,
-                                                pos_shift=4)
 
         return stage_offset
 
     def add_block(self, pos_offset, cells, channles, next_block_channels, reduction=False):
         for cell_i in range(cells):
+            # Add
             self.add_aggregation((0, pos_offset+cell_i*2), AddBlock(), self._AGGREGATION_NODE_FORMAT)
+
+            # Cell
             if cell_i != cells - 1:
                 self.add_cell((0, pos_offset+cell_i*2+1),
-                              CellBlock(channles, channles),
+                              CellBlock(channles, channles, reduction=reduction if cell_i == 0 else False),
                               self._CELL_NODE_FORMAT)
             else:
                 if next_block_channels is None:
                     next_block_channels = channles
                 self.add_cell((0, pos_offset + cell_i * 2 + 1),
-                              CellBlock(channles, next_block_channels, reduction=reduction),
+                              CellBlock(channles, next_block_channels, reduction=reduction if cell_i == 0 else False),
                               self._CELL_NODE_FORMAT)
 
             # 固定连接
@@ -198,15 +195,6 @@ class BaselineSN(EvolutionSuperNetwork):
                         self.graph.add_edge(self._CELL_NODE_FORMAT.format(0, pos_offset+pre_cell_i*2+1),
                                             self._AGGREGATION_NODE_FORMAT.format(0, pos_offset+cell_i*2),
                                             width_node=self._AGGREGATION_NODE_FORMAT.format(0, pos_offset+cell_i*2))
-                    else:
-                        # 可学习连接
-                        self.add_transformation((0, pos_offset+pre_cell_i*2+1),
-                                                (0, pos_offset+cell_i*2),
-                                                Identity(),
-                                                self._CELL_NODE_FORMAT,
-                                                self._AGGREGATION_NODE_FORMAT,
-                                                self._TRANSFORMATION_FORMAT,
-                                                pos_shift=2)
 
     def add_aggregation(self, pos, module, node_format):
         agg_node_name = node_format.format(*pos)

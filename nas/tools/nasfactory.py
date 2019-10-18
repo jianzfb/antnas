@@ -28,18 +28,24 @@ class InvertedResidualBlockWithSEHS(NasBlock):
                             activation_fn=None,
                             normalizer_fn=slim.batch_norm,
                             padding='SAME')
+
             if hs:
                 x = x * (tf.nn.relu6(x + 3.0) / 6.0)
             else:
                 x = tf.nn.relu6(x)
 
+            stride = kwargs.get('stride', 1)
+            if reduction and stride == 1:
+                stride = 2
+
             # no bias
             x = slim.separable_conv2d(x,
                                       num_outputs=None,
                                       kernel_size=kernel_size,
-                                      stride=2 if reduction else 1,
+                                      stride=stride,
                                       activation_fn=None,
                                       normalizer_fn=slim.batch_norm,
+                                      depth_multiplier=1,
                                       padding='SAME')
             if se:
                 se_x = tf.reduce_mean(x, axis=[1, 2], keep_dims=True)
@@ -75,7 +81,7 @@ class InvertedResidualBlockWithSEHS(NasBlock):
                             normalizer_fn=slim.batch_norm,
                             padding='SAME')
 
-            if skip and input_shape[-1] == out_chan and (not reduction):
+            if skip and input_shape[-1] == out_chan and (stride == 1):
                 x = tf.add(x, inputs)
             return x
 
@@ -107,6 +113,7 @@ class SepConvBN(NasBlock):
                                       activation_fn=tf.nn.relu6 if relu else None,
                                       normalizer_fn=slim.batch_norm,
                                       rate=dilation,
+                                      depth_multiplier=1,
                                       padding='SAME')
             return x
 
@@ -184,6 +191,17 @@ class Skip(NasBlock):
 
     def __call__(self, inputs, out_chan, reduction, scope, **kwargs):
         return inputs
+        # input_shape = inputs.get_shape()
+        # if int(input_shape[-1]) != out_chan:
+        #     inputs = tf.concat((inputs, tf.zeros((int(input_shape[0]),
+        #                                          int(input_shape[1]),
+        #                                          int(input_shape[2]),
+        #                                          out_chan - int(input_shape[3])))), axis=3)
+        #
+        # if reduction:
+        #     inputs = slim.avg_pool2d(inputs, kernel_size=2, stride=2)
+        #
+        # return inputs
 
 
 class ResizedBlock(NasBlock):
@@ -377,14 +395,14 @@ class NasFactory(object):
                     reduction = sampled_module_params['reduction']
 
                     trying_out_chan = out_chan
-                    trying_reduction = reduction
+                    if not trying_reduction:
+                        trying_reduction = reduction
                     break
 
             if successor_name.startswith('A') or successor_name.startswith('Identity'):
                 trying_node = successor_node
                 trying_name = successor_name
                 break
-
 
         if trying_node is None and trying_name is None:
             return trying_out_chan, trying_reduction
@@ -408,26 +426,42 @@ class NasFactory(object):
                     input_feature.append(layers_map[pre_name])
 
             # adapt skip
-            if node_name.startswith('CELL') and len(graph.successors(node_name)) > 0:
+            if (node_name.startswith('CELL') or node_name.startswith('I')) and len(graph.successors(node_name)) > 0:
                 out_chan, reduction = self._find_recommand_channel(graph, cur_node, node_name, None, None)
                 if out_chan is not None and reduction is not None:
                     # 修改当前节点参数
-                    cur_params = cur_node['module_params']
-                    cur_sampled = int(cur_node['sampled'])
-                    cur_params[cur_params['name_list'][cur_sampled]]['out_chan'] = out_chan
-                    cur_params[cur_params['name_list'][cur_sampled]]['reduction'] = reduction
+                    if node_name.startswith('I'):
+                        cur_params = cur_node['module_params']
+                        cur_params[cur_params['name_list'][0]]['out_chan'] = out_chan
+                        if 'reduction' not in cur_params[cur_params['name_list'][0]]:
+                            if reduction:
+                                cur_params[cur_params['name_list'][0]]['stride'] = cur_params[cur_params['name_list'][0]]['stride'] * 2
+                        else:
+                            cur_params[cur_params['name_list'][0]]['reduction'] = reduction
+                    else:
+                        cur_params = cur_node['module_params']
+                        cur_sampled = int(cur_node['sampled'])
+                        cur_params[cur_params['name_list'][cur_sampled]]['out_chan'] = out_chan
+                        # cur_params[cur_params['name_list'][cur_sampled]]['reduction'] = reduction
 
-            # adapt skip
-            if node_name.startswith("T"):
-                cur_params = cur_node['module_params']
-                cur_sampled = int(cur_node['sampled'])
-                if cur_params['name_list'][0] == 'Identity':
-                    out_chan, _ = self._find_recommand_channel(graph, cur_node, node_name, None, None)
-                    cur_params[cur_params['name_list'][0]]['out_chan'] = out_chan
+                        if cur_params[cur_params['name_list'][cur_sampled]]['reduction'] and reduction:
+                            cur_params[cur_params['name_list'][cur_sampled]]['stride'] = 4
+                        elif reduction:
+                            cur_params[cur_params['name_list'][cur_sampled]]['reduction'] = True
+
+            # # adapt skip
+            # if node_name.startswith("T"):
+            #     cur_params = cur_node['module_params']
+            #     cur_sampled = int(cur_node['sampled'])
+            #     if cur_params['name_list'][0] == 'Identity':
+            #         out_chan, _ = self._find_recommand_channel(graph, cur_node, node_name, None, None)
+            #         cur_params[cur_params['name_list'][0]]['out_chan'] = out_chan
 
             input_feature = self.format_input(input_feature)
             outputs = None
             if 'out' in cur_node['module_params']:
+                print('out')
+                print(input_feature)
                 outputs = self._build_out_node(cur_node, node_index, input_feature, out_layers[cur_node['module_params']['out']])
             else:
                 outputs = self._build_node(cur_node, node_index, input_feature)

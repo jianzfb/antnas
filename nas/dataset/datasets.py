@@ -21,9 +21,9 @@ def get_PASCAL2012_SEG(path, *args):
     out_size = (21, 224, 224)
 
     train_transform = ExtCompose([
-        # ExtRandomScale((0.5, 2.0)),
-        # ExtRandomCrop(size=(513, 513), pad_if_needed=True),
-        # ExtRandomHorizontalFlip(),
+        ExtRandomScale((0.5, 2.0)),
+        ExtRandomCrop(size=(513, 513), pad_if_needed=True),
+        ExtRandomHorizontalFlip(),
         ExtResize((224, 224)),
         ExtToTensor(),
         ExtNormalize(mean=[0.485, 0.456, 0.406],

@@ -682,9 +682,9 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
 
         flops_se = 0.0
         if self.se:
-            step_2_1_size = torch.Size([1, 1, 1, self.in_chan*self.expansion])
-            step_2_2_size = torch.Size([1, 1, 1, (self.in_chan * self.expansion)//self.ratio])
-            step_2_3_size = torch.Size([1, 1, 1, self.in_chan * self.expansion])
+            step_2_1_size = torch.Size([1, self.in_chan*self.expansion, 1, 1])
+            step_2_2_size = torch.Size([1, (self.in_chan * self.expansion)//self.ratio, 1, 1])
+            step_2_3_size = torch.Size([1, self.in_chan * self.expansion, 1, 1])
             flops_se_1 = self.get_avgglobalpool_flops(self.global_pool, step_2_out_size, step_2_1_size)
             flops_se_2 = self.get_conv2d_flops(self.se_conv_layer_1, step_2_out_size, step_2_1_size)
             flops_se_3 = self.get_relu_flops(F.relu6, step_2_2_size, step_2_2_size)

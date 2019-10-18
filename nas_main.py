@@ -29,15 +29,15 @@ def argument_parser():
     # Experience
     parser.add_argument('-exp-name', action='store', default='', type=str, help='Experience Name')
     # Model
-    parser.add_argument('-arch', action='store', default='BiSegSN', type=str)
+    parser.add_argument('-arch', action='store', default='BaselineSN', type=str)
     parser.add_argument('-deter_eval', action='store', default=False, type=bool,
                         help='Take blocks with probas >0.5 instead of sampling during evaluation')
 
     # Training
-    parser.add_argument('-path', default='/Users/jian/Downloads/pascal_voc/', type=str,
+    parser.add_argument('-path', default='/Users/jian/Downloads/pascal_voc/dataset', type=str,
                         help='path for the execution')
 
-    parser.add_argument('-dset', default='PASCAL2012SEG', type=str, help='Dataset')
+    parser.add_argument('-dset', default='CIFAR10', type=str, help='Dataset')
     parser.add_argument('-bs', action='store', default=2, type=int, help='Size of each batch')
     parser.add_argument('-epochs', action='store', default=300, type=int,
                         help='Number of training epochs')
@@ -132,7 +132,7 @@ def main(args, plotter):
     #                 channels_per_block=[[16], [24], [40], [80, 112], [160, 180]])
 
     # nas_model.supernetwork.load_state_dict(torch.load('/Users/jian/Downloads/sn/nas_0.model', map_location='cpu'))
-    # nas_model.supernetwork.load_static_architecture('/Users/jian/Downloads/sn/nas_0.architecture')
+    nas_model.supernetwork.load_static_architecture('/Users/jian/Downloads/tryarch/epoch_239_accuray_0.66_flops_13389355008.000000000000000.architecture')
 
     # logger initialize
     xp = mlogger.Container()
