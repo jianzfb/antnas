@@ -16,8 +16,8 @@ class NetworkBlock(nn.Module):
         self._sampling = threading.local()
         self._last_sampling = threading.local()
         self.node_regularizer = threading.local()
+        self.node_quant_error = threading.local()
         self._is_switch = False
-
         self._params = {}
 
     @property
@@ -217,6 +217,12 @@ class NetworkBlock(nn.Module):
     def get_node_regularizer(self):
         return getattr(self.node_regularizer, 'value', None)
 
+    def set_node_quant_error(self, val):
+        self.node_quant_error.value = val
+
+    def get_node_quant_error(self):
+        return getattr(self.node_quant_error, 'value', None)
+
 
 class Identity(NetworkBlock):
     n_layers = 0
@@ -304,6 +310,9 @@ class ConvBn(NetworkBlock):
         }
         self.switch = True
 
+    def get_param_num(self, x):
+        return [0] + [self.conv.kernel_size[0]*self.conv.kernel_size[1]*self.conv.in_channels*self.conv.out_channels] + [0]*(NetworkBlock.state_num - 2)
+
     def forward(self, x):
         x = self.conv(x)
         x = self.bn(x)
@@ -375,6 +384,11 @@ class SepConvBN(NetworkBlock):
 
         return x * (self._sampling.value == 1).float()
 
+    def get_param_num(self, x):
+        part1_params = self.depthwise_conv.kernel_size[0]*self.depthwise_conv.kernel_size[1]*self.depthwise_conv.in_channels
+        part2_params = self.pointwise_conv.in_channels * self.pointwise_conv.out_channels
+        return [0] + [part1_params+part2_params] + [0]*(NetworkBlock.state_num - 2)
+
     def get_flop_cost(self, x):
         conv_in_data_size = torch.Size([1, *x.shape[1:]])
         conv_out_data_size = torch.Size([1,
@@ -425,6 +439,12 @@ class ResizedBlock(NetworkBlock):
             return x
 
         return x * (self._sampling.value == 1).float()
+
+    def get_param_num(self, x):
+        if self.conv_layer is not None:
+            return [0] + [self.conv_layer.get_param_num(x)[1]] + [0] * (NetworkBlock.state_num - 2)
+        else:
+            return [0] * NetworkBlock.state_num
 
     def get_flop_cost(self, x):
         flops = 9 * (x.shape[2]*self.scale_factor)*(x.shape[3]*self.scale_factor) * x.shape[1]
@@ -646,6 +666,26 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
             x = x + input
 
         return x
+
+    def get_param_num(self, x):
+        conv1_param = self.conv1.in_channels*self.conv1.out_channels*self.conv1.kernel_size[0]*self.conv1.kernel_size[1]
+        conv2_param = self.dwconv2.kernel_size[0]*self.dwconv2.kernel_size[1]*self.dwconv2.in_channels
+        conv_se_1_param = 0
+        conv_se_2_param = 0
+        if self.se:
+            conv_se_1_param = self.se_conv_layer_1.kernel_size[0]*\
+                              self.se_conv_layer_1.kernel_size[1]*\
+                              self.se_conv_layer_1.in_channels*\
+                              self.se_conv_layer_1.out_channels
+            conv_se_2_param = self.se_conv_layer_2.kernel_size[0]*\
+                              self.se_conv_layer_2.kernel_size[1]*\
+                              self.se_conv_layer_2.in_channels*\
+                              self.se_conv_layer_2.out_channels
+
+        conv3_param = self.conv3.kernel_size[0]*self.conv3.kernel_size[1]*self.conv3.in_channels*self.conv3.out_channels
+
+        params = conv1_param+conv2_param+conv_se_1_param+conv_se_2_param+conv3_param
+        return [0] + [params] + [0]*(NetworkBlock.state_num - 2)
 
     def get_flop_cost(self, x):
         step_1_in_size = torch.Size([1, *x.shape[1:]])

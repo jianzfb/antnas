@@ -179,7 +179,7 @@ class EvolutionSuperNetwork(SuperNetwork):
         # 7.step compute model accuracy
         model_accuracy = self.accuray(model_out, y)
 
-        # 8.step compute architecture loss
+        # 8.1.step compute architecture loss
         optim_cost = None
         sampled_cost = None
         pruned_cost = None
@@ -242,11 +242,27 @@ class EvolutionSuperNetwork(SuperNetwork):
                     node_sampling_val = torch.squeeze(pruned_architecture[self.path_recorder.node_index[node]]).item()
                     graph.node[node]['sampled'] = int(node_sampling_val)
 
-                # 3.step save architecture
-                architecture_path = os.path.join(folder,
-                                                 'epoch_%d_accuray_%0.2f_flops_%f.architecture'%(self.epoch,
-                                                                                                     individual.values[0],
-                                                                                                     individual.values[1]))
+                # 3.step get architecture parameter number
+                parameter_num = 0
+                for node in self.traversal_order:
+                    sampled_state = graph.node[node]['sampled']
+                    cur_node = graph.node[node]
+                    parameter_num += self.blocks[cur_node['module']].get_param_num(None)[sampled_state]
+
+                # 4.step save architecture
+                architecture_info = ''
+                if self.architecture_cost_optimization == 'comp':
+                    architecture_info = 'flops_%d'%int(individual.values[1])
+                elif self.architecture_cost_optimization == 'latency':
+                    architecture_info = 'latency_%0.2f'%individual.values[1]
+                else:
+                    architecture_info = 'para_%d'%int(individual.values[1])
+
+                architecture_tag = 'epoch_%d_accuray_%0.4f_%s_params_%d.architecture'%(self.epoch,
+                                                                                       individual.values[0],
+                                                                                       architecture_info,
+                                                                                       int(parameter_num))
+                architecture_path = os.path.join(folder,architecture_tag)
                 nx.write_gpickle(graph, architecture_path)
 
     def sampling_param_generator(self, node_name):
@@ -333,9 +349,10 @@ class EvolutionSuperNetwork(SuperNetwork):
                     graph=self.net,
                     blocks=self.blocks)
 
-            # parent + offsprings
+            # TODO 可能导致上代精英种群过度训练，致使子代种群不易继续存活
+            # parent.pareto_front + offsprings
             self.current_population.population = candidate_elite_population.population
-            self.current_population.population.extend(copy.deepcopy(parent_population.population))
+            self.current_population.population.extend(copy.deepcopy(self.current_population.pareto_front))
             print('population size %d for generation %d'%(len(self.current_population.population), self.current_population.current_genration))
 
             # 候选精英种群初始化

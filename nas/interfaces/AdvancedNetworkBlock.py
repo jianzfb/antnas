@@ -140,6 +140,24 @@ class GCN(NetworkBlock):
 
         return x * (self._sampling.value == 1).float()
 
+    def get_param_num(self, x):
+        left_conv1_params = self.left_conv1.kernel_size[0]*self.left_conv1.kernel_size[1]*self.left_conv1.in_channels*self.left_conv1.out_channels
+        left_conv2_params = self.left_conv2.kernel_size[0]*self.left_conv2.kernel_size[1]*self.left_conv2.in_channels*self.left_conv2.out_channels
+        right_conv1_params = self.right_conv1.kernel_size[0]*self.right_conv1.kernel_size[1]*self.right_conv1.in_channels*self.right_conv1.out_channels
+        right_conv2_params = self.right_conv2.kernel_size[0]*self.right_conv2.kernel_size[1]*self.right_conv2.in_channels*self.right_conv2.out_channels
+
+        conv1_params = self.conv1.kernel_size[0]*self.conv1.kernel_size[1]*self.conv1.in_channels*self.conv1.out_channels
+        conv2_params = self.conv2.kernel_size[0]*self.conv2.kernel_size[1]*self.conv2.in_channels*self.conv2.out_channels
+
+        params = left_conv1_params+\
+                 left_conv2_params+\
+                 right_conv1_params+\
+                 right_conv2_params+\
+                 conv1_params+\
+                 conv2_params
+
+        return [0] + [params] + [0]*(NetworkBlock.state_num  - 2)
+
     def get_flop_cost(self, x):
         conv_in_data_size = torch.Size([1, *x.shape[1:]])
         conv_out_data_size = torch.Size([1, self.out_chan, x.shape[-1], x.shape[-1]])
@@ -186,6 +204,11 @@ class BoundaryRefinement(NetworkBlock):
             return x
 
         return x * (self._sampling.value == 1).float()
+
+    def get_param_num(self, x):
+        conv1_params = self.conv1.kernel_size[0]*self.conv1.kernel_size[1]*self.conv1.in_channels*self.conv1.out_channels
+        conv2_params = self.conv2.kernel_size[0]*self.conv2.kernel_size[1]*self.conv2.in_channels*self.conv2.out_channels
+        return [0] + [conv1_params+conv2_params] + [0]*(NetworkBlock.state_num-2)
 
     def get_flop_cost(self, x):
         conv_in_data_size = torch.Size([1, *x.shape[1:]])
@@ -268,6 +291,17 @@ class ASPPBlock(NetworkBlock):
 
         return concat_logits * (self._sampling.value == 1).float()
 
+    def get_param_num(self, x):
+        conv1_params = self.conv_1_step.kernel_size[0]*self.conv_1_step.kernel_size[1]*self.conv_1_step.in_channels*self.conv_1_step.out_channels
+        conv2_params = self.conv_2_step.kernel_size[0]*self.conv_2_step.kernel_size[1]*self.conv_2_step.in_channels*self.conv_2_step.out_channels
+        atrous_conv_params = 0
+        for index in range(self.atrous_conv_list):
+            atrous_conv_params += self.atrous_conv_list[index].get_param_num(x)[1]
+        conv5_params = self.conv_5_step.kernel_size[0]*self.conv_5_step.kernel_size[1]*self.conv_5_step.in_channels*self.conv_5_step.out_channels
+
+        params = conv1_params+conv2_params+atrous_conv_params+conv5_params
+        return [0] + [params] + [0]*(NetworkBlock.state_num - 2)
+
     def get_flop_cost(self, x):
         flops = self.get_conv2d_flops(self.conv_1_step, torch.Size((1, x.shape[1], 1, 1)), torch.Size((1, self.depth, 1, 1)))
         flops += self.get_bn_flops(self.bn1, torch.Size((1, self.depth, 1, 1)), torch.Size((1, self.depth, 1, 1)))
@@ -321,6 +355,12 @@ class FocusBlock(NetworkBlock):
             return res
 
         return res * (self._sampling.value == 1).float()
+
+    def get_param_num(self, x):
+        sep_conv1_param = self.sep_conv1.get_param_num(x)[1]
+        sep_conv2_param = self.sep_conv2.get_param_num(x)[1]
+        sep_conv3_param = self.sep_conv3.get_param_num(x)[1]
+        return [0] + [sep_conv1_param+sep_conv2_param+sep_conv3_param] + [0]*(NetworkBlock.state_num - 2)
 
     def get_flop_cost(self, x):
         flops = self.sep_conv1.get_flop_cost(x)[1]
