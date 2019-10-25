@@ -40,9 +40,6 @@ class SegmentationAccuracyEvaluator(AccuracyEvaluator):
 
             scores = 0.0
             for c in range(self.class_num):
-                if c == 0:
-                    continue
-
                 pr_c = pr[c]
                 gt_c = gt[c]
 

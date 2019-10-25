@@ -29,15 +29,15 @@ def argument_parser():
     # Experience
     parser.add_argument('-exp-name', action='store', default='', type=str, help='Experience Name')
     # Model
-    parser.add_argument('-arch', action='store', default='BaselineSN', type=str)
+    parser.add_argument('-arch', action='store', default='BiSegSN', type=str)
     parser.add_argument('-deter_eval', action='store', default=False, type=bool,
                         help='Take blocks with probas >0.5 instead of sampling during evaluation')
 
     # Training
-    parser.add_argument('-path', default='/Users/jian/Downloads/pascal_voc/dataset', type=str,
+    parser.add_argument('-path', default='/Users/jian/Downloads/pascal_voc', type=str,
                         help='path for the execution')
 
-    parser.add_argument('-dset', default='CIFAR10', type=str, help='Dataset')
+    parser.add_argument('-dset', default='PASCAL2012SEG', type=str, help='Dataset')
     parser.add_argument('-bs', action='store', default=2, type=int, help='Size of each batch')
     parser.add_argument('-epochs', action='store', default=300, type=int,
                         help='Number of training epochs')
@@ -117,9 +117,9 @@ def main(args, plotter):
     #                 channels_per_block=[[16], [24], [40], [80, 112], [160]])
 
     # BiSegSN
-    nas_model.build(blocks_per_stage=[1, 1, 1, 3],
-                    cells_per_block=[[1], [3], [3], [3, 3, 2]],
-                    channels_per_block=[[32], [48], [64], [96, 160, 320]])
+    nas_model.build(blocks_per_stage=[1, 1, 4],
+                    cells_per_block=[[2], [4], [4, 4, 4, 1]],
+                    channels_per_block=[[32], [40], [80, 96, 192, 320]])
 
     # # Mobilenetv2BiSegSN
     # nas_model.build(blocks_per_stage=[1, 1, 1, 3],
@@ -132,7 +132,7 @@ def main(args, plotter):
     #                 channels_per_block=[[16], [24], [40], [80, 112], [160, 180]])
 
     # nas_model.supernetwork.load_state_dict(torch.load('/Users/jian/Downloads/sn/nas_0.model', map_location='cpu'))
-    nas_model.supernetwork.load_static_architecture('/Users/jian/Downloads/tryarch/epoch_239_accuray_0.66_flops_13389355008.000000000000000.architecture')
+    # nas_model.supernetwork.load_static_architecture('/Users/jian/Downloads/tryarch/epoch_239_accuray_0.66_flops_13389355008.000000000000000.architecture')
 
     # logger initialize
     xp = mlogger.Container()

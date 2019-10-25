@@ -248,13 +248,13 @@ class BiSegSN(EvolutionSuperNetwork):
                                cells_per_block[block_i],
                                channles_per_block[block_i],
                                channles_per_block[block_i + 1],
-                               True if block_i == 0 and stage_index != 0 else False)
+                               True if block_i == 0 else False)
             else:
                 self.add_block(stage_offset,
                                cells_per_block[block_i],
                                channles_per_block[block_i],
                                next_stage_channels,
-                               True if block_i == 0 and stage_index != 0 else False)
+                               True if block_i == 0 else False)
             stage_offset += cells_per_block[block_i] * 2
 
             # dense connection among blocks

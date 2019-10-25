@@ -491,7 +491,7 @@ class EvolutionSuperNetwork(SuperNetwork):
             plt.scatter(x=x, y=y, c='r', marker='o')
 
             for x_p, y_p, individual in zip(x, y, self.current_population.pareto_front):
-                plt.text(x_p, y_p, '%0.2f'%individual.values[0])
+                plt.text(x_p, y_p, '%0.4f'%individual.values[0])
 
             if path is None:
                 path = './'

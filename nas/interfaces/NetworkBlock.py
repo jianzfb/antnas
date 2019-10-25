@@ -65,62 +65,11 @@ class NetworkBlock(nn.Module):
             return False
 
     @staticmethod
-    def proximate_latency(kernel_latency, kernel_profile, approx, kernel_name):
-        # if kernel_profile in kernel_latency:
-        #     return kernel_latency[kernel_profile]
-        # assert(approx != 'same')
-        #
-        # latency_dict = {}
-        # for k, v in kernel_latency.items():
-        #     hw_in, hw_out, c_in, c_out, stride, dilation = k.split('x')
-        #     hw_in = int(hw_in)
-        #     c_in = int(c_in)
-        #     c_out = int(c_out)
-        #     stride = int(stride[1:])
-        #     dilation = int(dilation[1:])
-        #
-        #     # match h,w,s,d
-        #     if kernel_name.startswith('depthwise'):
-        #         latency_dict['%dxS%dxD%d'%(hw_in,stride,dilation)] = c_in
-        #     elif kernel_name.startswith('convbn'):
-        #         latency_dict['%dxS%dxD%d'%(hw_in,stride,dilation)] = c_in * c_out
-        #     elif kernel_name.startswith('resize'):
-        #         latency_dict[''%()] = c_in
-        #     elif kernel_name.startswith('se'):
-        #         latency_dict[int(hw_in / stride)] = hw_in * hw_in * c_in
-        #     else:
-        #         raise NotImplementedError
-        #
-        # kernel_hw_in, kernel_c_in, kernel_c_out, kernel_stride, kernel_dilation = kernel_profile.split('x')
-        # kernel_hw_in = int(kernel_hw_in)
-        # kernel_c_in = int(kernel_c_in)
-        # kernel_c_out = int(kernel_c_out)
-        # kernel_stride = int(kernel_stride[1:])
-        # kernel_dilation = int(kernel_dilation[1:])
-        # assert( int(kernel_hw_in/kernel_stride) in latency_dict)
-        return 0
+    def proximate_latency(op_lookuptable, profile):
+        if profile in op_lookuptable['latency']:
+            return op_lookuptable['latency'][profile]
 
-
-        # kernel_a,kernel_b,kernel_c, kernel_d = kernel_profile.split('x')
-        # kernel_total = (int(kernel_a)*int(kernel_b)*int(kernel_c))/int(kernel_d[-1])
-
-        # most_prox_index = 0
-        # most_prox_val = 100000000000
-        # for index in range(len(name_list)):
-        #     a = name_list[index] if name_list[index] > kernel_total else kernel_total
-        #     b = kernel_total if name_list[index] >= kernel_total else name_list[index]
-        #     ratio = float(a) / float(b)
-        #
-        #     if most_prox_val > ratio:
-        #         most_prox_val = ratio
-        #         most_prox_index = index
-        #
-        # prox_latency = 0.0
-        # if name_list[most_prox_index] > kernel_total:
-        #     prox_latency = latency_list[most_prox_index] / most_prox_val
-        # else:
-        #     prox_latency = latency_list[most_prox_index] * most_prox_val
-        # return prox_latency
+        return 0.0
 
     @staticmethod
     def get_conv2d_flops(m, x_size, y_size):
@@ -317,7 +266,7 @@ class ConvBn(NetworkBlock):
         x = self.conv(x)
         x = self.bn(x)
         if self.relu:
-            x = F.relu6(x)
+            x = F.relu(x)
 
         if self.get_sampling() is None:
             return x
@@ -339,7 +288,21 @@ class ConvBn(NetworkBlock):
         return flop_cost
 
     def get_latency(self, x):
-        pass
+        op_latency_table = NetworkBlock.lookup_table['op']
+
+        op_name = "convbn_%dx%d" % (self.conv.kernel_size[0], self.conv.kernel_size[1])
+        if self.relu:
+            op_name += "_relu"
+
+        input_h, _ = x.shape[2:]
+        after_h = input_h // self.conv.stride
+        op_latency = NetworkBlock.proximate_latency(op_latency_table[op_name],
+                                                    '%dx%dx%dx%d'%(self.conv.in_channels,
+                                                                   int(input_h),
+                                                                   self.conv.out_channels,
+                                                                   int(after_h)))
+        latency_cost = [0] + [op_latency] + [0] * (NetworkBlock.state_num - 2)
+        return latency_cost
 
 
 class SepConvBN(NetworkBlock):
@@ -377,7 +340,7 @@ class SepConvBN(NetworkBlock):
         x = self.pointwise_conv(x)
         x = self.bn(x)
         if self.relu:
-            x = F.relu6(x)
+            x = F.relu(x)
 
         if self.get_sampling() is None:
             return x
@@ -406,6 +369,23 @@ class SepConvBN(NetworkBlock):
         total_flops = flops_1 + flops_2 + flops_3 + flops_4
         flop_cost = [0] + [total_flops] + [0] * (self.state_num - 2)
         return flop_cost
+
+    def get_latency(self, x):
+        op_latency_table = NetworkBlock.lookup_table['op']
+
+        op_name = "sepconvbn_%dx%d" % (self.conv.kernel_size[0], self.conv.kernel_size[1])
+        if self.relu:
+            op_name += "_relu"
+
+        input_h, _ = x.shape[2:]
+        after_h = input_h // self.conv.stride
+        op_latency = NetworkBlock.proximate_latency(op_latency_table[op_name],
+                                                    '%dx%dx%dx%d' % (self.conv.in_channels,
+                                                                     int(input_h),
+                                                                     self.conv.out_channels,
+                                                                     int(after_h)))
+        latency_cost = [0] + [op_latency] + [0] * (NetworkBlock.state_num - 2)
+        return latency_cost
 
 
 class ResizedBlock(NetworkBlock):
@@ -641,23 +621,26 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
         if self.hs:
             x = x * (F.relu6(x + 3.0) / 6.0)
         else:
-            x = F.relu6(x)
+            x = F.relu(x)
 
         x = self.dwconv2(x)
         x = self.bn2(x)
+        if self.hs:
+            x = x * (F.relu6(x + 3.0) / 6.0)
+        else:
+            x = F.relu(x)
 
         if self.se:
             se_x = self.global_pool(x)
             se_x = self.se_conv_layer_1(se_x)
-            se_x = F.relu6(se_x)
+            if self.hs:
+                se_x = se_x * (F.relu6(se_x + 3.0) / 6.0)
+            else:
+                se_x = F.relu(se_x)
+
             se_x = self.se_conv_layer_2(se_x)
             se_x = F.relu6(se_x + 3.0) / 6.0
             x = torch.mul(se_x, x)
-
-        if self.hs:
-            x = x * (F.relu6(x+3.0) / 6.0)
-        else:
-            x = F.relu6(x)
 
         x = self.conv3(x)
         x = self.bn3(x)
@@ -754,22 +737,19 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
     def get_latency(self, x):
         op_latency_table = NetworkBlock.lookup_table['op']
 
-        x_size = x.shape[-1]
-        op_1_name = "convbn_1x1"
-        op_1_kernel_profile = "%dx%dx%dxS%d"%(x_size,self.conv1.in_channels,self.conv1.out_channels,self.conv1.stride[0])
-        op_1_latency = NetworkBlock.proximate_latency(op_latency_table[op_1_name]['latency'], op_1_kernel_profile)
+        irb_name = 'irb_%dx%d'%(self.kernel_size, self.kernel_size)
+        if self.se:
+            irb_name += "_se"
+        if self.hs:
+            irb_name += "_hs"
 
-        if self.reduction:
-            x_size = x_size / 2
+        irb_name += "_e%d"%self.expansion
+        if self.skip:
+            irb_name += "_skip"
 
-        op_2_name = "depthwise_%dx%d"%(self.dwconv2.kernel_size[0],self.dwconv2.kernel_size[1])
-        op_2_kernel_profile = "%dx%dx%dxS%d"%(x_size,self.dwconv2.in_channels,self.dwconv2.out_channels,self.dwconv2.stride[0])
-        op_2_latency = NetworkBlock.proximate_latency(op_latency_table[op_2_name]['latency'], op_2_kernel_profile)
-
-        op_3_name = "convbn_1x1"
-        op_3_kernel_profile = "%dx%dx%dxS%d"%(x_size,self.conv3.in_channels,self.conv3.out_channels,self.conv3.stride[0])
-        op_3_latency = NetworkBlock.proximate_latency(op_latency_table[op_3_name]['latency'], op_3_kernel_profile)
-
-        total_latency = op_1_latency + op_2_latency + op_3_latency
-        latency_cost = [0] + [total_latency] * (self.state_num - 1)
+        input_h, _ = x.shape[2:]
+        after_h = input_h if not self.reduction else input_h // 2
+        irb_latency = NetworkBlock.proximate_latency(op_latency_table[irb_name],
+                                                     "%dx%dx%dx%d"%(self.in_chan, int(input_h), self.out_chan, int(after_h)))
+        latency_cost = [0] + [irb_latency] + [0] * (NetworkBlock.state_num - 2)
         return latency_cost

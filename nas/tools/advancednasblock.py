@@ -25,7 +25,7 @@ class ASPPBlock(NasBlock):
                                  num_outputs=depth,
                                  kernel_size=1,
                                  stride=1,
-                                 activation_fn=tf.nn.relu6,
+                                 activation_fn=tf.nn.relu,
                                  normalizer_fn=slim.batch_norm,
                                  padding='SAME')
             part_1 = tf.image.resize_images(part_1, size=[input_shape[1], input_shape[2]], align_corners=True)
@@ -36,7 +36,7 @@ class ASPPBlock(NasBlock):
                                  num_outputs=depth,
                                  kernel_size=1,
                                  stride=1,
-                                 activation_fn=tf.nn.relu6,
+                                 activation_fn=tf.nn.relu,
                                  normalizer_fn=slim.batch_norm,
                                  padding='SAME')
             part_list.append(part_2)
@@ -47,7 +47,7 @@ class ASPPBlock(NasBlock):
                                                num_outputs=depth,
                                                kernel_size=3,
                                                stride=1,
-                                               activation_fn=tf.nn.relu6,
+                                               activation_fn=tf.nn.relu,
                                                normalizer_fn=slim.batch_norm,
                                                rate=atrous_rates[i],
                                                padding='SAME')
@@ -58,7 +58,7 @@ class ASPPBlock(NasBlock):
             res = slim.conv2d(part,
                               num_outputs=depth,
                               kernel_size=1,
-                              activation_fn=tf.nn.relu6,
+                              activation_fn=tf.nn.relu,
                               normalizer_fn=slim.batch_norm,
                               padding='SAME')
             return res
@@ -74,7 +74,7 @@ class FocusBlock(NasBlock):
                                               num_outputs=out_chan,
                                               kernel_size=3,
                                               stride=1,
-                                              activation_fn=tf.nn.relu6,
+                                              activation_fn=tf.nn.relu,
                                               normalizer_fn=slim.batch_norm,
                                               rate=1,
                                               padding='SAME')
@@ -83,7 +83,7 @@ class FocusBlock(NasBlock):
                                               num_outputs=out_chan,
                                               kernel_size=3,
                                               stride=1,
-                                              activation_fn=tf.nn.relu6,
+                                              activation_fn=tf.nn.relu,
                                               normalizer_fn=slim.batch_norm,
                                               rate=2,
                                               padding='SAME')
@@ -92,7 +92,7 @@ class FocusBlock(NasBlock):
                                               num_outputs=out_chan,
                                               kernel_size=3,
                                               stride=1,
-                                              activation_fn=tf.nn.relu6,
+                                              activation_fn=tf.nn.relu,
                                               normalizer_fn=slim.batch_norm,
                                               rate=4,
                                               padding='SAME')
@@ -141,7 +141,7 @@ class GCN(NasBlock):
                                num_outputs=out_chan,
                                kernel_size=3,
                                stride=1,
-                               activation_fn=tf.nn.relu6,
+                               activation_fn=tf.nn.relu,
                                normalizer_fn=None,
                                padding='SAME')
 
@@ -166,7 +166,7 @@ class BoundaryRefinement(NasBlock):
                                num_outputs=out_chan,
                                kernel_size=3,
                                stride=1,
-                               activation_fn=tf.nn.relu6,
+                               activation_fn=tf.nn.relu,
                                normalizer_fn=None,
                                padding='SAME')
             br_x = slim.conv2d(br_x,

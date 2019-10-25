@@ -14,55 +14,6 @@ import threading
 from nas.interfaces.NetworkBlock import *
 
 
-class RegionSEBlock(NetworkBlock):
-    n_layers = 0
-    n_comp_steps = 0
-
-    def __init__(self, in_channels, squeeze_channel, region_size):
-        super(RegionSEBlock, self).__init__()
-        self.in_channels = in_channels
-        self.squeeze_channel = squeeze_channel
-        self.region_size = region_size
-
-        self.pool2d = torch.nn.AvgPool2d(region_size, region_size, padding=region_size//2)
-        self.conv_1 = nn.Conv2d(in_channels, squeeze_channel, kernel_size=1, stride=1, padding=0, bias=False)
-        self.bn_1 = nn.BatchNorm2d(squeeze_channel)
-
-        self.conv_2 = nn.Conv2d(squeeze_channel, in_channels, kernel_size=1, stride=1, padding=0, bias=False)
-        self.bn_2 = nn.BatchNorm2d(in_channels)
-
-        self.switch = True
-
-        self.params = {
-            'module_list': ['RegionSEBlock'],
-            'name_list': ['RegionSEBlock'],
-            'RegionSEBlock': {'in_channels': in_channels, 'squeeze_channel': squeeze_channel, 'region_size': region_size},
-        }
-
-    def forward(self, x):
-        input = x
-        pool2d_x = self.pool2d(input)
-        x = self.conv_1(pool2d_x)
-        x = self.bn_1(x)
-        x = F.relu6(x)
-
-        x = self.conv_2(x)
-        x = self.bn_2(x)
-        x = F.sigmoid(x)
-
-        x = F.upsample(x, size=(int(input.shape[2]),int(input.shape[3])))
-        x = input * x
-        x = input + x
-
-        if self.get_sampling() is None:
-            return x
-
-        return x * (self._sampling.value == 1).float()
-
-    def get_flop_cost(self, x):
-        return [0] * self.state_num
-
-
 class GCN(NetworkBlock):
     n_layers = 1
     n_comp_steps = 1
@@ -130,7 +81,7 @@ class GCN(NetworkBlock):
         x = left_x2 + right_x2
 
         x_res = self.conv1(x)
-        x_res = F.relu6(x_res)
+        x_res = F.relu(x_res)
         x_res = self.conv2(x_res)
 
         x = x + x_res
@@ -196,7 +147,7 @@ class BoundaryRefinement(NetworkBlock):
 
     def forward(self, x):
         x_res = self.conv1(x)
-        x_res = F.relu6(x_res)
+        x_res = F.relu(x_res)
         x_res = self.conv2(x_res)
 
         x = x + x_res
@@ -265,14 +216,14 @@ class ASPPBlock(NetworkBlock):
         feature_1 = self.global_pool(x)
         feature_1 = self.conv_1_step(feature_1)
         feature_1 = self.bn1(feature_1)
-        feature_1 = F.relu6(feature_1)
+        feature_1 = F.relu(feature_1)
         feature_1 = F.upsample(feature_1, size=[h, w])
         branch_logits.append(feature_1)
 
         # 2.step 1x1 convolution
         feature_2 = self.conv_2_step(x)
         feature_2 = self.bn2(feature_2)
-        feature_2 = F.relu6(feature_2)
+        feature_2 = F.relu(feature_2)
         branch_logits.append(feature_2)
 
         # 3.step 3x3 convolutions with different atrous rates
@@ -284,7 +235,7 @@ class ASPPBlock(NetworkBlock):
         concat_logits = torch.cat(branch_logits, 1)
         concat_logits = self.conv_5_step(concat_logits)
         concat_logits = self.bn5(concat_logits)
-        concat_logits = F.relu6(concat_logits)
+        concat_logits = F.relu(concat_logits)
 
         if self.get_sampling() is None:
             return concat_logits
@@ -295,7 +246,7 @@ class ASPPBlock(NetworkBlock):
         conv1_params = self.conv_1_step.kernel_size[0]*self.conv_1_step.kernel_size[1]*self.conv_1_step.in_channels*self.conv_1_step.out_channels
         conv2_params = self.conv_2_step.kernel_size[0]*self.conv_2_step.kernel_size[1]*self.conv_2_step.in_channels*self.conv_2_step.out_channels
         atrous_conv_params = 0
-        for index in range(self.atrous_conv_list):
+        for index in range(len(self.atrous_conv_list)):
             atrous_conv_params += self.atrous_conv_list[index].get_param_num(x)[1]
         conv5_params = self.conv_5_step.kernel_size[0]*self.conv_5_step.kernel_size[1]*self.conv_5_step.in_channels*self.conv_5_step.out_channels
 

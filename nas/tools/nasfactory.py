@@ -32,7 +32,7 @@ class InvertedResidualBlockWithSEHS(NasBlock):
             if hs:
                 x = x * (tf.nn.relu6(x + 3.0) / 6.0)
             else:
-                x = tf.nn.relu6(x)
+                x = tf.nn.relu(x)
 
             stride = kwargs.get('stride', 1)
             if reduction and stride == 1:
@@ -47,15 +47,27 @@ class InvertedResidualBlockWithSEHS(NasBlock):
                                       normalizer_fn=slim.batch_norm,
                                       depth_multiplier=1,
                                       padding='SAME')
+
+            if hs:
+                x = x * (tf.nn.relu6(x + 3.0) / 6.0)
+            else:
+                x = tf.nn.relu(x)
+
             if se:
                 se_x = tf.reduce_mean(x, axis=[1, 2], keep_dims=True)
                 se_x = slim.conv2d(se_x,
                                    num_outputs=input_shape[3] * expansion // ratio,
                                    kernel_size=1,
                                    stride=1,
-                                   activation_fn=tf.nn.relu6,
+                                   activation_fn=None,
                                    normalizer_fn=None,
                                    padding='SAME')
+
+                if hs:
+                    se_x = se_x * (tf.nn.relu6(se_x + 3.0) / 6.0)
+                else:
+                    se_x = tf.nn.relu(se_x)
+
                 se_x = slim.conv2d(se_x,
                                    num_outputs=input_shape[3] * expansion,
                                    kernel_size=1,
@@ -64,13 +76,8 @@ class InvertedResidualBlockWithSEHS(NasBlock):
                                    normalizer_fn=None,
                                    padding='SAME')
 
-                se_x = se_x * (tf.nn.relu6(tf.add(x, 3.0)) / 6.0)
+                se_x = tf.nn.relu6(tf.add(se_x, 3.0)) / 6.0
                 x = tf.multiply(se_x, x)
-
-            if hs:
-                x = x * (tf.nn.relu6(tf.add(x, 3.0)) / 6.0)
-            else:
-                x = tf.nn.relu6(x)
 
             # no bias
             x = slim.conv2d(x,
@@ -110,7 +117,7 @@ class SepConvBN(NasBlock):
                                       num_outputs=out_chan,
                                       kernel_size=k_size,
                                       stride=stride,
-                                      activation_fn=tf.nn.relu6 if relu else None,
+                                      activation_fn=tf.nn.relu if relu else None,
                                       normalizer_fn=slim.batch_norm,
                                       rate=dilation,
                                       depth_multiplier=1,
@@ -150,7 +157,7 @@ class ConvBn(NasBlock):
                                num_outputs=out_chan,
                                kernel_size=k_size,
                                stride=stride,
-                               activation_fn=tf.nn.relu6 if relu else None,
+                               activation_fn=tf.nn.relu if relu else None,
                                normalizer_fn=slim.batch_norm,
                                rate=dilation,
                                padding='SAME')
@@ -217,7 +224,7 @@ class ResizedBlock(NasBlock):
                                 num_outputs=out_chan,
                                 kernel_size=k_size,
                                 stride=1,
-                                activation_fn=tf.nn.relu6 if relu else None,
+                                activation_fn=tf.nn.relu if relu else None,
                                 normalizer_fn=slim.batch_norm,
                                 padding='SAME')
 
