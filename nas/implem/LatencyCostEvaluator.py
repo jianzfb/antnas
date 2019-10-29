@@ -1,3 +1,7 @@
+# -*- coding: UTF-8 -*-
+# @Time    : 2019-10-29 12:15
+# @File    : LatencyCostEvaluator.py
+# @Author  : jian<jian@mltalker.com>
 import logging
 import torch
 from nas.implem.EdgeCostEvaluator import EdgeCostEvaluator
@@ -24,7 +28,11 @@ class LatencyCostEvaluator(EdgeCostEvaluator):
                 if (isinstance(input, tuple) or isinstance(input, list)) and len(input) == 1:
                     input = input[0]
 
-                cost = model.blocks[cur_node['module']].get_latency(input)
+                print('latency node %s'%node)
+                if node.startswith('F'):
+                    cost = [0.0] * NetworkBlock.state_num
+                else:
+                    cost = model.blocks[cur_node['module']].get_latency(input)
 
                 if main_cost:
                     cur_node['cost'] = cost

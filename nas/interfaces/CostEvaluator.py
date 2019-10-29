@@ -1,3 +1,7 @@
+# -*- coding: UTF-8 -*-
+# @Time    : 2019-08-19 18:16
+# @File    : CostEvaluator.py
+# @Author  : jian<jian@mltalker.com>
 import abc
 
 class CostEvaluator(object):

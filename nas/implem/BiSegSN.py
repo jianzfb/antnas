@@ -89,7 +89,7 @@ class BiSegSN(EvolutionSuperNetwork):
 
         # 1.step encoder
         # head (固定计算节点，对应激活参数不可学习)
-        in_module = ConvBn(self.in_chan, channels_per_block[0][0], k_size=3, stride=2, relu=True)
+        in_module = ConvBn(self.in_chan, 16, k_size=3, stride=2, relu=True)
         in_name = self.add_aggregation((0, 0), module=in_module, node_format=self._INPUT_NODE_FORMAT)
 
         # search space（stage - block - cell）
@@ -102,8 +102,7 @@ class BiSegSN(EvolutionSuperNetwork):
                                         blocks_per_stage[stage_i],
                                         cells_per_block[stage_i],
                                         channels_per_block[stage_i],
-                                        channels_per_block[stage_i+1][0] if stage_i != len(blocks_per_stage) - 1 else None,
-                                        stage_i)
+                                        16 if stage_i == 0 else channels_per_block[stage_i - 1][-1])
 
             if stage_i > 0:
                 # add stage edge
@@ -131,7 +130,7 @@ class BiSegSN(EvolutionSuperNetwork):
         # 1.3.step bibranch
         bibranch = (20, 0)
         self.add_aggregation(bibranch,
-                             FocusBlock(channels_per_block[0][0], 32),
+                             FocusBlock(16, 16),
                              node_format=self._FIXED_NODE_FORMAT)
         self.graph.add_edge(self._INPUT_NODE_FORMAT.format(0, 0),
                             self._FIXED_NODE_FORMAT.format(*bibranch),
@@ -152,7 +151,7 @@ class BiSegSN(EvolutionSuperNetwork):
 
         middle_branch_decoder_pos = (1, last_stage_index-2)
         self.add_aggregation(middle_branch_decoder_pos,
-                             ConvBn(channels_per_block[last_stage_index-1][0], 32, relu=True, k_size=3),
+                             ConvBn(channels_per_block[last_stage_index-2][-1], 32, relu=True, k_size=3),
                              node_format=self._FIXED_NODE_FORMAT)
         self.graph.add_edge(self._CELL_NODE_FORMAT.format(*middle_branch_pos),
                             self._FIXED_NODE_FORMAT.format(*middle_branch_decoder_pos),
@@ -213,7 +212,7 @@ class BiSegSN(EvolutionSuperNetwork):
 
         bibranch_decoder_conv_pos = (3, last_stage_index - 4)
         self.add_aggregation(bibranch_decoder_conv_pos,
-                             SepConvBN(64+32, 64, relu=True, k_size=3),
+                             SepConvBN(64+16, 64, relu=True, k_size=3),
                              node_format=self._FIXED_NODE_FORMAT)
         self.graph.add_edge(self._AGGREGATION_NODE_FORMAT.format(*bibranch_decoder_aggregation_pos),
                             self._FIXED_NODE_FORMAT.format(*bibranch_decoder_conv_pos),
@@ -238,23 +237,24 @@ class BiSegSN(EvolutionSuperNetwork):
         # set graph
         self.set_graph(self.graph, in_name, out_name)
 
-    def add_stage(self, pos_offset, block_num, cells_per_block, channles_per_block, next_stage_channels, stage_index):
+    def add_stage(self, pos_offset, block_num, cells_per_block, channles_per_block, pre_stage_channels):
         stage_offset = pos_offset
         offset_per_block = []
         for block_i in range(block_num):
             offset_per_block.append(stage_offset)
-            if block_i < block_num - 1:
+            if block_i == 0:
                 self.add_block(stage_offset,
                                cells_per_block[block_i],
                                channles_per_block[block_i],
-                               channles_per_block[block_i + 1],
+                               pre_stage_channels,
                                True if block_i == 0 else False)
             else:
                 self.add_block(stage_offset,
                                cells_per_block[block_i],
                                channles_per_block[block_i],
-                               next_stage_channels,
-                               True if block_i == 0 else False)
+                               channles_per_block[block_i-1],
+                               False)
+
             stage_offset += cells_per_block[block_i] * 2
 
             # dense connection among blocks
@@ -268,22 +268,17 @@ class BiSegSN(EvolutionSuperNetwork):
 
         return stage_offset
 
-    def add_block(self, pos_offset, cells, channles, next_block_channels, reduction=False):
+    def add_block(self, pos_offset, cells, channles, pre_block_channels, reduction=False):
         for cell_i in range(cells):
             # Add
             self.add_aggregation((0, pos_offset+cell_i*2), AddBlock(), self._AGGREGATION_NODE_FORMAT)
 
             # Cell
-            if cell_i != cells - 1:
-                self.add_cell((0, pos_offset+cell_i*2+1),
-                              CellBlock(channles, channles, reduction=reduction if cell_i == 0 else False),
-                              self._CELL_NODE_FORMAT)
-            else:
-                if next_block_channels is None:
-                    next_block_channels = channles
-                self.add_cell((0, pos_offset + cell_i * 2 + 1),
-                              CellBlock(channles, next_block_channels, reduction=reduction if cell_i == 0 else False),
-                              self._CELL_NODE_FORMAT)
+            self.add_cell((0, pos_offset + cell_i * 2 + 1),
+                          CellBlock(pre_block_channels if cell_i == 0 else channles,
+                                    channles,
+                                    reduction=reduction if cell_i == 0 else False),
+                          self._CELL_NODE_FORMAT)
 
             # 固定连接
             self.graph.add_edge(self._AGGREGATION_NODE_FORMAT.format(0, pos_offset+cell_i*2),

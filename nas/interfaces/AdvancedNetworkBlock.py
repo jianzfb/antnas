@@ -282,7 +282,7 @@ class FocusBlock(NetworkBlock):
 
     def __init__(self, in_chan, out_chan):
         super(FocusBlock, self).__init__()
-        self.sep_conv1 = SepConvBN(in_chan, out_chan, dilation=1, k_size=3, relu=True)
+        self.sep_conv1 = SepConvBN(out_chan, out_chan, dilation=1, k_size=3, relu=True)
         self.sep_conv2 = SepConvBN(out_chan, out_chan, dilation=2, k_size=3, relu=True)
         self.sep_conv3 = SepConvBN(out_chan, out_chan, dilation=4, k_size=3, relu=True)
         self.in_chan = in_chan

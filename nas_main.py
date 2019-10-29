@@ -73,9 +73,9 @@ def argument_parser():
     parser.add_argument('-np', '--n_parallel', dest='n_parallel', action='store', default=3, type=int,
                         help='Maximum number of module evaluation in parallel')
     parser.add_argument('-ce', '-cost_evaluation', dest='cost_evaluation', action='store',
-                        default=['comp'],
+                        default=['latency'],
                         type=restricted_list('comp', 'latency', 'para'))
-    parser.add_argument('-co', dest='cost_optimization', action='store', default='comp',
+    parser.add_argument('-co', dest='cost_optimization', action='store', default='latency',
                         type=restricted_str('comp', 'latency', 'para'))
 
     parser.add_argument('-lambda', dest='lambda', action='store', default=1e-7, type=float,

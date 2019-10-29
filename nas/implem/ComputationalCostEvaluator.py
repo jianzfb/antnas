@@ -1,3 +1,7 @@
+# -*- coding: UTF-8 -*-
+# @Time    : 2019-10-29 12:15
+# @File    : ComputationalCostEvaluator.py
+# @Author  : jian<jian@mltalker.com>
 import logging
 import torch
 from nas.implem.EdgeCostEvaluator import EdgeCostEvaluator

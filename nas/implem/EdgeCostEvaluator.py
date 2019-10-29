@@ -1,3 +1,7 @@
+# -*- coding: UTF-8 -*-
+# @Time    : 2019-10-29 12:15
+# @File    : EdgeCostEvaluator.py
+# @Author  : jian<jian@mltalker.com>
 from nas.interfaces.CostEvaluator import CostEvaluator
 import torch
 from nas.utils.globalval import *

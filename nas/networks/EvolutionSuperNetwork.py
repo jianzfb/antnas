@@ -153,6 +153,7 @@ class EvolutionSuperNetwork(SuperNetwork):
                 node_last_sampling = self.last_sampling[self.path_recorder.node_index[node]]
                 self.blocks[cur_node['module']].set_last_sampling(node_last_sampling)
 
+            print(node)
             # 4.4.step execute node op
             out = self.blocks[cur_node['module']](input)
 
@@ -262,7 +263,7 @@ class EvolutionSuperNetwork(SuperNetwork):
                                                                                        individual.values[0],
                                                                                        architecture_info,
                                                                                        int(parameter_num))
-                architecture_path = os.path.join(folder,architecture_tag)
+                architecture_path = os.path.join(folder, architecture_tag)
                 nx.write_gpickle(graph, architecture_path)
 
     def sampling_param_generator(self, node_name):
@@ -321,13 +322,17 @@ class EvolutionSuperNetwork(SuperNetwork):
             self.evolution_control.crossover_controler.generation = self.current_population.current_genration
 
             print('generate pareto front')
+            # 新完成训练的种群
             parent_population = copy.deepcopy(self.current_population)
+            # 前代精英种群
+            parent_population.extend(copy.deepcopy(self.current_population.pareto_front))
+            # 获得当代精英种群
             self.current_population.pareto_front = \
                 self.evolution_control.evolve(parent_population,
                                               target_size=self.population_size,
                                               children_population=None).population
-            print('pareto front size %d'%(len(self.current_population.pareto_front)))
 
+            print('pareto front size %d'%(len(self.current_population.pareto_front)))
             print('generate population for generation %d'%(self.current_population.current_genration))
             # 产生新种群 (crossover and mutation)
             candidate_elite_population = Population()
@@ -349,10 +354,9 @@ class EvolutionSuperNetwork(SuperNetwork):
                     graph=self.net,
                     blocks=self.blocks)
 
-            # TODO 可能导致上代精英种群过度训练，致使子代种群不易继续存活
             # parent.pareto_front + offsprings
             self.current_population.population = candidate_elite_population.population
-            self.current_population.population.extend(copy.deepcopy(self.current_population.pareto_front))
+            # self.current_population.population.extend(copy.deepcopy(self.current_population.pareto_front))
             print('population size %d for generation %d'%(len(self.current_population.population), self.current_population.current_genration))
 
             # 候选精英种群初始化
