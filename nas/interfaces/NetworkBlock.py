@@ -637,10 +637,7 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
         if self.se:
             se_x = self.global_pool(x)
             se_x = self.se_conv_layer_1(se_x)
-            if self.hs:
-                se_x = se_x * (F.relu6(se_x + 3.0) / 6.0)
-            else:
-                se_x = F.relu(se_x)
+            se_x = F.relu(se_x)
 
             se_x = self.se_conv_layer_2(se_x)
             se_x = F.relu6(se_x + 3.0) / 6.0

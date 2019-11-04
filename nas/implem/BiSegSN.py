@@ -30,9 +30,7 @@ class SegOutLayer(NetworkBlock):
 
     def __init__(self, in_chan, out_shape):
         super(SegOutLayer, self).__init__()
-        self.conv_1 = nn.Conv2d(in_chan, out_shape[0], kernel_size=3, stride=1, padding=3//2, bias=True)
-        self.conv_2 = nn.Conv2d(out_shape[0], out_shape[0], kernel_size=3, stride=1, padding=3//2, bias=True)
-        self.conv_3 = nn.Conv2d(in_chan, out_shape[0], kernel_size=1, stride=1, padding=0, bias=True)
+        self.conv = nn.Conv2d(in_chan, out_shape[0], kernel_size=1, stride=1, padding=0, bias=True)
         self.out_shape = out_shape
         self.params = {
             'module_list': ['SegOutLayer'],
@@ -43,15 +41,9 @@ class SegOutLayer(NetworkBlock):
 
     def forward(self, input):
         # resized to original size
-        resized_input = F.upsample(input, scale_factor=2.0, mode='bilinear')
-
-        # conv
-        x = self.conv_1(resized_input)
-        x = F.relu6(x)
-        x = self.conv_2(x)
-        y = self.conv_3(resized_input)
-        x = x + y
-        return x
+        y = self.conv(input)
+        y = F.upsample(y, scale_factor=2.0, mode='bilinear')
+        return y
 
     def get_flop_cost(self, x):
         return [0] + [0] * (self.state_num - 1)
@@ -115,7 +107,7 @@ class BiSegSN(EvolutionSuperNetwork):
         encoder_last_layer = (0, offset_per_stage[last_stage_index] + sum(cells_per_block[last_stage_index]) * 2 - 1)
         aspp_node_pos = (1, last_stage_index)
         self.add_aggregation(aspp_node_pos,
-                             ASPPBlock(channels_per_block[last_stage_index][-1], 256, atrous_rates=[2, 4, 6]),
+                             ASPPBlock(channels_per_block[last_stage_index][-1], 256, atrous_rates=[6, 12, 18]),
                              node_format=self._FIXED_NODE_FORMAT)
 
         self.graph.add_edge(self._CELL_NODE_FORMAT.format(*encoder_last_layer),

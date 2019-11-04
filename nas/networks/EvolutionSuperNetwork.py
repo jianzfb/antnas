@@ -153,7 +153,6 @@ class EvolutionSuperNetwork(SuperNetwork):
                 node_last_sampling = self.last_sampling[self.path_recorder.node_index[node]]
                 self.blocks[cur_node['module']].set_last_sampling(node_last_sampling)
 
-            print(node)
             # 4.4.step execute node op
             out = self.blocks[cur_node['module']](input)
 
@@ -476,7 +475,7 @@ class EvolutionSuperNetwork(SuperNetwork):
             y = [individual.objectives[0] for individual in self.current_population.pareto_front]
 
             x_min = np.min(x)
-            x_max = np.max(x) + 1
+            x_max = np.max(x)
 
             y_min = np.min(y)
             y_max = np.max(y)

@@ -61,12 +61,12 @@ def argument_parser():
 
     parser.add_argument('-cuda', action='store', default='', type=str,
                         help='Enables cuda and select device')
-    parser.add_argument('-latency', action='store', default='./latency.gpu.855.lookuptable.json',type=str,
+    parser.add_argument('-latency', action='store', default='./latency.gpu.855.512.lookuptable.json',type=str,
                         help='latency lookup table')
 
     parser.add_argument('-draw_env', default='test', type=str, help='Visdom drawing environment')
 
-    parser.add_argument('-regularizer', action='store', default=0, type=int, help='architecture regularizer')
+    parser.add_argument('-regularizer', action='store', default=1, type=int, help='architecture regularizer')
     parser.add_argument('-static_proba', action='store', default=-1, type=restricted_float(0, 1),
                         help='sample a static binary weight with given proba for each stochastic Node.')
 
