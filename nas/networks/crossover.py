@@ -80,21 +80,81 @@ class CrossOver(object):
 
       crossover_result = []
       crossover_num = self.size if self.size > 0 else N//2
-      for _ in range(crossover_num):
-        # selecting first chromosome
-        first_chromosome_index = np.random.choice(list(range(N)), p=chromosome_probability)
 
-        # selecting second chromosome
-        PCII = H[first_chromosome_index, :]/np.sum(H[first_chromosome_index, :])
-        second_chromosome_index = np.random.choice(list(range(N)), p=PCII)
+      # # method 1
+      # # 每一个个体均可以与某个个体参与交叉编译
+      # first_chromosome_index_list = np.random.choice(list(range(N)), size=N, replace=False, p=chromosome_probability)
+      # for first_chromosome_index in first_chromosome_index_list:
+      #     # selecting second chromosome
+      #     PCII = H[first_chromosome_index, :] / np.sum(H[first_chromosome_index, :])
+      #     second_chromosome_index = np.random.choice(list(range(N)), p=PCII)
+      #
+      #     # selecting
+      #     crossover_pos = np.random.choice(position_contribution[0].flatten().tolist(),
+      #                                      size=self.multi_points,
+      #                                      p=probability_contribution,
+      #                                      replace=False)
+      #
+      #     print("first %d second %d selection %s" % (first_chromosome_index,
+      #                                                second_chromosome_index,
+      #                                                str(crossover_pos.tolist())))
+      #     crossover_result.append((first_chromosome_index, second_chromosome_index, crossover_pos.tolist()))
 
-        # selecting
-        crossover_pos = np.random.choice(position_contribution[0].flatten().tolist(),
+      # # # method 2
+      # # # 随机挑选可以交叉变异对，可能存在没有交叉编译的可能，将被淘汰
+      # for crossover_count in range(crossover_num):
+      #   # selecting first chromosome
+      #   first_chromosome_index = np.random.choice(list(range(N)), p=chromosome_probability)
+      #
+      #   # selecting second chromosome
+      #   PCII = H[first_chromosome_index, :]/np.sum(H[first_chromosome_index, :])
+      #   second_chromosome_index = np.random.choice(list(range(N)), p=PCII)
+      #
+      #   # selecting
+      #   crossover_pos = np.random.choice(position_contribution[0].flatten().tolist(),
+      #                                    size=self.multi_points,
+      #                                    p=probability_contribution,
+      #                                    replace=False)
+      #
+      #   print("crossover %d count first %d second %d selection %s"%(crossover_count,
+      #                                                               first_chromosome_index,
+      #                                                               second_chromosome_index,
+      #                                                               str(crossover_pos.tolist())))
+      #
+      #   if len(crossover_pos) > 0:
+      #       crossover_result.append((first_chromosome_index, second_chromosome_index, crossover_pos.tolist()))
+
+      # method 3
+      # 随机挑选可以交叉变异对，将没有参与交叉变异的个体，依然保留下来
+      crossover_chromosome_list = []
+      for crossover_count in range(crossover_num):
+          # selecting first chromosome
+          first_chromosome_index = np.random.choice(list(range(N)), p=chromosome_probability)
+
+          # selecting second chromosome
+          PCII = H[first_chromosome_index, :]/np.sum(H[first_chromosome_index, :])
+          second_chromosome_index = np.random.choice(list(range(N)), p=PCII)
+          # selecting
+          crossover_pos = np.random.choice(position_contribution[0].flatten().tolist(),
                                          size=self.multi_points,
                                          p=probability_contribution,
                                          replace=False)
-        if len(crossover_pos) > 0:
-            crossover_result.append((first_chromosome_index, second_chromosome_index, crossover_pos.tolist()))
+
+          print("crossover %d count first %d second %d selection %s"%(crossover_count,
+                                                                    first_chromosome_index,
+                                                                    second_chromosome_index,
+                                                                    str(crossover_pos.tolist())))
+
+          if len(crossover_pos) > 0:
+              crossover_result.append((first_chromosome_index, second_chromosome_index, crossover_pos.tolist()))
+
+          crossover_chromosome_list.append(first_chromosome_index)
+          crossover_chromosome_list.append(second_chromosome_index)
+
+      for i in range(N):
+          if i not in crossover_chromosome_list:
+              print("no crossover %d"%i)
+              crossover_result.append((i, None, None))
 
       if len(crossover_result) == 0:
           print('couldnt finding crossover locs because of others')
@@ -162,19 +222,19 @@ class EvolutionCrossover(CrossOver):
     for crossover_suggestion in crossover_individuals:
         first_individual_index, second_individual_index, crossover_region = crossover_suggestion
 
-        first_individual_clone = copy.deepcopy(population.population[first_individual_index])
-        second_individual_clone = copy.deepcopy(population.population[second_individual_index])
+        if second_individual_index is not None:
+            first_individual_clone = copy.deepcopy(population.population[first_individual_index])
+            second_individual_clone = copy.deepcopy(population.population[second_individual_index])
 
-        for loc in crossover_region:
-            first_individual_clone.features[loc] = population.population[second_individual_index].features[loc]
-            second_individual_clone.features[loc] = population.population[first_individual_index].features[loc]
+            for loc in crossover_region:
+                first_individual_clone.features[loc] = population.population[second_individual_index].features[loc]
+                second_individual_clone.features[loc] = population.population[first_individual_index].features[loc]
 
-        crossover_population.population.append(first_individual_clone)
-        if len(crossover_population.population) == self.size:
-            break
+            crossover_population.population.append(first_individual_clone)
+            crossover_population.population.append(second_individual_clone)
+        else:
+            first_individual_clone = copy.deepcopy(population.population[first_individual_index])
+            crossover_population.population.append(first_individual_clone)
 
-        crossover_population.population.append(second_individual_clone)
-        if len(crossover_population.population) == self.size:
-            break
-
+    # may be larger than > original population size
     return crossover_population

@@ -73,7 +73,7 @@ class Mutation(object):
     probability_sigma = probability_sigma / (np.sum(probability_sigma) + 0.000000001)
 
     mutation_result = []
-    for f in fitness_values:
+    for f_index, f in enumerate(fitness_values):
         # mutation points number
         multi_points = self.multi_points if self.multi_points > 0 else int(alpha[f[0]] * len(position_sigma[0].flatten().tolist()))
         if multi_points > 0:
@@ -81,8 +81,10 @@ class Mutation(object):
                                                  multi_points,
                                                  replace=False,
                                                  p=probability_sigma)
+            print("individual %d mutation at %s"%(f_index, str(mutation_position.flatten().tolist())))
             mutation_result.append((f + (mutation_position.flatten().tolist(),)))
         else:
+            print("individual %d mutation at none"%f_index)
             mutation_result.append((f + (None,)))
 
     return mutation_result
@@ -161,7 +163,7 @@ class EvolutionMutation(Mutation):
 
     mutation_individuals = self.adaptive_mutate(fitness_values=fitness_values)
 
-    for individual in mutation_individuals:
+    for index, individual in enumerate(mutation_individuals):
       if individual[-1] is not None:
         individual_index = individual[0]
         mutation_position = individual[-1]
@@ -182,6 +184,11 @@ class EvolutionMutation(Mutation):
 
                     population.population[individual_index].features[pos] = mutated_val
                 else:
-                    population.population[individual_index].features[pos] = int(np.random.randint(0, NetworkBlock.state_num, 1))
+                    cur_state = population.population[individual_index].features[pos]
+                    mutated_state = np.random.choice([a for a in list(range(NetworkBlock.state_num)) if a != cur_state], 1)
+                    population.population[individual_index].features[pos] = int(mutated_state)
+                    print("individual %d mutation to %d at pos %d" % (index,population.population[individual_index].features[pos], pos))
+            else:
+                print("shouldnt mutation at this pos")
 
     return population

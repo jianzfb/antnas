@@ -85,7 +85,7 @@ class EvolutionSuperNetwork(SuperNetwork):
         self.nodes_param = None
 
         self.max_generation = 100
-        self.epoch_num_every_generation = 50
+        self.epoch_num_every_generation = 20
         self.current_population = None
         self.population_size = 100
         assert(self.epoch_num_every_generation > 2)
@@ -94,10 +94,10 @@ class EvolutionSuperNetwork(SuperNetwork):
         mutation_control = EvolutionMutation(multi_points=-1,
                                              max_generation=self.max_generation,
                                              k0=1.0,
-                                             k1=0.8,
+                                             k1=1.0,
                                              method='based_matrices',
                                              adaptive=True)
-        crossover_control = EvolutionCrossover(multi_points=5,
+        crossover_control = EvolutionCrossover(multi_points=8,
                                                max_generation=self.max_generation,
                                                k0=1.0,
                                                k1=0.8,
@@ -196,9 +196,11 @@ class EvolutionSuperNetwork(SuperNetwork):
             for arch_index, sample_index in zip(batched_archs_index, list(range(batch_size))):
                 evaluation_count = self.current_population.population[arch_index].evaluation_count
                 pre_accuracy = self.current_population.population[arch_index].values[0]
-                self.current_population.population[arch_index].values[0] = (pre_accuracy * (evaluation_count-1) + model_accuracy[sample_index].item())/float(evaluation_count)
+                self.current_population.population[arch_index].values[0] = (pre_accuracy * (evaluation_count-1) + model_accuracy[sample_index].item() * self.current_population.population[arch_index].discount)/float(evaluation_count)
                 self.current_population.population[arch_index].values[1] = sampled_cost[sample_index].item()
                 self.evolution_control.problem.calculateObjectives(self.current_population.population[arch_index])
+
+                print("architecture index %d evaluation count %d"%(arch_index, evaluation_count))
             population_lock.release()
 
         # 9.step compute regularizer loss
@@ -321,15 +323,14 @@ class EvolutionSuperNetwork(SuperNetwork):
             self.evolution_control.crossover_controler.generation = self.current_population.current_genration
 
             print('generate pareto front')
-            # 新完成训练的种群
+            # 新完成训练的种群 (parent + children)
             parent_population = copy.deepcopy(self.current_population)
-            # 前代精英种群
-            parent_population.extend(copy.deepcopy(self.current_population.pareto_front))
+            # # 前代精英种群
+            # parent_population.extend(copy.deepcopy(self.current_population.pareto_front))
             # 获得当代精英种群
             self.current_population.pareto_front = \
                 self.evolution_control.evolve(parent_population,
-                                              target_size=self.population_size,
-                                              children_population=None).population
+                                              target_size=self.population_size).population
 
             print('pareto front size %d'%(len(self.current_population.pareto_front)))
             print('generate population for generation %d'%(self.current_population.current_genration))
@@ -354,21 +355,30 @@ class EvolutionSuperNetwork(SuperNetwork):
                     blocks=self.blocks)
 
             # parent.pareto_front + offsprings
+            children_size = len(candidate_elite_population.population)
+            parent_size = len(self.current_population.pareto_front)
             self.current_population.population = candidate_elite_population.population
-            # self.current_population.population.extend(copy.deepcopy(self.current_population.pareto_front))
-            print('population size %d for generation %d'%(len(self.current_population.population), self.current_population.current_genration))
+            self.current_population.population.extend(self.current_population.pareto_front)
+            print('population size %d (children %d, parent %d)for generation %d'%(len(self.current_population.population),
+                                                                                  children_size,
+                                                                                  parent_size,
+                                                                                  self.current_population.current_genration))
 
             # 候选精英种群初始化
-            for individual_index, individual in enumerate(self.current_population.population):
-                individual.id = individual_index
-                individual.is_selected = False
-                individual.selected_count = 0
-                individual.evaluation_count = 0
-                individual.objectives[0] = 0
-                individual.objectives[1] = 0
-                individual.values[0] = 0
-                individual.values[1] = 0
-                individual.type = 'children'
+            for individual_index in range(children_size+parent_size):
+                self.current_population.population[individual_index].id = individual_index
+                self.current_population.population[individual_index].is_selected = False
+                self.current_population.population[individual_index].selected_count = 0
+                self.current_population.population[individual_index].evaluation_count = 0
+                self.current_population.population[individual_index].objectives[0] = 0
+                self.current_population.population[individual_index].objectives[1] = 0
+                self.current_population.population[individual_index].values[0] = 0
+                self.current_population.population[individual_index].values[1] = 0
+                if individual_index < children_size:
+                    self.current_population.population[individual_index].discount = 1.0
+                else:
+                    self.current_population.population[individual_index].discount = 0.7
+                self.current_population.population[individual_index].type = 'children'
 
             self.current_population.update_population_flag = False
 
@@ -450,6 +460,7 @@ class EvolutionSuperNetwork(SuperNetwork):
                 me.is_selected = False
                 me.selected_count = 0
                 me.evaluation_count = 0
+                me.discount = 1.0
                 me.type = 'parent'
                 self.current_population.population.append(me)
 

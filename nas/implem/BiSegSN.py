@@ -40,9 +40,8 @@ class SegOutLayer(NetworkBlock):
         }
 
     def forward(self, input):
-        # resized to original size
         y = self.conv(input)
-        y = F.upsample(y, scale_factor=2.0, mode='bilinear')
+        y = F.upsample(y, scale_factor=4.0, mode='bilinear')
         return y
 
     def get_flop_cost(self, x):
@@ -107,7 +106,7 @@ class BiSegSN(EvolutionSuperNetwork):
         encoder_last_layer = (0, offset_per_stage[last_stage_index] + sum(cells_per_block[last_stage_index]) * 2 - 1)
         aspp_node_pos = (1, last_stage_index)
         self.add_aggregation(aspp_node_pos,
-                             ASPPBlock(channels_per_block[last_stage_index][-1], 256, atrous_rates=[6, 12, 18]),
+                             ASPPBlock(channels_per_block[last_stage_index][-1], 256, atrous_rates=[3, 6, 9]),
                              node_format=self._FIXED_NODE_FORMAT)
 
         self.graph.add_edge(self._CELL_NODE_FORMAT.format(*encoder_last_layer),
@@ -118,15 +117,6 @@ class BiSegSN(EvolutionSuperNetwork):
         self.graph.add_edge(self._INPUT_NODE_FORMAT.format(0, 0),
                             self._AGGREGATION_NODE_FORMAT.format(0, 1),
                             width_node=self._AGGREGATION_NODE_FORMAT.format(0, 1))
-
-        # 1.3.step bibranch
-        bibranch = (20, 0)
-        self.add_aggregation(bibranch,
-                             FocusBlock(16, 16),
-                             node_format=self._FIXED_NODE_FORMAT)
-        self.graph.add_edge(self._INPUT_NODE_FORMAT.format(0, 0),
-                            self._FIXED_NODE_FORMAT.format(*bibranch),
-                            width_node=self._FIXED_NODE_FORMAT.format(*bibranch))
 
         # 2.step decoder
         # 2.1.step aspp decoder
@@ -143,7 +133,7 @@ class BiSegSN(EvolutionSuperNetwork):
 
         middle_branch_decoder_pos = (1, last_stage_index-2)
         self.add_aggregation(middle_branch_decoder_pos,
-                             ConvBn(channels_per_block[last_stage_index-2][-1], 32, relu=True, k_size=3),
+                             ConvBn(channels_per_block[last_stage_index-2][-1], 48, relu=True, k_size=3),
                              node_format=self._FIXED_NODE_FORMAT)
         self.graph.add_edge(self._CELL_NODE_FORMAT.format(*middle_branch_pos),
                             self._FIXED_NODE_FORMAT.format(*middle_branch_decoder_pos),
@@ -164,7 +154,7 @@ class BiSegSN(EvolutionSuperNetwork):
 
         decoder_aggregation_conv_1_node_pos = (3, last_stage_index-2)
         self.add_aggregation(decoder_aggregation_conv_1_node_pos,
-                             SepConvBN(256+32, 64, relu=True, k_size=3),
+                             SepConvBN(256+48, 256, relu=True, k_size=3),
                              node_format=self._FIXED_NODE_FORMAT)
 
         self.graph.add_edge(self._AGGREGATION_NODE_FORMAT.format(*decoder_aggregation_node_pos),
@@ -173,45 +163,15 @@ class BiSegSN(EvolutionSuperNetwork):
 
         decoder_aggregation_conv_2_node_pos = (4, last_stage_index-2)
         self.add_aggregation(decoder_aggregation_conv_2_node_pos,
-                             SepConvBN(64, 64, relu=True, k_size=3),
+                             SepConvBN(256, 256, relu=True, k_size=3),
                              node_format=self._FIXED_NODE_FORMAT)
 
         self.graph.add_edge(self._FIXED_NODE_FORMAT.format(*decoder_aggregation_conv_1_node_pos),
                             self._FIXED_NODE_FORMAT.format(*decoder_aggregation_conv_2_node_pos),
                             width_node=self._FIXED_NODE_FORMAT.format(*decoder_aggregation_conv_2_node_pos))
 
-        # 2.3.step bibranch decoder
-        bibranch_decoder_pos = (1, last_stage_index - 4)
-        self.add_aggregation(bibranch_decoder_pos,
-                             ResizedBlock(64, -1, scale_factor=2),
-                             node_format=self._FIXED_NODE_FORMAT)
-
-        self.graph.add_edge(self._FIXED_NODE_FORMAT.format(*decoder_aggregation_conv_2_node_pos),
-                            self._FIXED_NODE_FORMAT.format(*bibranch_decoder_pos),
-                            width_node=self._FIXED_NODE_FORMAT.format(*bibranch_decoder_pos))
-
-        bibranch_decoder_aggregation_pos = (2, last_stage_index - 4)
-        self.add_aggregation(bibranch_decoder_aggregation_pos,
-                             ConcatBlock(),
-                             node_format=self._AGGREGATION_NODE_FORMAT)
-        self.graph.add_edge(self._FIXED_NODE_FORMAT.format(*bibranch),
-                            self._AGGREGATION_NODE_FORMAT.format(*bibranch_decoder_aggregation_pos),
-                            width_node=self._AGGREGATION_NODE_FORMAT.format(*bibranch_decoder_aggregation_pos))
-
-        self.graph.add_edge(self._FIXED_NODE_FORMAT.format(*bibranch_decoder_pos),
-                            self._AGGREGATION_NODE_FORMAT.format(*bibranch_decoder_aggregation_pos),
-                            width_node=self._AGGREGATION_NODE_FORMAT.format(*bibranch_decoder_aggregation_pos))
-
-        bibranch_decoder_conv_pos = (3, last_stage_index - 4)
-        self.add_aggregation(bibranch_decoder_conv_pos,
-                             SepConvBN(64+16, 64, relu=True, k_size=3),
-                             node_format=self._FIXED_NODE_FORMAT)
-        self.graph.add_edge(self._AGGREGATION_NODE_FORMAT.format(*bibranch_decoder_aggregation_pos),
-                            self._FIXED_NODE_FORMAT.format(*bibranch_decoder_conv_pos),
-                            width_node=self._FIXED_NODE_FORMAT.format(*bibranch_decoder_conv_pos))
-
         # 3.step output(固定计算节点，对应激活参数不可学习)
-        out_module = SegOutLayer(64, data_prop['out_size'])
+        out_module = SegOutLayer(256, data_prop['out_size'])
         out_name = self._OUTPUT_NODE_FORMAT.format(*(0, offset_per_stage[-1]+sum(cells_per_block[-1])*2))
         sampling_param = self.sampling_param_generator(out_name)
 
@@ -220,7 +180,7 @@ class BiSegSN(EvolutionSuperNetwork):
                             module_params=out_module.params,
                             sampling_param=len(self.sampling_parameters),
                             pos=BSNDrawer.get_draw_pos(pos=(0, offset_per_stage[-1]+sum(cells_per_block[-1])*2)))
-        self.graph.add_edge(self._FIXED_NODE_FORMAT.format(*bibranch_decoder_conv_pos),
+        self.graph.add_edge(self._FIXED_NODE_FORMAT.format(*decoder_aggregation_conv_2_node_pos),
                             out_name,
                             width_node=out_name)
         self.sampling_parameters.append(sampling_param)

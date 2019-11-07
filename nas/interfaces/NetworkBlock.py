@@ -23,7 +23,6 @@ class NetworkBlock(nn.Module):
         self._sampling = threading.local()
         self._last_sampling = threading.local()
         self.node_regularizer = threading.local()
-        self.node_quant_error = threading.local()
         self._is_switch = False
         self._params = {}
 

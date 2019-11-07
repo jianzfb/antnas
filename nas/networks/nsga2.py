@@ -58,6 +58,7 @@ class Individual(object):
     self.is_selected = False
     self.selected_count = 0
     self.evaluation_count = 0
+    self.discount = 1.0
 
   def set_objectives(self, objectives):
     self.objectives = objectives
@@ -203,14 +204,7 @@ class Nsga2(object):
     # return children population
     return population_clone
 
-  def evolve(self,
-             population,
-             target_size,
-             graph=None,
-             blocks=None,
-             architecture_index=None,
-             architecture_cost_func=None,
-             children_population=None):
+  def evolve(self, population, target_size):
     # 1.step compute nondominated_sort and crowding distance
     self.fast_nondominated_sort(population)
     for front in population.fronts:
@@ -219,18 +213,18 @@ class Nsga2(object):
     # environment pooling population (parent + children)
     expand_population = population
 
-    # 2.step generate next children generation
-    children = children_population
-    if children is None and graph is not None:
-      children = self.create_children(population, graph, blocks, architecture_index, architecture_cost_func)
-
-    # 3.step environment pooling
-    # 3.1.step expand population
-    if children is not None:
-      expand_population.extend(children)
-
-    # 3.2.step re-fast-nondominated-sort
-    self.fast_nondominated_sort(expand_population)
+    # # 2.step generate next children generation
+    # children = children_population
+    # if children is None and graph is not None:
+    #   children = self.create_children(population, graph, blocks, architecture_index, architecture_cost_func)
+    #
+    # # 3.step environment pooling
+    # # 3.1.step expand population
+    # if children is not None:
+    #   expand_population.extend(children)
+    #
+    # # 3.2.step re-fast-nondominated-sort
+    # self.fast_nondominated_sort(expand_population)
 
     # 3.3.step select elite into next population
     front_num = 0
@@ -248,8 +242,8 @@ class Nsga2(object):
     if len(new_population) < target_size:
       self.calculate_crowding_distance(expand_population.fronts[front_num])
       expand_population.fronts[front_num] = sorted(expand_population.fronts[front_num],
-                                                 key=functools.cmp_to_key(self.crowding_operator),
-                                            reverse=True)
+                                                   key=functools.cmp_to_key(self.crowding_operator),
+                                                   reverse=True)
       new_population.extend(expand_population.fronts[front_num][0:target_size - len(new_population)])
     return new_population
 
