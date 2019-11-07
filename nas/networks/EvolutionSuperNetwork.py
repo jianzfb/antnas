@@ -102,7 +102,7 @@ class EvolutionSuperNetwork(SuperNetwork):
                                                k0=1.0,
                                                k1=0.8,
                                                method='based_matrices',
-                                               size=self.population_size)
+                                               size=self.population_size//2)
         self.evolution_control = Nsga2(ModelProblem('MINIMIZE',
                                                     alpha=-0.07,
                                                     beta=-0.07,
@@ -358,7 +358,7 @@ class EvolutionSuperNetwork(SuperNetwork):
             children_size = len(candidate_elite_population.population)
             parent_size = len(self.current_population.pareto_front)
             self.current_population.population = candidate_elite_population.population
-            self.current_population.population.extend(self.current_population.pareto_front)
+            self.current_population.population.extend(copy.deepcopy(self.current_population.pareto_front))
             print('population size %d (children %d, parent %d)for generation %d'%(len(self.current_population.population),
                                                                                   children_size,
                                                                                   parent_size,
