@@ -14,6 +14,30 @@ from nas.dataset.portrait import PortraitSegmentation
 logger = logging.getLogger(__name__)
 
 
+class Test(data.Dataset):
+    def __init__(self):
+        pass
+
+    def __getitem__(self, index):
+        return np.random.randint(0, 255, (3, 512, 512), dtype=np.uint8), \
+               np.random.randint(0, 20, (1, 512, 512), dtype=np.uint8)
+
+    def __len__(self):
+        return 100
+
+
+def get_Test(path, *args):
+    img_dim = 512
+    in_channels = 3
+    out_size = (512, 512)
+
+    train_set = Test()
+    val_set = Test()
+    test_set = Test()
+
+    return train_set, val_set, test_set, img_dim, in_channels, out_size
+
+
 def get_PASCAL2012_SEG(path, *args):
     path = os.path.join(path, 'vision')
     img_dim = 224
@@ -233,7 +257,8 @@ sets = {
     'SVHN': get_SVHN,
     'ImageNet': get_ImageNet,
     'PASCAL2012SEG': get_PASCAL2012_SEG,
-    'PORTRAIT_SEG': get_Portrait_SEG
+    'PORTRAIT_SEG': get_Portrait_SEG,
+    'TEST_DATA': get_Test
 }
 
 

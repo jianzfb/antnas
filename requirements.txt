@@ -7,3 +7,5 @@ pymongo==3
 sacred==0.7
 visdom==0.1.8.5
 plotly==2
+numpy
+tensorflow
