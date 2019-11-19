@@ -84,8 +84,8 @@ class EvolutionSuperNetwork(SuperNetwork):
         super(EvolutionSuperNetwork, self).__init__(*args, **kwargs)
         self.nodes_param = None
 
-        self.max_generation = 100
-        self.epoch_num_every_generation = 20
+        self.max_generation = 10
+        self.epoch_num_every_generation = 15
         self.current_population = None
         self.population_size = 100
         assert(self.epoch_num_every_generation > 2)
@@ -94,10 +94,10 @@ class EvolutionSuperNetwork(SuperNetwork):
         mutation_control = EvolutionMutation(multi_points=-1,
                                              max_generation=self.max_generation,
                                              k0=1.0,
-                                             k1=1.0,
+                                             k1=1.5,
                                              method='based_matrices',
                                              adaptive=True)
-        crossover_control = EvolutionCrossover(multi_points=8,
+        crossover_control = EvolutionCrossover(multi_points=5,
                                                max_generation=self.max_generation,
                                                k0=1.0,
                                                k1=0.8,
@@ -377,7 +377,7 @@ class EvolutionSuperNetwork(SuperNetwork):
                 if individual_index < children_size:
                     self.current_population.population[individual_index].discount = 1.0
                 else:
-                    self.current_population.population[individual_index].discount = 0.7
+                    self.current_population.population[individual_index].discount = 0.98
                 self.current_population.population[individual_index].type = 'children'
 
             self.current_population.update_population_flag = False

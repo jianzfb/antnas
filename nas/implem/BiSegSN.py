@@ -93,7 +93,8 @@ class BiSegSN(EvolutionSuperNetwork):
                                         blocks_per_stage[stage_i],
                                         cells_per_block[stage_i],
                                         channels_per_block[stage_i],
-                                        16 if stage_i == 0 else channels_per_block[stage_i - 1][-1])
+                                        16 if stage_i == 0 else channels_per_block[stage_i - 1][-1],
+                                        stage_i == len(blocks_per_stage) - 1)
 
             if stage_i > 0:
                 # add stage edge
@@ -129,17 +130,17 @@ class BiSegSN(EvolutionSuperNetwork):
                             width_node=self._FIXED_NODE_FORMAT.format(*aspp_decoder_pos))
 
         # 2.2.step middle feature decoder
-        middle_branch_pos = (0, offset_per_stage[last_stage_index-2] + sum(cells_per_block[last_stage_index-2]) * 2 - 1)
+        middle_branch_pos = (0, offset_per_stage[last_stage_index-3] + sum(cells_per_block[last_stage_index-3]) * 2 - 1)
 
-        middle_branch_decoder_pos = (1, last_stage_index-2)
+        middle_branch_decoder_pos = (1, last_stage_index-3)
         self.add_aggregation(middle_branch_decoder_pos,
-                             ConvBn(channels_per_block[last_stage_index-2][-1], 48, relu=True, k_size=3),
+                             ConvBn(channels_per_block[last_stage_index-3][-1], 48, relu=True, k_size=3),
                              node_format=self._FIXED_NODE_FORMAT)
         self.graph.add_edge(self._CELL_NODE_FORMAT.format(*middle_branch_pos),
                             self._FIXED_NODE_FORMAT.format(*middle_branch_decoder_pos),
                             width_node=self._FIXED_NODE_FORMAT.format(*middle_branch_decoder_pos))
 
-        decoder_aggregation_node_pos = (2, last_stage_index-2)
+        decoder_aggregation_node_pos = (2, last_stage_index-3)
         self.add_aggregation(decoder_aggregation_node_pos,
                              ConcatBlock(),
                              node_format=self._AGGREGATION_NODE_FORMAT)
@@ -152,7 +153,7 @@ class BiSegSN(EvolutionSuperNetwork):
                             self._AGGREGATION_NODE_FORMAT.format(*decoder_aggregation_node_pos),
                             width_node=self._AGGREGATION_NODE_FORMAT.format(*decoder_aggregation_node_pos))
 
-        decoder_aggregation_conv_1_node_pos = (3, last_stage_index-2)
+        decoder_aggregation_conv_1_node_pos = (3, last_stage_index-3)
         self.add_aggregation(decoder_aggregation_conv_1_node_pos,
                              SepConvBN(256+48, 256, relu=True, k_size=3),
                              node_format=self._FIXED_NODE_FORMAT)
@@ -161,7 +162,7 @@ class BiSegSN(EvolutionSuperNetwork):
                             self._FIXED_NODE_FORMAT.format(*decoder_aggregation_conv_1_node_pos),
                             width_node=self._FIXED_NODE_FORMAT.format(*decoder_aggregation_conv_1_node_pos))
 
-        decoder_aggregation_conv_2_node_pos = (4, last_stage_index-2)
+        decoder_aggregation_conv_2_node_pos = (4, last_stage_index-3)
         self.add_aggregation(decoder_aggregation_conv_2_node_pos,
                              SepConvBN(256, 256, relu=True, k_size=3),
                              node_format=self._FIXED_NODE_FORMAT)
@@ -189,7 +190,7 @@ class BiSegSN(EvolutionSuperNetwork):
         # set graph
         self.set_graph(self.graph, in_name, out_name)
 
-    def add_stage(self, pos_offset, block_num, cells_per_block, channles_per_block, pre_stage_channels):
+    def add_stage(self, pos_offset, block_num, cells_per_block, channles_per_block, pre_stage_channels, is_final_stage):
         stage_offset = pos_offset
         offset_per_block = []
         for block_i in range(block_num):
@@ -199,12 +200,14 @@ class BiSegSN(EvolutionSuperNetwork):
                                cells_per_block[block_i],
                                channles_per_block[block_i],
                                pre_stage_channels,
+                               is_final_stage,
                                True if block_i == 0 else False)
             else:
                 self.add_block(stage_offset,
                                cells_per_block[block_i],
                                channles_per_block[block_i],
                                channles_per_block[block_i-1],
+                               is_final_stage,
                                False)
 
             stage_offset += cells_per_block[block_i] * 2
@@ -220,17 +223,24 @@ class BiSegSN(EvolutionSuperNetwork):
 
         return stage_offset
 
-    def add_block(self, pos_offset, cells, channles, pre_block_channels, reduction=False):
+    def add_block(self, pos_offset, cells, channles, pre_block_channels, is_final_stage, reduction=False):
         for cell_i in range(cells):
             # Add
             self.add_aggregation((0, pos_offset+cell_i*2), AddBlock(), self._AGGREGATION_NODE_FORMAT)
 
             # Cell
-            self.add_cell((0, pos_offset + cell_i * 2 + 1),
-                          CellBlock(pre_block_channels if cell_i == 0 else channles,
-                                    channles,
-                                    reduction=reduction if cell_i == 0 else False),
-                          self._CELL_NODE_FORMAT)
+            if not is_final_stage:
+                self.add_cell((0, pos_offset + cell_i * 2 + 1),
+                              CellBlock(pre_block_channels if cell_i == 0 else channles,
+                                        channles,
+                                        reduction=reduction if cell_i == 0 else False),
+                              self._CELL_NODE_FORMAT)
+            else:
+                self.add_cell((0, pos_offset + cell_i * 2 + 1),
+                              DilationCellBlock(pre_block_channels if cell_i == 0 else channles,
+                                        channles,
+                                        reduction=False),
+                              self._CELL_NODE_FORMAT)
 
             # 固定连接
             self.graph.add_edge(self._AGGREGATION_NODE_FORMAT.format(0, pos_offset+cell_i*2),

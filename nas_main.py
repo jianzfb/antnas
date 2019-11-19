@@ -61,7 +61,7 @@ def argument_parser():
 
     parser.add_argument('-cuda', action='store', default='', type=str,
                         help='Enables cuda and select device')
-    parser.add_argument('-latency', action='store', default='./latency.gpu.855.512.lookuptable.json',type=str,
+    parser.add_argument('-latency', action='store', default='./latency.gpu.855.224_16.32.64.96.112.160_lookuptable.json',type=str,
                         help='latency lookup table')
 
     parser.add_argument('-draw_env', default='test', type=str, help='Visdom drawing environment')
@@ -117,9 +117,9 @@ def main(args, plotter):
     #                 channels_per_block=[[16], [24], [40], [80, 112], [160]])
 
     # BiSegSN
-    nas_model.build(blocks_per_stage=[1, 1, 4],
-                    cells_per_block=[[2], [4], [4, 4, 4, 1]],
-                    channels_per_block=[[32], [40], [80, 96, 192, 320]])
+    nas_model.build(blocks_per_stage=[1, 1, 2, 2],
+                    cells_per_block=[[2], [4], [3, 3], [3, 3]],
+                    channels_per_block=[[16], [32], [64, 96], [112, 160]])
 
     # # Mobilenetv2BiSegSN
     # nas_model.build(blocks_per_stage=[1, 1, 1, 3],

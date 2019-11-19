@@ -39,8 +39,7 @@ class Mutation(object):
                               # can be considered as an information measure of chromosome i
     ordered_fitness = [(f[0], f[1]) for f in fitness_values]
     ordered_fitness = sorted(ordered_fitness, key=lambda x: x[1])
-    ordered_fitness_values = np.array([m[1] for m in ordered_fitness])
-    probability_fitness = ordered_fitness_values / np.sum(ordered_fitness_values)
+    probability_fitness = np.array([m[1] for m in ordered_fitness])
 
     gamma = 1
     if self.adaptive:
@@ -81,6 +80,7 @@ class Mutation(object):
                                                  multi_points,
                                                  replace=False,
                                                  p=probability_sigma)
+            print(probability_sigma)
             print("individual %d mutation at %s"%(f_index, str(mutation_position.flatten().tolist())))
             mutation_result.append((f + (mutation_position.flatten().tolist(),)))
         else:

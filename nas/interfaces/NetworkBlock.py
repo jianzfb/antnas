@@ -562,7 +562,8 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
                  reduction=False,
                  ratio=4,
                  se=True,
-                 hs=True):
+                 hs=True,
+                 dilation=1):
         super(InvertedResidualBlockWithSEHS, self).__init__()
         # expansion,
         self.conv1 = nn.Conv2d(in_chan,
@@ -577,8 +578,9 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
                                  kernel_size=kernel_size,
                                  groups=in_chan * expansion,
                                  stride=2 if reduction else 1,
-                                 padding=kernel_size // 2,
-                                 bias=False)
+                                 padding=kernel_size // 2 + (kernel_size-1)*(dilation-1) // 2,
+                                 bias=False,
+                                 dilation=dilation)
         self.bn2 = nn.BatchNorm2d(in_chan * expansion)
 
         # for se
