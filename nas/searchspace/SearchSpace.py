@@ -5,7 +5,7 @@
 from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
-from nas.implem import *
+from nas.searchspace import *
 
 
 class SearchSpace(object):

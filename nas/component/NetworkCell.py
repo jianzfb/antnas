@@ -5,7 +5,7 @@
 from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
-from nas.interfaces.NetworkBlock import *
+from nas.component.NetworkBlock import *
 import torch.nn.functional as F
 
 
@@ -72,28 +72,18 @@ class CellBlock(NetworkBlock):
         self.op_list = self.build()
         assert(len(self.op_list) == NetworkBlock.state_num)
 
-    def forward(self, input):
+    def forward(self, input, sampling=None):
         last_cell_result = None
         val_list = []
         for i in range(len(self.op_list)):
             op_result = self.op_list[i](input)
 
-            op_sampling = (self._sampling.value == i).float()
-            op_result = op_result * op_sampling
-
-            if getattr(self._last_sampling, 'value', None) is not None:
-                if int(self._last_sampling.value.item()) == i:
-                    last_cell_result = op_result
+            if sampling is not None:
+              op_sampling = (sampling == i).float()
+              op_result = op_result * op_sampling
 
             val_list.append(op_result)
         cell_result = sum(val_list)
-
-        # set regularizer loss
-        if last_cell_result is not None:
-            last_cell_result = last_cell_result.detach()
-            regularizer_loss = F.kl_div(cell_result, last_cell_result, reduction='batchmean')
-            self.set_node_regularizer(regularizer_loss)
-
         return cell_result
 
     def get_flop_cost(self, x):
@@ -178,27 +168,18 @@ class DilationCellBlock(NetworkBlock):
         self.op_list = self.build()
         assert(len(self.op_list) == NetworkBlock.state_num)
 
-    def forward(self, input):
+    def forward(self, input, sampling=None):
         last_cell_result = None
         val_list = []
         for i in range(len(self.op_list)):
             op_result = self.op_list[i](input)
 
-            op_sampling = (self._sampling.value == i).float()
-            op_result = op_result * op_sampling
-
-            if getattr(self._last_sampling, 'value', None) is not None:
-                if int(self._last_sampling.value.item()) == i:
-                    last_cell_result = op_result
+            if sampling is not None:
+              op_sampling = (sampling == i).float()
+              op_result = op_result * op_sampling
 
             val_list.append(op_result)
         cell_result = sum(val_list)
-
-        # set regularizer loss
-        if last_cell_result is not None:
-            last_cell_result = last_cell_result.detach()
-            regularizer_loss = F.kl_div(cell_result, last_cell_result, reduction='batchmean')
-            self.set_node_regularizer(regularizer_loss)
 
         return cell_result
 
@@ -286,28 +267,18 @@ class ReductionCellBlock(NetworkBlock):
         self.op_list = self.build()
         assert(len(self.op_list) == NetworkBlock.state_num)
 
-    def forward(self, input):
+    def forward(self, input, sampling=None):
         last_cell_result = None
         val_list = []
         for i in range(len(self.op_list)):
             op_result = self.op_list[i](input)
 
-            op_sampling = (self._sampling.value == i).float()
-            op_result = op_result * op_sampling
-
-            if getattr(self._last_sampling, 'value', None) is not None:
-                if int(self._last_sampling.value.item()) == i:
-                    last_cell_result = op_result
+            if sampling is not None:
+              op_sampling = (sampling == i).float()
+              op_result = op_result * op_sampling
 
             val_list.append(op_result)
         cell_result = sum(val_list)
-
-        # set regularizer loss
-        if last_cell_result is not None:
-            last_cell_result = last_cell_result.detach()
-            regularizer_loss = F.kl_div(cell_result, last_cell_result, reduction='batchmean')
-            self.set_node_regularizer(regularizer_loss)
-
         return cell_result
 
     def get_flop_cost(self, x):

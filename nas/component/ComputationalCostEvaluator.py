@@ -4,20 +4,19 @@
 # @Author  : jian<jian@mltalker.com>
 import logging
 import torch
-from nas.implem.EdgeCostEvaluator import EdgeCostEvaluator
-from nas.interfaces.NetworkBlock import NetworkBlock
+from nas.component.EdgeCostEvaluator import EdgeCostEvaluator
+from nas.component.NetworkBlock import NetworkBlock
 
 logger = logging.getLogger(__name__)
 
 
 class ComputationalCostEvaluator(EdgeCostEvaluator):
-    def init_costs(self, model, main_cost, graph):
+    def init_costs(self, model, graph, is_main_cost=False):
         print('initialize computation cost')
         with torch.no_grad():
             # set costs
             costs = torch.Tensor(graph.number_of_nodes(), NetworkBlock.state_num)
 
-            count = 0
             for node in model.traversal_order:
                 cur_node = graph.node[node]
                 # if isinstance(cur_node['module'], NetworkBlock):
@@ -31,10 +30,10 @@ class ComputationalCostEvaluator(EdgeCostEvaluator):
 
                 cost = model.blocks[cur_node['module']].get_flop_cost(input)
 
-                if main_cost:
+                if is_main_cost:
                     cur_node['cost'] = cost
 
-                costs[self.model.architecture_node_index[node]] = torch.Tensor(cost)
+                costs[self.model.arch_node_index[node]] = torch.Tensor(cost)
 
-                count += 1
+            self.costs = costs
             return costs

@@ -4,8 +4,8 @@
 # @Author  : jian<jian@mltalker.com>
 import logging
 import torch
-from nas.implem.EdgeCostEvaluator import EdgeCostEvaluator
-from nas.interfaces.NetworkBlock import NetworkBlock
+from nas.component.EdgeCostEvaluator import EdgeCostEvaluator
+from nas.component.NetworkBlock import NetworkBlock
 logger = logging.getLogger(__name__)
 
 
@@ -16,7 +16,7 @@ class LatencyCostEvaluator(EdgeCostEvaluator):
         NetworkBlock.load_lookup_table(self.kwargs['latency'])
         print('load latency lookup table')
 
-    def init_costs(self, model, main_cost, graph):
+    def init_costs(self, model, graph, is_main_cost=False):
         print('initialize latency cost')
         with torch.no_grad():
             # set costs
@@ -28,15 +28,15 @@ class LatencyCostEvaluator(EdgeCostEvaluator):
                 if (isinstance(input, tuple) or isinstance(input, list)) and len(input) == 1:
                     input = input[0]
 
-                print('latency node %s'%node)
                 if node.startswith('F'):
                     cost = [0.0] * NetworkBlock.state_num
                 else:
                     cost = model.blocks[cur_node['module']].get_latency(input)
 
-                if main_cost:
+                if is_main_cost:
                     cur_node['cost'] = cost
 
-                costs[self.model.architecture_node_index[node]] = torch.Tensor(cost)
+                costs[self.model.arch_node_index[node]] = torch.Tensor(cost)
 
+            self.costs = costs
             return costs

@@ -1,10 +1,9 @@
 import logging
 
 import torch
-from torch.autograd import Variable
 
-from nas.implem.EdgeCostEvaluator import EdgeCostEvaluator
-from nas.interfaces.NetworkBlock import NetworkBlock
+from nas.component.EdgeCostEvaluator import EdgeCostEvaluator
+from nas.component.NetworkBlock import NetworkBlock
 
 logger = logging.getLogger(__name__)
 

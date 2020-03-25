@@ -1,29 +1,19 @@
 # -*- coding: UTF-8 -*-
 # @Time    : 2019-08-19 18:37
-# @File    : NasModel.py
+# @File    : manager.py
 # @Author  : jian<jian@mltalker.com>
 from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
-import torch
 from torch.autograd import Variable
 from torch import optim
-import torch.nn as nn
 from tqdm import tqdm
-from torch.nn.parallel import DistributedDataParallel
-from nas.networks.SearchSpace import *
+from nas.searchspace.SearchSpace import *
 
 
-class NasModel(object):
+class Manager(object):
     def __init__(self, args, data_properties):
         self.args = args
-        # 创建搜索空间
-        # self._model = SearchSpace(arch=args['arch']).build(blocks_per_stage=[1, 1, 1, 3, 3],
-        #                                                    cells_per_block=[[3], [3], [3], [3, 3, 3], [3,3,3],[3,3,3]],
-        #                                                    channels_per_block=[[16], [32], [64], [128, 128, 128],[256,256,256]],
-        #                                                    data_prop=data_properties,
-        #                                                    **args)
-
         self._search_space = SearchSpace(arch=args['arch'])
         assert(self._search_space is not None)
 
@@ -91,16 +81,14 @@ class NasModel(object):
         if not self.model.training:
             self.model.train()
 
-        # 0.step before process
-        self.supernetwork.preprocess()
-
         # 1.step forward model
         loss, accuracy, sample_cost, prune_cost = self.model(Variable(x), Variable(y))
 
         # 2.step get last sampling
-        last_sampling = self.supernetwork.path_recorder.get_and_reset()
-        self.supernetwork.last_sampling = last_sampling
-        return loss.mean(), accuracy.sum(), sample_cost.mean(), prune_cost.mean()
+        return loss.mean(), \
+               accuracy.sum(), \
+               sample_cost.mean() if sample_cost is not None else None, \
+               prune_cost.mean() if prune_cost is not None else None
 
     def eval(self, x, y, loader, name=''):
         if self.model.training:

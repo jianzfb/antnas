@@ -61,10 +61,10 @@ def get_PASCAL2012_SEG(path, *args):
                      std=[0.229, 0.224, 0.225]),
     ])
 
-    train_dst = VOCSegmentation(root=path, is_aug=True, image_set='train',
+    train_dst = VOCSegmentation(root=path, is_aug=False, image_set='train',
                                 transform=train_transform)
 
-    val_dst = VOCSegmentation(root=path, is_aug=True, image_set='val',
+    val_dst = VOCSegmentation(root=path, is_aug=False, image_set='val',
                               transform=val_transform)
     test_dst = val_dst
 

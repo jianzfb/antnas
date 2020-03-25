@@ -4,6 +4,7 @@
 # @Author  : jian<jian@mltalker.com>
 import abc
 
+
 class CostEvaluator(object):
     __metaclass__ = abc.ABCMeta
 
@@ -18,8 +19,8 @@ class CostEvaluator(object):
     def get_cost(self, **kwargs):
         raise NotImplementedError
 
-    def get_costs(self, architectures, graph):
-        return [self.get_cost(arch, graph) for arch in architectures]
+    def get_costs(self, architectures):
+        return [self.get_cost(arch) for arch in architectures]
 
     def init_costs(self, *args, **kwargs):
         pass

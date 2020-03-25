@@ -19,6 +19,7 @@ import math
 from sklearn import gaussian_process
 import functools
 # import matplotlib.pyplot as plt
+from nas.networks.metric import *
 
 
 class BayesianOptimizer(object):
@@ -68,14 +69,14 @@ class BayesianOptimizer(object):
                 temp_exp = min((opt_acq - elem.metric_value) / t, 1.0)
             ap = math.exp(temp_exp)
             if ap >= random.uniform(0, 1):
-                for model_x, model in searcher():
+                for model_x in searcher():
                     # UCB acquisition function
                     temp_acq_value = self.acq(np.expand_dims(model_x, 0))[0]
-                    pq.put(elem_class(temp_acq_value, model))
+                    pq.put(elem_class(temp_acq_value, model_x))
 
                     if self._accept_new_acq_value(opt_acq, temp_acq_value):
                         opt_acq = temp_acq_value
-                        opt_model = model
+                        opt_model = model_x
                         opt_model_x = model_x
 
             t *= alpha
@@ -84,7 +85,7 @@ class BayesianOptimizer(object):
         if remaining_time < 0:
             raise TimeoutError
 
-        return opt_model_x, opt_acq, opt_model
+        return opt_acq, opt_model
 
     def predict(self, x):
         return self.gp.predict(x, return_std=True)

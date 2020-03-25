@@ -2,19 +2,13 @@
 # @Time    : 2019-10-29 12:15
 # @File    : EdgeCostEvaluator.py
 # @Author  : jian<jian@mltalker.com>
-from nas.interfaces.CostEvaluator import CostEvaluator
+from nas.component.CostEvaluator import CostEvaluator
 import torch
 from nas.utils.globalval import *
 
 
 class EdgeCostEvaluator(CostEvaluator):
-    def get_cost(self, architectures, graph):
-        # initialize
-        cost_lock.acquire(blocking=True)
-        if self.costs is None:
-            self.costs = self.init_costs(self.model, self.main_cost, graph)
-        cost_lock.release()
-
+    def get_cost(self, architectures):
         # self.costs is N x state
         costs = torch.gather(self.costs, dim=1, index=architectures.long())
         # costs = costs * architectures

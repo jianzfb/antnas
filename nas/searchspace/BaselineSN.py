@@ -6,19 +6,12 @@ from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
 
-from numbers import Number
 import networkx as nx
-import numpy as np
-import torch.nn.functional as F
-from torch import nn
-import torch
-from nas.interfaces.NetworkBlock import *
-from nas.interfaces.NetworkCell import *
-# from nas.networks.StochasticSuperNetwork import StochasticSuperNetwork
-from nas.networks.EvolutionSuperNetwork import EvolutionSuperNetwork
+from nas.component.NetworkCell import *
+from nas.networks.UniformSamplingSuperNetwork import UniformSamplingSuperNetwork
 from nas.utils.drawers.BSNDrawer import BSNDrawer
-from nas.implem.Loss import *
-from nas.implem.ClassificationAccuracyEvaluator import *
+from nas.component.Loss import *
+from nas.component.ClassificationAccuracyEvaluator import *
 
 __all__ = ['BaselineSN']
 
@@ -44,7 +37,7 @@ class OutLayer(NetworkBlock):
             'out': 'outname'
         }
 
-    def forward(self, x):
+    def forward(self, x, sampling=None):
         x = self.conv_1(x)
         x = self.bn(x)
         x = F.relu6(x)
@@ -60,7 +53,7 @@ class OutLayer(NetworkBlock):
         return [0] + [0] * (self.state_num - 1)
 
 
-class BaselineSN(EvolutionSuperNetwork):
+class BaselineSN(UniformSamplingSuperNetwork):
     _INPUT_NODE_FORMAT = 'I_{}_{}'              # 不可学习
     _OUTPUT_NODE_FORMAT = 'O_{}_{}'             # 不可学习
     _AGGREGATION_NODE_FORMAT = 'A_{}_{}'        # 不可学习
@@ -102,8 +95,9 @@ class BaselineSN(EvolutionSuperNetwork):
                                         blocks_per_stage[stage_i],
                                         cells_per_block[stage_i],
                                         channels_per_block[stage_i],
-                                        channels_per_block[stage_i+1][0] if stage_i != len(blocks_per_stage) - 1 else None,
-                                        stage_i)
+                                        16 if stage_i == 0 else channels_per_block[stage_i - 1][-1],
+                                        stage_i == len(blocks_per_stage) - 1,
+                                        stage_i == 0)
 
             if stage_i > 0:
                 # add stage edge
@@ -135,23 +129,26 @@ class BaselineSN(EvolutionSuperNetwork):
         # set graph
         self.set_graph(self.graph, in_name, out_name)
 
-    def add_stage(self, pos_offset, block_num, cells_per_block, channles_per_block, next_stage_channels, stage_index):
+    def add_stage(self, pos_offset, block_num, cells_per_block, channles_per_block, pre_stage_channels, is_final_stage, is_first_stage):
         stage_offset = pos_offset
         offset_per_block = []
         for block_i in range(block_num):
             offset_per_block.append(stage_offset)
-            if block_i < block_num - 1:
+            if block_i == 0:
                 self.add_block(stage_offset,
                                cells_per_block[block_i],
                                channles_per_block[block_i],
-                               channles_per_block[block_i + 1],
-                               True if block_i == 0 and stage_index != 0 else False)
+                               pre_stage_channels,
+                               is_final_stage,
+                               True if (block_i == 0 and not is_first_stage) else False)
             else:
                 self.add_block(stage_offset,
                                cells_per_block[block_i],
                                channles_per_block[block_i],
-                               next_stage_channels,
-                               True if block_i == 0 and stage_index != 0 else False)
+                               channles_per_block[block_i-1],
+                               is_final_stage,
+                               False)
+
             stage_offset += cells_per_block[block_i] * 2
 
             # dense connection among blocks
@@ -165,22 +162,23 @@ class BaselineSN(EvolutionSuperNetwork):
 
         return stage_offset
 
-    def add_block(self, pos_offset, cells, channles, next_block_channels, reduction=False):
+    def add_block(self, pos_offset, cells, channles, pre_block_channels, is_final_stage, reduction=False):
         for cell_i in range(cells):
             # Add
             self.add_aggregation((0, pos_offset+cell_i*2), AddBlock(), self._AGGREGATION_NODE_FORMAT)
 
             # Cell
-            if cell_i != cells - 1:
-                self.add_cell((0, pos_offset+cell_i*2+1),
-                              CellBlock(channles, channles, reduction=reduction if cell_i == 0 else False),
-                              self._CELL_NODE_FORMAT)
+            if reduction and cell_i == 0:
+              self.add_cell((0, pos_offset + cell_i * 2 + 1),
+                            ReductionCellBlock(pre_block_channels if cell_i == 0 else channles,
+                                      channles),
+                            self._CELL_NODE_FORMAT)
             else:
-                if next_block_channels is None:
-                    next_block_channels = channles
-                self.add_cell((0, pos_offset + cell_i * 2 + 1),
-                              CellBlock(channles, next_block_channels, reduction=reduction if cell_i == 0 else False),
-                              self._CELL_NODE_FORMAT)
+              self.add_cell((0, pos_offset + cell_i * 2 + 1),
+                            CellBlock(pre_block_channels if cell_i == 0 else channles,
+                                      channles,
+                                      reduction=reduction if cell_i == 0 else False),
+                            self._CELL_NODE_FORMAT)
 
             # 固定连接
             self.graph.add_edge(self._AGGREGATION_NODE_FORMAT.format(0, pos_offset+cell_i*2),

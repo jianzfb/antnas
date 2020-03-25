@@ -10,29 +10,24 @@ from torch import nn
 import torch
 import json
 import os
-import threading
 
 
 class NetworkBlock(nn.Module):
     state_num = 5
-    epoch = 0
     lookup_table = {}
 
     def __init__(self):
         super(NetworkBlock, self).__init__()
-        self._sampling = threading.local()
-        self._last_sampling = threading.local()
-        self.node_regularizer = threading.local()
-        self._is_switch = False
         self._params = {}
+        self._structure_fixed = True
 
     @property
-    def switch(self):
-        return self._is_switch
+    def structure_fixed(self):
+        return self._structure_fixed
 
-    @switch.setter
-    def switch(self, val):
-        self._is_switch = val
+    @structure_fixed.setter
+    def structure_fixed(self, val):
+        self._structure_fixed = val
 
     @property
     def params(self):
@@ -56,7 +51,7 @@ class NetworkBlock(nn.Module):
         return [0.0] * NetworkBlock.state_num
 
     def get_param_num(self, x):
-        return [0] * NetworkBlock.state_num
+        return [0.0] * NetworkBlock.state_num
 
     def get_flop_cost(self, x):
         return [0.0] * NetworkBlock.state_num
@@ -154,30 +149,6 @@ class NetworkBlock(nn.Module):
 
         return total_ops
 
-    def set_sampling(self, val):
-        self._sampling.value = val
-
-    def get_sampling(self):
-        return getattr(self._sampling, 'value', None)
-
-    def set_last_sampling(self, val):
-        self._last_sampling.value = val
-
-    def get_last_sampling(self):
-        return getattr(self._last_sampling, 'value', None)
-
-    def set_node_regularizer(self, val):
-        self.node_regularizer.value = val
-
-    def get_node_regularizer(self):
-        return getattr(self.node_regularizer, 'value', None)
-
-    def set_node_quant_error(self, val):
-        self.node_quant_error.value = val
-
-    def get_node_quant_error(self):
-        return getattr(self.node_quant_error, 'value', None)
-
 
 class Identity(NetworkBlock):
     n_layers = 0
@@ -185,7 +156,7 @@ class Identity(NetworkBlock):
 
     def __init__(self):
         super(Identity, self).__init__()
-        self.switch = True
+        self.structure_fixed = False
 
         self.params = {
             'module_list': ['Identity'],
@@ -193,11 +164,11 @@ class Identity(NetworkBlock):
             'Identity': {}
         }
 
-    def forward(self, x):
-        if self.get_sampling() is None:
+    def forward(self, x, sampling=None):
+        if sampling is None:
             return x
 
-        return x * (self._sampling.value == 1).float()
+        return x * (sampling == 1).float()
 
     def get_flop_cost(self, x):
         return [0] * self.state_num
@@ -213,8 +184,7 @@ class Skip(NetworkBlock):
         self.out_channels = out_chan
         self.reduction = reduction
         self.pool2d = torch.nn.AvgPool2d(2, 2)
-
-        self.switch = True
+        self.structure_fixed = False
 
         self.params = {
             'module_list': ['Skip'],
@@ -222,7 +192,7 @@ class Skip(NetworkBlock):
             'Skip': {'out_chan': out_chan, 'reduction': reduction},
         }
 
-    def forward(self, x):
+    def forward(self, x, sampling=None):
         x_res = x
         if self.out_channels > self.in_channels:
             x_res = torch.cat([x, torch.zeros(x.size(0),
@@ -232,10 +202,10 @@ class Skip(NetworkBlock):
         if self.reduction:
             x_res = self.pool2d(x_res)
 
-        if self.get_sampling() is None:
+        if sampling is None:
             return x_res
 
-        return x_res * (self._sampling.value == 1).float()
+        return x_res * (sampling == 1).float()
 
     def get_flop_cost(self, x):
         return [0] * NetworkBlock.state_num
@@ -251,7 +221,7 @@ class ConvBn(NetworkBlock):
     def __init__(self, in_chan, out_chan, relu, k_size=3, stride=1, dilation=1):
         super(ConvBn, self).__init__()
         self.conv = nn.Conv2d(in_chan, out_chan, kernel_size=k_size, stride=stride, padding=k_size//2, bias=False, dilation=dilation)
-        self.bn = nn.BatchNorm2d(out_chan)
+        self.bn = nn.BatchNorm2d(out_chan, momentum=1.0)
         self.relu = relu
         self.out_chan = out_chan
         self.params = {
@@ -263,21 +233,21 @@ class ConvBn(NetworkBlock):
                        'relu': relu,
                        'dilation': dilation}
         }
-        self.switch = True
+        self.structure_fixed = False
 
     def get_param_num(self, x):
         return [0] + [self.conv.kernel_size[0]*self.conv.kernel_size[1]*self.conv.in_channels*self.conv.out_channels] + [0]*(NetworkBlock.state_num - 2)
 
-    def forward(self, x):
+    def forward(self, x, sampling=None):
         x = self.conv(x)
         x = self.bn(x)
         if self.relu:
             x = F.relu(x)
 
-        if self.get_sampling() is None:
+        if sampling is None:
             return x
 
-        return x * (self._sampling.value == 1).float()
+        return x * (sampling == 1).float()
 
     def get_flop_cost(self, x):
         conv_in_data_size = torch.Size([1, *x.shape[1:]])
@@ -323,7 +293,7 @@ class SepConvBN(NetworkBlock):
                                         dilation=dilation,
                                         bias=False)
         self.pointwise_conv = nn.Conv2d(in_chan, out_chan, kernel_size=1, stride=1, padding=0, bias=False)
-        self.bn = nn.BatchNorm2d(out_chan)
+        self.bn = nn.BatchNorm2d(out_chan, momentum=1.0)
         self.relu = relu
         self.out_chan = out_chan
 
@@ -336,19 +306,19 @@ class SepConvBN(NetworkBlock):
                           'relu': relu,
                           'dilation': dilation}
         }
-        self.switch = True
+        self.structure_fixed = False
 
-    def forward(self, x):
+    def forward(self, x, sampling=None):
         x = self.depthwise_conv(x)
         x = self.pointwise_conv(x)
         x = self.bn(x)
         if self.relu:
             x = F.relu(x)
 
-        if self.get_sampling() is None:
+        if sampling is None:
             return x
 
-        return x * (self._sampling.value == 1).float()
+        return x * (sampling == 1).float()
 
     def get_param_num(self, x):
         part1_params = self.depthwise_conv.kernel_size[0]*self.depthwise_conv.kernel_size[1]*self.depthwise_conv.in_channels
@@ -410,15 +380,15 @@ class ResizedBlock(NetworkBlock):
                              'scale_factor': scale_factor}
         }
 
-    def forward(self, x):
+    def forward(self, x, sampling=None):
         x = F.upsample(x, scale_factor=self.scale_factor, mode='bilinear')
         if self.conv_layer is not None:
             x = self.conv_layer(x)
 
-        if self.get_sampling() is None:
+        if sampling is None:
             return x
 
-        return x * (self._sampling.value == 1).float()
+        return x * (sampling == 1).float()
 
     def get_param_num(self, x):
         if self.conv_layer is not None:
@@ -446,7 +416,7 @@ class AddBlock(NetworkBlock):
             'AddBlock': {}
         }
 
-    def forward(self, x):
+    def forward(self, x, sampling=None):
         if not isinstance(x, list):
             return x
 
@@ -473,7 +443,7 @@ class ConcatBlock(NetworkBlock):
             'ConcatBlock': {}
         }
 
-    def forward(self, x):
+    def forward(self, x, sampling=None):
         if not isinstance(x, list):
             return x
 
@@ -571,7 +541,7 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
                                kernel_size=1,
                                stride=1,
                                bias=False)
-        self.bn1 = nn.BatchNorm2d(in_chan * expansion)
+        self.bn1 = nn.BatchNorm2d(in_chan * expansion, momentum=1.0)
 
         self.dwconv2 = nn.Conv2d(in_chan * expansion,
                                  in_chan * expansion,
@@ -581,7 +551,7 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
                                  padding=kernel_size // 2 + (kernel_size-1)*(dilation-1) // 2,
                                  bias=False,
                                  dilation=dilation)
-        self.bn2 = nn.BatchNorm2d(in_chan * expansion)
+        self.bn2 = nn.BatchNorm2d(in_chan * expansion,momentum=1.0)
 
         # for se
         if se:
@@ -604,7 +574,7 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
                                kernel_size=1,
                                stride=1,
                                bias=False)
-        self.bn3 = nn.BatchNorm2d(out_chan)
+        self.bn3 = nn.BatchNorm2d(out_chan,momentum=1.0)
         self.ratio = ratio
 
         self.reduction = reduction
@@ -619,7 +589,7 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
         else:
             self.skip = False
 
-    def forward(self, input):
+    def forward(self, input, sampling=None):
         x = input
         x = self.conv1(x)
         x = self.bn1(x)
@@ -755,3 +725,20 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
                                                      "%dx%dx%dx%d"%(int(input_h), self.in_chan, int(after_h), self.out_chan))
         latency_cost = [0] + [irb_latency] + [0] * (NetworkBlock.state_num - 2)
         return latency_cost
+
+
+if __name__ == '__main__':
+    # 1.step test convbn flops
+    # a = ConvBn(128, 256, True, 3)
+    # t = torch.ones((1,128,10,10))
+    # b = a.get_flop_cost(t)
+    # print(b)
+
+    # # 2.step test sepconvbn
+    # a = SepConvBN(128,256,True,3)
+    # t = torch.ones((1,128,10,10))
+    # b = a.get_flop_cost(t)
+    # print(b)
+
+    # 3.step test
+    pass

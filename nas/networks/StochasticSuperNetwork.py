@@ -9,13 +9,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from nas.networks.SuperNetwork import SuperNetwork
-from nas.interfaces.NetworkBlock import *
-from nas.interfaces.NetworkCell import *
-from nas.interfaces.PathRecorder import PathRecorder
+from nas.component.NetworkBlock import *
+from nas.component.NetworkCell import *
+from nas.component.PathRecorder import PathRecorder
 import copy
 import networkx as nx
 import threading
 import pickle
+from nas.networks.bayesian import *
 
 
 class StochasticSuperNetwork(SuperNetwork):

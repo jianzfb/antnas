@@ -11,7 +11,7 @@ import torch
 import json
 import os
 import threading
-from nas.interfaces.NetworkBlock import *
+from nas.component.NetworkBlock import *
 
 
 class GCN(NetworkBlock):

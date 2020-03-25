@@ -8,7 +8,7 @@ from __future__ import print_function
 import numpy as np
 import random
 import networkx as nx
-from nas.interfaces.NetworkBlock import *
+from nas.component.NetworkBlock import *
 
 
 class Mutation(object):
@@ -41,11 +41,10 @@ class Mutation(object):
     ordered_fitness = sorted(ordered_fitness, key=lambda x: x[1])
     probability_fitness = np.array([m[1] for m in ordered_fitness])
 
-    gamma = 1
-    if self.adaptive:
-      gamma = np.exp(float(self.generation)/float(self.max_generation * self.k0) - self.k1)
-
-    probability_fitness = np.power(probability_fitness, gamma)
+    # gamma = 1
+    # if self.adaptive:
+    #   gamma = np.exp(float(self.generation)/float(self.max_generation * self.k0) - self.k1)
+    # probability_fitness = np.power(probability_fitness, gamma)
     probability_fitness = probability_fitness / np.sum(probability_fitness)
 
     c_sum = 0.0
@@ -60,32 +59,63 @@ class Mutation(object):
     for n in range(N):
       A[n, :] = np.array(fitness_values[n][2])
 
-    # which position in chromosome i should mutation
-    sigma = np.sum(np.power(A - np.mean(A, 0), 2.0) * C, 0) / np.sum(C)
-    position_sigma = np.where(sigma > 0.00001)
-    if position_sigma[0].size == 0:
-        print('couldnt finding mutation locs because of sigma')
+    # 分析p(fitness|pos,state)
+    AA = A.astype(np.int32)
+    AA_FITNESS = np.array([f[1] for f in fitness_values])
+    probability_contribution_pos = np.zeros((M))
+    for m in range(M):
+        m_list = AA[:, m].tolist()
+        lookup = {}
+        for state_i in range(NetworkBlock.state_num):
+            count = m_list.count(state_i)
+            lookup[state_i] = (float)(count) / (float)(N)
+
+        for n in range(N):
+            probability_contribution_pos[m] += lookup[int(AA[n, m])] * AA_FITNESS[n]
+
+    sigma = np.std(A, 0)
+    position_contribution = np.where(sigma > 0.00001)
+    if position_contribution[0].size == 0:
+        print('couldnt finding crossover locs because of sigma')
         return []
 
-    probability_sigma = sigma[position_sigma]
-    probability_sigma = np.power(probability_sigma, gamma)
-    probability_sigma = probability_sigma / (np.sum(probability_sigma) + 0.000000001)
+    # 获得每一基因位的变异概率
+    # 基因位置对适应度的贡献（除去那些不动基因）
+    probability_contribution_pos = probability_contribution_pos[position_contribution]
+    probability_contribution_pos = probability_contribution_pos / np.sum(probability_contribution_pos)
+    # 贡献的反
+    probability_contribution_pos = 1.0 - probability_contribution_pos
+    # 重新归一化
+    probability_contribution_pos = probability_contribution_pos / np.sum(probability_contribution_pos)
 
+    print("gene mutation probability at position")
+    print(probability_contribution_pos)
+    print(position_contribution)
+
+    #######################################################################
     mutation_result = []
     for f_index, f in enumerate(fitness_values):
         # mutation points number
-        multi_points = self.multi_points if self.multi_points > 0 else int(alpha[f[0]] * len(position_sigma[0].flatten().tolist()))
+        multi_points = self.multi_points if self.multi_points > 0 else int(alpha[f[0]] * len(position_contribution[0]))
         if multi_points > 0:
-            mutation_position = np.random.choice(position_sigma[0].flatten().tolist(),
+            print("multi_points %d"%(multi_points))
+            mutation_position = np.random.choice(position_contribution[0],
                                                  multi_points,
                                                  replace=False,
-                                                 p=probability_sigma)
-            print(probability_sigma)
-            print("individual %d mutation at %s"%(f_index, str(mutation_position.flatten().tolist())))
-            mutation_result.append((f + (mutation_position.flatten().tolist(),)))
+                                                 p=probability_contribution_pos)
+            mutation_position = mutation_position.flatten().tolist()
+            mutation_state = []
+            for _ in mutation_position:
+              s = np.random.choice(list(range(NetworkBlock.state_num)),
+                                   1,
+                                   replace=False)
+              mutation_state.append(int(s))
+
+            print("individual %d mutation at %s to state %s"%(f_index, str(mutation_position), str(mutation_state)))
+            mutation_result.append((f + (mutation_position, mutation_state)))
         else:
             print("individual %d mutation at none"%f_index)
-            mutation_result.append((f + (None,)))
+            mutation_result.append((f + (None, None)))
 
     return mutation_result
 
@@ -143,7 +173,7 @@ class EvolutionMutation(Mutation):
                                             k0=k0,
                                             k1=k1)
 
-  def population_mutate(self, *args, **kwargs):
+  def mutate(self, *args, **kwargs):
     population = kwargs['population']
     graph = kwargs['graph']
     blocks = kwargs['blocks']
@@ -163,31 +193,28 @@ class EvolutionMutation(Mutation):
 
     mutation_individuals = self.adaptive_mutate(fitness_values=fitness_values)
 
-    for index, individual in enumerate(mutation_individuals):
+    for _, individual in enumerate(mutation_individuals):
       if individual[-1] is not None:
         individual_index = individual[0]
-        mutation_position = individual[-1]
-        mutation_position = sorted(mutation_position)
+        mutation_position = individual[-2]
+        mutation_state = individual[-1]
 
-        for pos in mutation_position:
-            node_name = pos_map[pos]
+        for mutation_index, mutation_pos in enumerate(mutation_position):
+            node_name = pos_map[mutation_pos]
             node = graph.node[node_name]
 
             if node_name.startswith("CELL") or node_name.startswith('T'):
                 if blocks[node['module']].switch:
-                    mutated_val = 0
-                    before_val = population.population[individual_index].features[pos]
-                    if before_val == 0:
-                        mutated_val = 1
-                    else:
-                        mutated_val = 0
-
-                    population.population[individual_index].features[pos] = mutated_val
+                    mutated_state = mutation_state[mutation_index]
+                    if mutated_state != 0 and mutated_state != 1:
+                      mutated_state = 1
+                    population.population[individual_index].features[mutation_pos] = int(mutated_state)
                 else:
-                    cur_state = population.population[individual_index].features[pos]
-                    mutated_state = np.random.choice([a for a in list(range(NetworkBlock.state_num)) if a != cur_state], 1)
-                    population.population[individual_index].features[pos] = int(mutated_state)
-                    print("individual %d mutation to %d at pos %d" % (index,population.population[individual_index].features[pos], pos))
+                    # cur_state = population.population[individual_index].features[pos]
+                    # mutated_state = np.random.choice([a for a in list(range(NetworkBlock.state_num)) if a != cur_state], 1)
+                    mutated_state = mutation_state[mutation_index]
+                    population.population[individual_index].features[mutation_pos] = int(mutated_state)
+                    print("individual %d mutation to %d at pos %d" % (individual_index,population.population[individual_index].features[mutation_pos], mutation_pos))
             else:
                 print("shouldnt mutation at this pos")
 

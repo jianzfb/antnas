@@ -2,6 +2,8 @@ import abc
 
 import networkx as nx
 import torch
+import numpy as np
+from nas.component.NetworkBlock import *
 from torch.autograd import Variable
 from nas.utils.globalval import *
 
@@ -24,9 +26,10 @@ class PathRecorder(object):
         # update by multi threading
         self.global_sampling = None
         self.median_sampling = None
+        self.global_path_sampling_stats = None
         self.n_samplings = 0
 
-    def update_global_sampling(self, used_nodes):
+    def update_global_sampling(self, used_nodes, active):
         global lock
         lock.acquire()
         self.n_samplings += 1
@@ -41,20 +44,43 @@ class PathRecorder(object):
             self.median_sampling = [used_nodes]
         else:
             self.median_sampling.append(used_nodes)
+
+        # 统计每一节点采样次数
+        if self.global_path_sampling_stats is None:
+            self.global_path_sampling_stats = np.zeros((self.n_nodes,
+                                                        self.n_nodes,
+                                                        NetworkBlock.state_num,
+                                                        NetworkBlock.state_num))
+
+        sampling_nodes_np_data = used_nodes.data.cpu().numpy()
+        for node_name in nx.topological_sort(self.graph):
+            left_node_index = self.node_index[node_name]
+            left_node_sampling_state = sampling_nodes_np_data[left_node_index].tolist()
+
+            for successor_name in self.graph.successors(node_name):
+                right_node_index = self.node_index[successor_name]
+                right_node_sampling_state = sampling_nodes_np_data[right_node_index].tolist()
+
+                if not node_name.startswith("F") or not successor_name.startswith("F"):
+                    for left_s, right_s in zip(left_node_sampling_state, right_node_sampling_state):
+                        self.global_path_sampling_stats[left_node_index,
+                                                        right_node_index,
+                                                        int(left_s),
+                                                        int(right_s)] += 1.0
+
         lock.release()
 
     def update(self, sampling, active):
-        if self.default_out is not None and active is not None and active.numel() > 0:
-            # pruned = self.get_pruned_architecture(self.default_out, sampling, active)
-            self.update_global_sampling(sampling)
+        self.update_global_sampling(sampling, active)
 
     def get_and_reset(self):
         multi_cards_sampling = torch.cat(self.median_sampling,-1)
         median_sampling = multi_cards_sampling.median(1).values
         self.median_sampling = None
+
         return median_sampling
 
-    def add_sampling(self, node_name, node_sampling, sampling, active, switch):
+    def add_sampling(self, node_name, node_sampling, sampling, active, structure_fixed):
         node_sampling = node_sampling.float()
         if isinstance(node_sampling, torch.Tensor):
             node_sampling = node_sampling.data.cpu().squeeze()
@@ -77,8 +103,9 @@ class PathRecorder(object):
         # write to sampling
         sampling[self.node_index[node_name]] = node_sampling
 
-        if not switch:
-            # 对于非开关节点，不考虑0状态
+        if structure_fixed:
+            # 对于结构固定节点，任意状态均表示有效操作
+            # 对于非结构固定节点，0状态表示断开操作，1状态表示有效操作
             node_sampling = node_sampling + 1
 
         # parse graph is active?
@@ -154,13 +181,13 @@ class PathRecorder(object):
         consistence = self.get_consistence(model.out_node, sampling, active)
         return consistence.sum() != 0
 
-    def get_architectures(self, out_node, sampling, active):
-        return self.get_sampled_architecture(sampling, active), self.get_pruned_architecture(out_node, sampling,active)
+    def get_arch(self, out_node, sampling, active):
+        return self.get_sampled_arch(sampling, active), self.get_pruned_arch(out_node, sampling, active)
 
-    def get_sampled_architecture(self, sampling, active):
+    def get_sampled_arch(self, sampling, active):
         return sampling
 
-    def get_pruned_architecture(self, out_node, sampling, active):
+    def get_pruned_arch(self, out_node, sampling, active):
         return active[self.node_index[out_node]] * sampling
 
     def get_state(self):
