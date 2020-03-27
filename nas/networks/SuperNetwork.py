@@ -263,8 +263,9 @@ class SuperNetwork(nn.Module):
     def inference(self, arc, loader, name=''):
         total_correct = 0
         total = 0
-        x = torch.Tensor()
-        y = torch.LongTensor()
+        x = torch.Tensor().cuda()
+        y = torch.LongTensor().cuda()
+
         for images, labels in tqdm(loader, desc=name, ascii=True):
             x.resize_(images.size()).copy_(images)
             y.resize_(labels.size()).copy_(labels)
