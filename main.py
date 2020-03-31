@@ -72,9 +72,9 @@ def argument_parser():
 
     parser.add_argument('-lambda', dest='lambda', action='store', default=1e-7, type=float,
                         help='Constant balancing the ratio classifier loss/architectural loss')
-    parser.add_argument('-oc', dest='objective_cost', action='store', default=6000000, type=float,
+    parser.add_argument('-oc', dest='objective_cost', action='store', default=60000000000, type=float,
                         help='Maximum allowed cost for architecture')
-    parser.add_argument('-max_comp', dest='max_comp', action='store', default=6000000, type=float,
+    parser.add_argument('-max_comp', dest='max_comp', action='store', default=60000000000, type=float,
                         help='Maximum allowed cost for architecture')
     parser.add_argument('-max_latency', dest='max_latency', action='store', default=-1, type=float,
                         help='Maximum allowed cost for architecture')
@@ -91,6 +91,9 @@ def argument_parser():
 
 
 def main(args, plotter):
+    if torch.cuda.is_available():
+        print('CUDA is OK')
+
     # start run and set environment
     logger.info('Starting run : {}'.format(args['exp_name']))
     os.environ['CUDA_VISIBLE_DEVICES'] = args['cuda']
@@ -125,17 +128,25 @@ def main(args, plotter):
 
     # initialize supernetwork
     nas_model.supernetwork.init((2, data_properties['in_channels'],data_properties['img_dim'], data_properties['img_dim']))
+
+    # nas_model.supernetwork.sample_arch_and_save(folder='./supernetwork/',
+    #                                             suffix="0")
+
     # # initialize parameter
     # model_path = args.get('model_path', '')
     # if len(model_path) != 0:
     #     print('load supernetwork parameter')
-    #     nas_model.supernetwork.load_state_dict(torch.load(model_path,map_location=torch.device('cpu')))
+    #     #  map_location=torch.device('cuda')
+    #     nas_model.supernetwork.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+    #     # nas_model.supernetwork.to(torch.device("cuda"))
+    #
     #
     # if args.get('search', False):
-    #     nas_model.supernetwork.search(max_generation=200,
+    #     nas_model.supernetwork.search(max_generation=100,
     #                                   population_size=2,
     #                                   arc_loss="comp",
-    #                                   data_loader=val_loader)
+    #                                   data_loader=val_loader,
+    #                                   cuda_avilable_list=[int(c) for c in args['cuda'].split(',')] if len(args['cuda']) > 0else [])
     # return
 
     # logger initialize

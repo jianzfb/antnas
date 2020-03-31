@@ -158,18 +158,21 @@ class Nsga2(object):
                     self.problem.max_objectives[m] - self.problem.min_objectives[m] + 0.000000001)
 
   def __create_children(self, population, **kwargs):
-    children_population = copy.deepcopy(population)
+    kwargs.update({'problem': self.problem})
+    children_population = None
     if self.crossover_controler is not None:
       # crossover
       print('crossover population')
-      children_population = \
-        self.crossover_controler.crossover(population=children_population, **kwargs)
+      crossover_population = \
+        self.crossover_controler.crossover(population=population, **kwargs)
+      children_population = crossover_population
 
     if self.mutation_controler is not None:
       # mutation
       print('mutation population')
-      children_population = \
+      mutation_population = \
         self.mutation_controler.mutate(population=children_population, **kwargs)
+      children_population = mutation_population
 
     # recalculate objectives
     print('caculate population objectives')

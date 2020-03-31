@@ -82,7 +82,7 @@ class Manager(object):
             self.model.train()
 
         # 1.step forward model
-        loss, accuracy, sample_cost, prune_cost = self.model(Variable(x), Variable(y))
+        loss, accuracy, sample_cost, prune_cost = self.model(x, y)
 
         # 2.step get last sampling
         return loss.mean(), \
@@ -111,6 +111,7 @@ class Manager(object):
     @property
     def model(self):
         return self._model
+
     @model.setter
     def model(self, val):
         self._model = val

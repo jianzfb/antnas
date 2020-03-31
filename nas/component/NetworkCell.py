@@ -100,6 +100,14 @@ class CellBlock(NetworkBlock):
 
         return cost_list
 
+    def get_param_num(self, x):
+        cost_list = [0]
+        for i in range(len(self.op_list) - 1):
+            cost_list.append(self.op_list[i + 1].get_param_num(x)[1])
+
+        return cost_list
+
+
 
 class DilationCellBlock(NetworkBlock):
     n_layers = 3
@@ -197,6 +205,13 @@ class DilationCellBlock(NetworkBlock):
 
         return cost_list
 
+    def get_param_num(self, x):
+        cost_list = [0]
+        for i in range(len(self.op_list) - 1):
+            cost_list.append(self.op_list[i + 1].get_param_num(x)[1])
+
+        return cost_list
+
 
 class ReductionCellBlock(NetworkBlock):
     n_layers = 3
@@ -282,17 +297,22 @@ class ReductionCellBlock(NetworkBlock):
         return cell_result
 
     def get_flop_cost(self, x):
-        cost_list = [0]
-        for i in range(len(self.op_list) - 1):
-            cost_list.append(self.op_list[i+1].get_flop_cost(x)[1])
+        cost_list = []
+        for i in range(len(self.op_list)):
+            cost_list.append(self.op_list[i].get_flop_cost(x)[1])
 
         return cost_list
 
     def get_latency(self, x):
-        cost_list = [0]
-        for i in range(len(self.op_list) - 1):
-            cost_list.append(self.op_list[i + 1].get_latency(x)[1])
+        cost_list = []
+        for i in range(len(self.op_list)):
+            cost_list.append(self.op_list[i].get_latency(x)[1])
 
         return cost_list
 
+    def get_param_num(self, x):
+        cost_list = []
+        for i in range(len(self.op_list)):
+            cost_list.append(self.op_list[i].get_param_num(x)[1])
 
+        return cost_list

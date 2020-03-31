@@ -14,6 +14,7 @@ import os
 
 class NetworkBlock(nn.Module):
     state_num = 5
+    bn_moving_momentum = False
     lookup_table = {}
 
     def __init__(self):
@@ -221,7 +222,7 @@ class ConvBn(NetworkBlock):
     def __init__(self, in_chan, out_chan, relu, k_size=3, stride=1, dilation=1):
         super(ConvBn, self).__init__()
         self.conv = nn.Conv2d(in_chan, out_chan, kernel_size=k_size, stride=stride, padding=k_size//2, bias=False, dilation=dilation)
-        self.bn = nn.BatchNorm2d(out_chan, momentum=1.0)
+        self.bn = nn.BatchNorm2d(out_chan, momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1)
         self.relu = relu
         self.out_chan = out_chan
         self.params = {
@@ -231,7 +232,8 @@ class ConvBn(NetworkBlock):
                        'out_chan': out_chan,
                        'k_size': k_size,
                        'relu': relu,
-                       'dilation': dilation}
+                       'dilation': dilation,
+                       'in_chan': in_chan}
         }
         self.structure_fixed = False
 
@@ -293,7 +295,7 @@ class SepConvBN(NetworkBlock):
                                         dilation=dilation,
                                         bias=False)
         self.pointwise_conv = nn.Conv2d(in_chan, out_chan, kernel_size=1, stride=1, padding=0, bias=False)
-        self.bn = nn.BatchNorm2d(out_chan, momentum=1.0)
+        self.bn = nn.BatchNorm2d(out_chan, momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1)
         self.relu = relu
         self.out_chan = out_chan
 
@@ -304,7 +306,8 @@ class SepConvBN(NetworkBlock):
                           'out_chan': out_chan,
                           'k_size': k_size,
                           'relu': relu,
-                          'dilation': dilation}
+                          'dilation': dilation,
+                          'in_chan': in_chan}
         }
         self.structure_fixed = False
 
@@ -377,7 +380,8 @@ class ResizedBlock(NetworkBlock):
             'ResizedBlock': {'out_chan': out_chan,
                              'relu': relu,
                              'k_size': k_size,
-                             'scale_factor': scale_factor}
+                             'scale_factor': scale_factor,
+                             'in_chan': in_chan}
         }
 
     def forward(self, x, sampling=None):
@@ -459,66 +463,6 @@ class ConcatBlock(NetworkBlock):
         return flop_cost
 
 
-# class Moving_Add_Block(NetworkBlock):
-#     n_layers = 0
-#     n_comp_steps = 1
-#
-#     def __init__(self):
-#         super(Moving_Add_Block, self).__init__()
-#         self.history_mean = None
-#         self.history_var = None
-#
-#     def forward(self, x):
-#         block_val = x
-#         if not isinstance(x, list):
-#             block_val = [x]
-#         assert isinstance(block_val, list)
-#
-#         shift_x = sum(block_val)
-#
-#         if Moving_Add_Block.is_running:
-#             leaf_shift_x = shift_x.detach()
-#             x_mean = leaf_shift_x.mean(dim=0, keepdim=True)
-#             x_mean = x_mean.mean(dim=2, keepdim=True)
-#             x_mean = x_mean.mean(dim=3, keepdim=True)
-#
-#             ss = leaf_shift_x.permute(1,0,2,3)
-#             mm = ss.reshape(ss.size()[0], -1)
-#
-#             x_var = mm.var(dim=1, keepdim=False)
-#             x_var[torch.isnan(x_var)] = 0
-#             x_var = x_var + 1.0
-#             x_var = x_var.reshape((1, ss.size()[0], 1, 1))
-#
-#             if Moving_Add_Block.is_training:
-#                 decay = 0.5
-#                 if self.history_mean is None:
-#                     self.history_mean = x_mean
-#                     self.history_var = x_var
-#                 else:
-#                     if Moving_Add_Block.epoch < 50:
-#                         decay = 0.5
-#                     elif Moving_Add_Block.epoch < 100:
-#                         decay = 0.8
-#                     else:
-#                         decay = 1.0
-#
-#                 self.history_mean = (1 - decay) * self.history_mean + decay * x_mean
-#                 self.history_mean.detach_()
-#
-#                 self.history_var = (1 - decay) * self.history_var + decay * x_var
-#                 self.history_var.detach_()
-#
-#             shift_x = torch.div((shift_x - x_mean), x_var) * self.history_var + self.history_mean
-#         return shift_x
-#
-#     def get_flop_cost(self, x):
-#         if not isinstance(x, list):
-#             return [0] * self.state_num
-#         assert isinstance(x, list)
-#         return [0] + [x[0].numel() * (len(x) - 1)] * (self.state_num - 1)
-
-
 class InvertedResidualBlockWithSEHS(NetworkBlock):
     n_layers = 3
     n_comp_steps = 1
@@ -541,7 +485,7 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
                                kernel_size=1,
                                stride=1,
                                bias=False)
-        self.bn1 = nn.BatchNorm2d(in_chan * expansion, momentum=1.0)
+        self.bn1 = nn.BatchNorm2d(in_chan * expansion, momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1)
 
         self.dwconv2 = nn.Conv2d(in_chan * expansion,
                                  in_chan * expansion,
@@ -551,7 +495,7 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
                                  padding=kernel_size // 2 + (kernel_size-1)*(dilation-1) // 2,
                                  bias=False,
                                  dilation=dilation)
-        self.bn2 = nn.BatchNorm2d(in_chan * expansion,momentum=1.0)
+        self.bn2 = nn.BatchNorm2d(in_chan * expansion,momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1)
 
         # for se
         if se:
@@ -574,7 +518,7 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
                                kernel_size=1,
                                stride=1,
                                bias=False)
-        self.bn3 = nn.BatchNorm2d(out_chan,momentum=1.0)
+        self.bn3 = nn.BatchNorm2d(out_chan,momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1)
         self.ratio = ratio
 
         self.reduction = reduction
