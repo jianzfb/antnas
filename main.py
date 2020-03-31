@@ -20,7 +20,7 @@ def argument_parser():
     parser = argparse.ArgumentParser(description='Budgeted Super Networks')
 
     # Experience
-    parser.add_argument('-exp-name', action='store', default='', type=str, help='Experience Name')
+    parser.add_argument('-exp_name', action='store', default='', type=str, help='Experience Name')
     # Model
     parser.add_argument('-arch', action='store', default='BaselineSN', type=str)
     parser.add_argument('-deter_eval', action='store', default=False, type=bool,
@@ -46,7 +46,7 @@ def argument_parser():
     parser.add_argument('-wd', dest='weight_decay', action='store', default=1e-4, type=float,
                         help='weight decay used during optimisation')
 
-    parser.add_argument('-latest_num', action='store', default=1, type=int,help='save the latest number model state')
+    parser.add_argument('-latest_num', action='store', default=1, type=int, help='save the latest number model state')
     parser.add_argument('-lr_pol_tresh', action='store', default=[150, 225], type=str,
                         help='learning rate decay rate')
     parser.add_argument('-lr_pol_val', action='store', nargs='*', default=[0.1, 0.01, 0.001], type=str,
@@ -54,7 +54,8 @@ def argument_parser():
 
     parser.add_argument('-cuda', action='store', default='', type=str,
                         help='Enables cuda and select device')
-    parser.add_argument('-latency', action='store', default='./latency.gpu.855.224_16.32.64.96.112.160_lookuptable.json',type=str,
+    parser.add_argument('-latency', action='store',
+                        default='./latency.gpu.855.224_16.32.64.96.112.160_lookuptable.json', type=str,
                         help='latency lookup table')
 
     parser.add_argument('-draw_env', default='test', type=str, help='Visdom drawing environment')
@@ -86,7 +87,7 @@ def argument_parser():
     parser.add_argument('-pen', dest='arch_penalty', action='store', default=0, type=float,
                         help='Penalty for inconsistent architecture')
     parser.add_argument('-model_path', dest="model_path", action='store', default="", type=str)
-    parser.add_argument('-search', dest='search',action='store',default=False, type=bool)
+    parser.add_argument('-search', dest='search', action='store', default=False, type=bool)
     return parser.parse_known_args()[0]
 
 
@@ -124,7 +125,7 @@ def main(args, plotter):
                     channels_per_block=[[16], [32], [64], [96, 112], [160]])
 
     # initialize supernetwork
-    nas_model.supernetwork.init((2, data_properties['in_channels'],data_properties['img_dim'], data_properties['img_dim']))
+    nas_model.supernetwork.init(shape=(2, data_properties['in_channels'], data_properties['img_dim'], data_properties['img_dim']))
     # # initialize parameter
     # model_path = args.get('model_path', '')
     # if len(model_path) != 0:
@@ -146,7 +147,7 @@ def main(args, plotter):
     xp.train = mlogger.Container()
     xp.train.classif_loss = mlogger.metric.Average(plotter=plotter, plot_title="classif_loss", plot_legend="train")
     xp.train.accuracy = mlogger.metric.Average(plotter=plotter, plot_title="accuracy", plot_legend="train")
-    xp.train.rewards = mlogger.metric.Average(plotter=plotter, plot_title="rewards",plot_legend="train")
+    xp.train.rewards = mlogger.metric.Average(plotter=plotter, plot_title="rewards", plot_legend="train")
     xp.train.timer = mlogger.metric.Timer(plotter=plotter, plot_title="Time", plot_legend="train")
     xp.train.objective_cost = mlogger.metric.Average(plotter=plotter, plot_title="objective_cost", plot_legend="architecture")
 
@@ -159,13 +160,13 @@ def main(args, plotter):
     xp.test.timer = mlogger.metric.Timer(plotter=plotter, plot_title="Time", plot_legend="test")
 
     for cost in args['cost_evaluation']:
-        xp.train.__setattr__('train_sampled_%s'%cost,
-                            mlogger.metric.Average(plotter=plotter,
-                                                   plot_title='train_%s'%cost,
-                                                   plot_legend="sampled_cost"))
-        xp.train.__setattr__('train_pruned_%s'%cost,
+        xp.train.__setattr__('train_sampled_%s' % cost,
                              mlogger.metric.Average(plotter=plotter,
-                                                    plot_title='train_%s'%cost,
+                                                    plot_title='train_%s' % cost,
+                                                    plot_legend="sampled_cost"))
+        xp.train.__setattr__('train_pruned_%s' % cost,
+                             mlogger.metric.Average(plotter=plotter,
+                                                    plot_title='train_%s' % cost,
                                                     plot_legend="pruned_cost"))
 
         xp.val.__setattr__('eval_sampled_%s' % cost,
@@ -272,8 +273,7 @@ def main(args, plotter):
 
         # save model state
         nas_model.supernetwork.search_and_plot('./sn/')
-        nas_model.supernetwork.search_and_save('./sn/',
-                                                 'nas_%d'%(epoch%args['latest_num']))
+        nas_model.supernetwork.search_and_save('./sn/', 'nas_%d' % (epoch % args['latest_num']))
 
 
 if __name__ == '__main__':
