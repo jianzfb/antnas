@@ -32,6 +32,8 @@ class Mutation(object):
   def _mutate_based_matrices(self, *args, **kwargs):
     # fitness_values: [(index, fitness, gene, rate), (index, fitness, gene, rate), ...]
     fitness_values = kwargs['fitness_values']
+    explore_position = kwargs['explore_position']
+
     N = len(fitness_values)
     M = len(fitness_values[0][2])
 
@@ -73,12 +75,7 @@ class Mutation(object):
         for n in range(N):
             probability_contribution_pos[m] += lookup[int(AA[n, m])] * AA_FITNESS[n]
 
-    sigma = np.std(A, 0)
-    position_contribution = np.where(sigma > 0.00001)
-    if position_contribution[0].size == 0:
-        print('couldnt finding crossover locs because of sigma')
-        return []
-
+    position_contribution = explore_position
     # 获得每一基因位的变异概率
     # 基因位置对适应度的贡献（除去那些不动基因）
     probability_contribution_pos = probability_contribution_pos[position_contribution]
@@ -96,10 +93,10 @@ class Mutation(object):
     mutation_result = []
     for f_index, f in enumerate(fitness_values):
         # mutation points number
-        multi_points = self.multi_points if self.multi_points > 0 else int(alpha[f[0]] * len(position_contribution[0]))
+        multi_points = self.multi_points if self.multi_points > 0 else int(alpha[f[0]] * len(position_contribution))
         if multi_points > 0:
             print("multi_points %d"%(multi_points))
-            mutation_position = np.random.choice(position_contribution[0],
+            mutation_position = np.random.choice(position_contribution,
                                                  multi_points,
                                                  replace=False,
                                                  p=probability_contribution_pos)
@@ -119,7 +116,7 @@ class Mutation(object):
 
     return mutation_result
 
-  def _mutate_simple(self, *args, **kwargs):
+  def _mutate(self, *args, **kwargs):
     # fitness_values: [(index, fitness, gene, rate), (index, fitness, gene, rate), ...]
     fitness_values = kwargs['fitness_values']
     gene_length = len(fitness_values[0][2])
@@ -151,7 +148,7 @@ class Mutation(object):
 
   def adaptive_mutate(self, *args, **kwargs):
     if self.mutation_type.lower() == 'simple':
-      return self._mutate_simple(*args, **kwargs)
+      return self._mutate(*args, **kwargs)
     elif self.mutation_type.lower() == 'based_matrices':
       return self._mutate_based_matrices(*args, **kwargs)
 
@@ -177,6 +174,7 @@ class EvolutionMutation(Mutation):
     population = kwargs['population']
     graph = kwargs['graph']
     blocks = kwargs['blocks']
+    explore_position = kwargs['explore_position']
 
     traversal_order = list(nx.topological_sort(graph))
     pos_map = {}
@@ -191,7 +189,9 @@ class EvolutionMutation(Mutation):
                              individual.features,                   # feature
                              None))
 
-    mutation_individuals = self.adaptive_mutate(fitness_values=fitness_values)
+    mutation_individuals = \
+        self.adaptive_mutate(fitness_values=fitness_values,
+                             explore_position=explore_position)
 
     for _, individual in enumerate(mutation_individuals):
       if individual[-1] is not None:
@@ -204,7 +204,7 @@ class EvolutionMutation(Mutation):
             node = graph.node[node_name]
 
             if node_name.startswith("CELL") or node_name.startswith('T'):
-                if blocks[node['module']].switch:
+                if not blocks[node['module']].structure_fixed:
                     mutated_state = mutation_state[mutation_index]
                     if mutated_state != 0 and mutated_state != 1:
                       mutated_state = 1

@@ -36,7 +36,7 @@ class UniformSamplingSuperNetwork(SuperNetwork):
             batched_sampling = self._sample_archs_with_constraint(input[0].size(0), x.device)
         else:
             # search and find
-            batched_sampling = torch.as_tensor([arc]).expand([input[0].size(0), len(arc)])
+            batched_sampling = arc
 
         # 3.step forward network
         # 3.1.step set the input of network graph
@@ -133,7 +133,7 @@ class UniformSamplingSuperNetwork(SuperNetwork):
                 # 不可学习，处于永远激活状态
                 feature[cur_node['sampling_param']] = int(1)
             else:
-                if self.blocks[cur_node['module']].switch:
+                if not self.blocks[cur_node['module']].structure_fixed:
                     feature[cur_node['sampling_param']] = int(np.random.randint(0, 2))
                 else:
                     feature[cur_node['sampling_param']] = int(np.random.randint(0, NetworkBlock.state_num))
@@ -193,7 +193,6 @@ class UniformSamplingSuperNetwork(SuperNetwork):
 
             batch_arch = torch.as_tensor(batch_arch_list, device=device)
             return batch_arch
-
 
     def search_and_plot(self, path=None):
         if not os.path.exists(path):
