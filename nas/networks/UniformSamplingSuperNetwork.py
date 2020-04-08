@@ -24,10 +24,7 @@ class UniformSamplingSuperNetwork(SuperNetwork):
     def __init__(self, *args, **kwargs):
         super(UniformSamplingSuperNetwork, self).__init__(*args, **kwargs)
 
-    def forward(self, x, y, arc=None):
-        # 0.step copy network graph
-        running_graph = copy.deepcopy(self.net)
-
+    def forward(self, x, y, arc=None, epoch=None, warmup=False):
         # 1.step parse x,y - (data,label)
         input = [x]
 
@@ -40,11 +37,15 @@ class UniformSamplingSuperNetwork(SuperNetwork):
 
         # 3.step forward network
         # 3.1.step set the input of network graph
-        running_graph.node[self.in_node]['input'] = [*input]
+        # running_graph.node[self.in_node]['input'] = [*input]
+        data_dict = {}
+        data_dict[self.in_node] = [*input]
+
         model_out = None
         for node in self.traversal_order:
-            cur_node = running_graph.node[node]
-            input = self.format_input(cur_node['input'])
+            cur_node = self.net.node[node]
+            # input = self.format_input(cur_node['input'])
+            input = self.format_input(data_dict[node])
 
             if len(input) == 0:
                 raise RuntimeError('Node {} has no inputs'.format(node))
@@ -62,10 +63,16 @@ class UniformSamplingSuperNetwork(SuperNetwork):
                 break
 
             # 3.3.step set successor input
-            for succ in running_graph.successors(node):
-                if 'input' not in running_graph.node[succ]:
-                    running_graph.node[succ]['input'] = []
-                running_graph.node[succ]['input'].append(out)
+            # for succ in running_graph.successors(node):
+            #     if 'input' not in running_graph.node[succ]:
+            #         running_graph.node[succ]['input'] = []
+            #     running_graph.node[succ]['input'].append(out)
+            # 3.3.step set successor input
+            for succ in self.graph.successors(node):
+                if succ not in data_dict:
+                    data_dict[succ] = []
+
+                data_dict[succ].append(out)
 
         # 4.step compute model loss
         indiv_loss = self.loss(model_out, y)

@@ -166,7 +166,7 @@ class StageBlockCellArc:
         self.pos_offset = stage_offset
         return self.pos_offset
 
-    def generate(self, head, tail, head_channels, blocks, cells, channels):
+    def generate(self, head, tail, blocks, cells, channels):
         in_name = self.add_aggregation((0, 0), module=head, node_format=SuperNetwork._INPUT_NODE_FORMAT)
         self.pos_offset += 1
 
@@ -176,7 +176,7 @@ class StageBlockCellArc:
             self.add_stage(blocks[stage_i],
                            cells[stage_i],
                            channels[stage_i],
-                           head_channels if stage_i == 0 else channels[stage_i - 1][-1],
+                           head.params['out_chan'] if stage_i == 0 else channels[stage_i - 1][-1],
                            stage_i == 0)
 
             if stage_i > 0:

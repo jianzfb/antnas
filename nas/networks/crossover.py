@@ -159,9 +159,6 @@ class CrossOver(object):
     elif self.crossover_type.lower() == 'based_matrices':
       return self._crossover_based_matrices(*args, **kwargs)
 
-    # return self._crossover_based_pattern(*args, **kwargs)
-    # return None
-
 
 class EvolutionCrossover(CrossOver):
   def __init__(self,

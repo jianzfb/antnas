@@ -9,12 +9,11 @@ import logging
 import mlogger
 import os
 import torch
-from tqdm import tqdm
 from torch import optim
+from tqdm import tqdm
 import argparse
-from nas.networks.FixedNetwork import *
 from nas.dataset.datasets import get_data
-
+from nas.networks.FixedNetwork import *
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,12 +32,12 @@ def argument_parser():
                         help='Number of training epochs')
     parser.add_argument('-optim', action='store', default='SGD', type=str,
                         help='Optimization method')
-    parser.add_argument('-lr', action='store', default=1e-3, type=float, help='Learning rate')
+    parser.add_argument('-lr', action='store', default=0.1, type=float, help='Learning rate')
     parser.add_argument('-cuda', action='store', default='', type=str,
                         help='Enables cuda and select device')
 
-    parser.add_argument('-draw_env', default='FIXED NETWORK', type=str, help='Visdom drawing environment')
-    parser.add_argument('-wd', dest='weight_decay', action='store', default=1e-4, type=float,
+    parser.add_argument('-draw_env', default='PKENAS', type=str, help='Visdom drawing environment')
+    parser.add_argument('-wd', dest='weight_decay', action='store', default=5e-4, type=float,
                         help='weight decay used during optimisation')
     parser.add_argument('-momentum', action='store', default=0.9, type=float,
                         help='momentum used by the optimizer')
@@ -85,9 +84,35 @@ class OutLayer(NetworkBlock):
         return [0] + [0] * (self.state_num - 1)
 
 
+# class OutLayer(NetworkBlock):
+#     n_layers = 1
+#     n_comp_steps = 1
+#
+#     def __init__(self, out_shape, in_chan=160, bias=True):
+#         super(OutLayer, self).__init__()
+#         self.conv = nn.Conv2d(in_chan, out_shape[0], kernel_size=1, stride=1, padding=0, bias=bias)
+#         self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
+#
+#         self.out_shape = out_shape
+#         self.params = {
+#             'module_list': ['OutLayer'],
+#             'name_list': ['OutLayer'],
+#             'OutLayer': {'out_shape': out_shape, 'in_chan': in_chan},
+#             'out': 'outname'
+#         }
+#
+#     def forward(self, x, sampling=None):
+#         x = self.conv(x)
+#         x = self.global_pool(x)
+#         return x.view(-1, *self.out_shape)
+#
+#     def get_flop_cost(self, x):
+#         return [0] + [0] * (self.state_num - 1)
+
+
 def main(args, plotter):
     if torch.cuda.is_available():
-        print('CUDA is OK')
+        logging.info("CUDA is AVAILABLE")
 
     # start run and set environment
     os.environ['CUDA_VISIBLE_DEVICES'] = args['cuda']
@@ -103,20 +128,15 @@ def main(args, plotter):
     xp.train = mlogger.Container()
     xp.train.classif_loss = mlogger.metric.Average(plotter=plotter, plot_title="classif_loss", plot_legend="train")
     xp.train.accuracy = mlogger.metric.Average(plotter=plotter, plot_title="accuracy", plot_legend="train")
-    xp.train.objective_cost = mlogger.metric.Average(plotter=plotter, plot_title="objective_cost", plot_legend="architecture")
     xp.train.learning_rate = mlogger.metric.Simple(plotter=plotter, plot_title="LR", plot_legend="train")
     xp.train.timer = mlogger.metric.Timer(plotter=plotter, plot_title="Time", plot_legend="train")
-
-    xp.val = mlogger.Container()
-    xp.val.accuracy = mlogger.metric.Simple(plotter=plotter, plot_title="val_test_accuracy", plot_legend="val")
-    xp.val.timer = mlogger.metric.Timer(plotter=plotter, plot_title="Time", plot_legend="val")
 
     xp.test = mlogger.Container()
     xp.test.accuracy = mlogger.metric.Simple(plotter=plotter, plot_title="val_test_accuracy", plot_legend="test")
     xp.test.timer = mlogger.metric.Timer(plotter=plotter, plot_title="Time", plot_legend="test")
 
     # 配置网络模型
-    model = FixedNetwork(architecture='/Users/jian/PycharmProjects/minas/supernetwork/accuray_0.8108_flops_9814212_params_1028592.architecture',
+    model = FixedNetwork(architecture='/Users/jian/PycharmProjects/minas/supernetwork/pk_ENAS.architecture',
                          output_layer_cls=OutLayer)
 
     # set model input
@@ -153,9 +173,11 @@ def main(args, plotter):
         raise RuntimeError
 
     # 配置学习率
-    decayRate = 0.96
-    lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=decayRate)
+    # decayRate = 0.96
+    # lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=decayRate)
+    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[150, 225], gamma=0.1)
 
+    best_test_accuracy = 0.0
     for epoch in range(args['epochs']):
         # write logger
         logger.info(epoch)
@@ -167,6 +189,7 @@ def main(args, plotter):
             x.resize_(inputs.size()).copy_(inputs)
             y.resize_(labels.size()).copy_(labels)
 
+            optimizer.zero_grad()
             loss, accuracy = model(x, y)
             loss = loss.mean()
             accuracy = accuracy.sum()
@@ -177,7 +200,6 @@ def main(args, plotter):
             xp.train.accuracy.update(accuracy * 100 / float(inputs.size(0)))
 
             # compute gradients
-            optimizer.zero_grad()
             loss.backward()
 
             # update parameter
@@ -193,15 +215,14 @@ def main(args, plotter):
 
             plotter.update_plots()
 
-        # adjust learning rate
-        if (epoch+1) % 30 == 0:
-            lr_scheduler.step()
+        # adjust learning rate (every epoch)
+        lr_scheduler.step()
 
         # test process
         model.eval()
         # test process on val dataset
         # test process on test dataset
-        if (epoch + 1) % 10 == 0:
+        if (epoch + 1) % 5 == 0:
             logger.info('\nEvaluation')
             total_correct = 0
             total = 0
@@ -210,7 +231,7 @@ def main(args, plotter):
                 y.resize_(labels.size()).copy_(labels)
 
                 with torch.no_grad():
-                    loss, accuracy = model(x, y)
+                    _, accuracy = model(x, y)
                     total_correct += accuracy.sum()
                     total += labels.size(0)
 
@@ -223,13 +244,14 @@ def main(args, plotter):
 
             plotter.update_plots()
 
-        # save model state
-        if (epoch + 1) % 5 == 0:
-            if not os.path.exists("./supernetwork"):
-                os.makedirs("./supernetwork")
+            # save model state
+            if best_test_accuracy < test_accuracy:
+                if not os.path.exists("./supernetwork"):
+                    os.makedirs("./supernetwork")
 
-            path = os.path.join("./supernetwork", "check")
-            torch.save(model.state_dict(), '%s.supernet.model' % path)
+                path = os.path.join("./supernetwork", "check")
+                torch.save(model.state_dict(), '%s.supernet.model' % path)
+                best_test_accuracy = test_accuracy
 
 
 if __name__ == '__main__':

@@ -66,7 +66,9 @@ class CellBlock(NetworkBlock):
                               'skip': True,
                               'ratio': 4,
                               'hs': True,
-                              'se': False}
+                              'se': False},
+            'in_chan': channles,
+            'out_chan': out_channels
         }
 
         self.op_list = self.build()
@@ -170,7 +172,9 @@ class DilationCellBlock(NetworkBlock):
                               'ratio': 4,
                               'hs': True,
                               'se': False,
-                              'dilation':2}
+                              'dilation':2},
+            'in_chan': channles,
+            'out_chan': out_channels
         }
 
         self.op_list = self.build()
@@ -276,7 +280,9 @@ class ReductionCellBlock(NetworkBlock):
                               'skip': False,
                               'ratio': 4,
                               'hs': True,
-                              'se': False}
+                              'se': False},
+            'in_chan': channles,
+            'out_chan': out_channels
         }
 
         self.op_list = self.build()

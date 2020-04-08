@@ -12,7 +12,7 @@ from nas.searchspace.SearchSpace import *
 
 
 class Manager(object):
-    def __init__(self, args, data_properties):
+    def __init__(self, args, data_properties, out_layer):
         self.args = args
         self._search_space = SearchSpace(arch=args['arch'])
         assert(self._search_space is not None)
@@ -20,6 +20,7 @@ class Manager(object):
         self._model = None
         self._supernetwork = None
         self._data_properties = data_properties
+        self._out_layer = out_layer
 
         # 模型优化器
         self._optimizer = None
@@ -30,19 +31,19 @@ class Manager(object):
 
         if self.args['optim'] == 'SGD':
             optimizer = optim.SGD([
-                {'params': self.model.blocks.parameters(), 'name': 'blocks'},
-                {'params': filter(lambda x: x.requires_grad, self.model.sampling_parameters.parameters()),
+                {'params': self.parallel.blocks.parameters(), 'name': 'blocks'},
+                {'params': filter(lambda x: x.requires_grad, self.parallel.sampling_parameters.parameters()),
                  'name': 'path',
                  'lr': self.args['path_lr'],
                  'momentum': False,
                  'weight_decay': 0.01}
             ], lr=self.args['lr'], weight_decay=self.args['weight_decay'], momentum=self.args['momentum'], nesterov=self.args['nesterov'])
         elif self.args['optim'] == 'ADAM':
-            optimizer = optim.Adam(self.model.parameters(),
+            optimizer = optim.Adam(self.parallel.parameters(),
                                    lr=self.args['lr'],
                                    weight_decay=self.args['weight_decay'])
         elif self.args['optim'] == 'RMS':
-            optimizer = optim.RMSprop(self.model.parameters(),
+            optimizer = optim.RMSprop(self.parallel.parameters(),
                                       lr=self.args['lr'],
                                       weight_decay=self.args['weight_decay'],
                                       momentum=self.args['momentum'])
@@ -67,6 +68,7 @@ class Manager(object):
         search_space_args = self.args
         search_space_args.update(kwargs)
         search_space_args.update({'data_prop': self._data_properties})
+        search_space_args.update({'out_layer': self._out_layer})
         self._model = self._search_space.build(**search_space_args)
         self._supernetwork = self._model
 
@@ -77,12 +79,12 @@ class Manager(object):
         if state_dict_path is not None:
             self._model.load_state_dict(torch.load(state_dict_path, map_location='cpu'))
 
-    def train(self, x, y):
-        if not self.model.training:
-            self.model.train()
+    def train(self, x, y, epoch=None, warmup=False):
+        if not self.parallel.training:
+            self.parallel.train()
 
         # 1.step forward model
-        loss, accuracy, sample_cost, prune_cost = self.model(x, y)
+        loss, accuracy, sample_cost, prune_cost = self.parallel(x, y, epoch=epoch, warmup=warmup)
 
         # 2.step get last sampling
         return loss.mean(), \
@@ -91,8 +93,8 @@ class Manager(object):
                prune_cost.mean() if prune_cost is not None else None
 
     def eval(self, x, y, loader, name=''):
-        if self.model.training:
-           self.model.eval()
+        if self.parallel.training:
+           self.parallel.eval()
 
         total_correct = 0
         total = 0
@@ -101,7 +103,7 @@ class Manager(object):
             y.resize_(labels.size()).copy_(labels)
 
             with torch.no_grad():
-                _, accuracy, _, _ = self.model(Variable(x), Variable(y))
+                _, accuracy, _, _ = self.parallel(Variable(x), Variable(y))
 
             total_correct += accuracy.sum()
             total += labels.size(0)
@@ -109,11 +111,11 @@ class Manager(object):
         return 100 * total_correct.float().item() / total
 
     @property
-    def model(self):
+    def parallel(self):
         return self._model
 
-    @model.setter
-    def model(self, val):
+    @parallel.setter
+    def parallel(self, val):
         self._model = val
 
     @property
@@ -141,6 +143,6 @@ class Manager(object):
         return lr
 
     def cuda(self, cuda_list):
-        self.model.to(0)
+        self.supernetwork.to(cuda_list[0])
         if len(cuda_list) > 1:
-            self.model = nn.DataParallel(self.model, [i for i in range(len(cuda_list))])
+            self.parallel = nn.DataParallel(self.supernetwork, [i for i in range(len(cuda_list))])

@@ -11,6 +11,7 @@ import mlogger
 from nas.dataset.datasets import get_data
 from nas.manager import *
 from nas.utils.misc import *
+from nas.networks.Anchors import *
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ def argument_parser():
     # Experience
     parser.add_argument('-exp-name', action='store', default='', type=str, help='Experience Name')
     # Model
-    parser.add_argument('-arch', action='store', default='BaselineSN', type=str)
+    parser.add_argument('-arch', action='store', default='PKSN', type=str)
     parser.add_argument('-deter_eval', action='store', default=False, type=bool,
                         help='Take blocks with probas >0.5 instead of sampling during evaluation')
 
@@ -32,14 +33,22 @@ def argument_parser():
 
     parser.add_argument('-dset', default='CIFAR10', type=str, help='Dataset')
     parser.add_argument('-bs', action='store', default=2, type=int, help='Size of each batch')
-    parser.add_argument('-epochs', action='store', default=300, type=int,
+    parser.add_argument('-epochs', action='store', default=1, type=int,
                         help='Number of training epochs')
+    parser.add_argument('-evo_epochs', action='store', default=80, type=int,
+                        help='Number of architecture searching epochs')
+    parser.add_argument('-warmup_epochs', action='store', default=0, type=int,
+                        help='warmup epochs before searching architecture')
+    parser.add_argument('-iterator_search', action='store', default=False, type=bool,
+                        help='is iterator search')
+    parser.add_argument('-population_size', action='store', default=2, type=int,
+                        help='population size for NSGAII')
 
     parser.add_argument('-optim', action='store', default='SGD', type=str,
                         help='Optimization method')
     parser.add_argument('-nesterov', action='store', default=False, type=bool,
                         help='Use Nesterov for SGD momentum')
-    parser.add_argument('-lr', action='store', default=1e-3, type=float, help='Learning rate')
+    parser.add_argument('-lr', action='store', default=0.1, type=float, help='Learning rate')
     parser.add_argument('-path_lr', action='store', default=1e-3, type=float, help='path learning rate')
     parser.add_argument('-momentum', action='store', default=0.9, type=float,
                         help='momentum used by the optimizer')
@@ -57,10 +66,11 @@ def argument_parser():
     parser.add_argument('-latency', action='store', default='./latency.gpu.855.224_16.32.64.96.112.160_lookuptable.json',type=str,
                         help='latency lookup table')
 
-    parser.add_argument('-draw_env', default='test', type=str, help='Visdom drawing environment')
+    parser.add_argument('-draw_env', default='CIFAR10PK', type=str, help='Visdom drawing environment')
 
     parser.add_argument('-static_proba', action='store', default=-1, type=restricted_float(0, 1),
                         help='sample a static binary weight with given proba for each stochastic Node.')
+    parser.add_argument('-static_arc', dest='', action='store', default=[], type=list, help='fixed architecture')
 
     parser.add_argument('-np', '--n_parallel', dest='n_parallel', action='store', default=3, type=int,
                         help='Maximum number of module evaluation in parallel')
@@ -74,20 +84,62 @@ def argument_parser():
                         help='Constant balancing the ratio classifier loss/architectural loss')
     parser.add_argument('-oc', dest='objective_cost', action='store', default=60000000000, type=float,
                         help='Maximum allowed cost for architecture')
-    parser.add_argument('-max_comp', dest='max_comp', action='store', default=60000000000, type=float,
+    parser.add_argument('-max_comp', dest='max_comp', action='store', default=-1, type=float,
                         help='Maximum allowed cost for architecture')
     parser.add_argument('-max_latency', dest='max_latency', action='store', default=-1, type=float,
                         help='Maximum allowed cost for architecture')
     parser.add_argument('-max_param', dest='max_param', action='store', default=-1, type=float,
                         help='Maximum allowed cost for architecture')
-
     parser.add_argument('-om', dest='objective_method', action='store', default='max',
                         type=restricted_str('max', 'abs'), help='Method used to compute the cost of an architecture')
     parser.add_argument('-pen', dest='arch_penalty', action='store', default=0, type=float,
                         help='Penalty for inconsistent architecture')
     parser.add_argument('-model_path', dest="model_path", action='store', default="", type=str)
-    parser.add_argument('-search', dest='search',action='store',default=False, type=bool)
+
+    parser.add_argument('-anchor_archs', dest="anchor_archs", action='store', default=[
+        './supernetwork/anchor_arch_0.architecture'
+    ], type=list)
+    parser.add_argument('-anchor_states', dest="anchor_states", action='store', default=[
+        './supernetwork/anchor_0_check.supernet.model'
+    ], type=list)
     return parser.parse_known_args()[0]
+
+
+class OutLayer(NetworkBlock):
+    n_layers = 1
+    n_comp_steps = 1
+
+    def __init__(self, in_chan, out_shape, bias=True):
+        super(OutLayer, self).__init__()
+        self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
+
+        self.conv_1 = nn.Conv2d(in_chan, 960, kernel_size=1, stride=1, padding=0, bias=bias)
+        self.bn = nn.BatchNorm2d(960)
+
+        self.conv_2 = nn.Conv2d(960, 1280, kernel_size=1, stride=1, padding=0, bias=bias)
+        self.conv_3 = nn.Conv2d(1280, out_shape[0], kernel_size=1, stride=1, padding=0, bias=bias)
+        self.out_shape = out_shape
+        self.params = {
+            'module_list': ['OutLayer'],
+            'name_list': ['OutLayer'],
+            'OutLayer': {'out_shape': out_shape, 'in_chan': in_chan},
+            'out': 'outname'
+        }
+
+    def forward(self, x, sampling=None):
+        x = self.conv_1(x)
+        x = self.bn(x)
+        x = F.relu6(x)
+
+        x = self.global_pool(x)
+        x = self.conv_2(x)
+        x = F.relu6(x)
+
+        x = self.conv_3(x)
+        return x.view(-1, *self.out_shape)
+
+    def get_flop_cost(self, x):
+        return [0] + [0] * (self.state_num - 1)
 
 
 def main(args, plotter):
@@ -101,53 +153,42 @@ def main(args, plotter):
     # 获得数据集
     train_loader, val_loader, test_loader, data_properties = \
         get_data(args['dset'], args['bs'], args['path'], args)
-    lp = len(train_loader)
 
     # 创建NAS模型
-    nas_model = Manager(args, data_properties)
-    # nas_model.build(n_layer=3, n_chan=32)
-    # nas_model.build(blocks_per_stage=[1, 1, 1, 3, 3],
+    nas_manager = Manager(args, data_properties, out_layer=OutLayer(256, (10,), True))
+
+    # nas_manager.build(n_layer=3, n_chan=32)
+    # nas_manager.build(blocks_per_stage=[1, 1, 1, 3, 3],
     #                 cells_per_block=[[3], [3], [3], [3, 3, 3], [3,3,3],[3,3,3]],
     #                 channels_per_block=[[16], [32], [64], [128, 128, 128],[256,256,256]],
     #                )
 
     # # SegSN and SegAsppSN
-    # nas_model.build(blocks_per_stage=[1, 1, 1, 3],
+    # nas_manager.build(blocks_per_stage=[1, 1, 1, 3],
     #                 cells_per_block=[[3], [3], [6], [6, 6, 3]],
     #                 channels_per_block=[[16], [32], [64], [128, 256, 512]])
 
     # # SegLargeKernelSN
-    # nas_model.build(blocks_per_stage=[1, 1, 1, 2, 1],
+    # nas_manager.build(blocks_per_stage=[1, 1, 1, 2, 1],
     #                 cells_per_block=[[2], [3], [4], [4, 4], [4]],
     #                 channels_per_block=[[16], [24], [40], [80, 112], [160]])
 
-    # BiSegSN
-    nas_model.build(blocks_per_stage=[1, 1, 1, 2, 1],
-                    cells_per_block=[[1], [2], [3], [3, 3], [6]],
-                    channels_per_block=[[16], [32], [64], [96, 112], [160]])
-
-    # initialize supernetwork
-    nas_model.supernetwork.init((2, data_properties['in_channels'],data_properties['img_dim'], data_properties['img_dim']))
-
-    # nas_model.supernetwork.sample_arch_and_save(folder='./supernetwork/',
-    #                                             suffix="0")
-
-    # # initialize parameter
-    # model_path = args.get('model_path', '')
-    # if len(model_path) != 0:
-    #     print('load supernetwork parameter')
-    #     #  map_location=torch.device('cuda')
-    #     nas_model.supernetwork.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
-    #     # nas_model.supernetwork.to(torch.device("cuda"))
+    # pk mobilenetv3-large
+    # nas_manager.build(blocks_per_stage=[1, 1, 1, 2, 1],
+    #                 cells_per_block=[[1], [2], [3], [3, 3], [6]],
+    #                 channels_per_block=[[16], [32], [64], [96, 112], [160]])
     #
-    #
-    # if args.get('search', False):
-    #     nas_model.supernetwork.search(max_generation=100,
-    #                                   population_size=2,
-    #                                   arc_loss="comp",
-    #                                   data_loader=val_loader,
-    #                                   cuda_avilable_list=[int(c) for c in args['cuda'].split(',')] if len(args['cuda']) > 0else [])
-    # return
+    # pk ENAS
+    nas_manager.build(blocks_per_stage=[2, 2, 1],
+                      cells_per_block=[[4, 4], [4, 4], [3]],
+                      channels_per_block=[[32, 32], [64, 128], [256]])
+
+    # 构建结构Anchor
+    anchors = None
+    if len(args['anchor_archs']) > 0:
+        anchors = Anchors()
+        anchors.load(args['anchor_archs'], args['anchor_states'], OutLayer, 7)
+    nas_manager.supernetwork.anchors = anchors
 
     # logger initialize
     xp = mlogger.Container()
@@ -188,104 +229,158 @@ def main(args, plotter):
                                                   plot_title='eval_%s' % cost,
                                                   plot_legend="pruned_cost"))
 
+    # initialize supernetwork
+    logging.info('initialize supernetwork basic info')
+    nas_manager.supernetwork.init(shape=(2, data_properties['in_channels'], data_properties['img_dim'], data_properties['img_dim']),
+                                  arc_loss="comp",
+                                  data_loader=test_loader,
+                                  supernetwork_manager=nas_manager)
+
+    # initialize parameter
+    logging.info('initialize supernetwork parameter')
+    if len(args.get('model_path', '')) != 0:
+        logging.info('load supernetwork parameter')
+        if torch.cuda.is_available():
+            nas_manager.supernetwork.to(torch.device("cuda:%d"%int(args['cuda'].split(',')[0])))
+
+        if torch.cuda.is_available():
+            nas_manager.supernetwork.load_state_dict(torch.load(args.get('model_path'),
+                                                                map_location="cuda:%d"%int(args['cuda'].split(',')[0])))
+        else:
+            nas_manager.supernetwork.load_state_dict(torch.load(args.get('model_path'),
+                                                                map_location=torch.device('cpu')))
     # set model input
     x = torch.Tensor()
     y = torch.LongTensor()
 
-    if len(args['cuda']) > 0 and len(args['cuda'].split(',')) > 0:
+    if torch.cuda.is_available():
         logger.info('Running with cuda (GPU {})'.format(args['cuda']))
-        nas_model.cuda([int(c) for c in args['cuda'].split(',')])
+        nas_manager.cuda([int(c) for c in args['cuda'].split(',')])
         x = x.cuda()
         y = y.cuda()
     else:
         logger.warning('Running *WITHOUT* cuda')
 
-    # training iterately
-    training_iter = 0
-    for epoch in range(args['epochs']):
-        # write logger
-        logger.info(epoch)
+    # training and searching iterately
+    if args['warmup_epochs'] > 0:
+        warmup_lr = nas_manager.adjust_lr(0, args['lr_pol_tresh'], args['lr_pol_val'], logger, ['path'])
+        logging.info('warmup supernetwork with fixed LR %f'%warmup_lr)
+        for warmup_epoch in range(args['warmup_epochs']):
+            for i, (inputs, labels) in enumerate(tqdm(train_loader, desc='Train', ascii=True)):
+                # set model status (train)
+                x.resize_(inputs.size()).copy_(inputs)
+                y.resize_(labels.size()).copy_(labels)
 
-        # lr_pol_tresh,lr_pol_val 负责网络参数学习率调整
-        # path_lr 负责网络架构参数学习率调整
-        nas_model.adjust_lr(epoch, args['lr_pol_tresh'], args['lr_pol_val'], logger, ['path'])
-        nas_model.supernetwork.epoch = epoch
+                # train and return predictions, loss, correct
+                nas_manager.optimizer.zero_grad()
+                loss, model_accuracy, model_sampled_cost, model_pruned_cost = nas_manager.train(x, y, epoch=warmup_epoch, warmup=True)
 
-        for i, (inputs, labels) in enumerate(tqdm(train_loader, desc='Train', ascii=True)):
-            # set model status (train)
-            x.resize_(inputs.size()).copy_(inputs)
-            y.resize_(labels.size()).copy_(labels)
+                # update model parameter
+                loss.backward()
 
-            # train and return predictions, loss, correct
-            loss, model_accuracy, model_sampled_cost, model_pruned_cost = nas_model.train(x, y)
+                # update parameter
+                nas_manager.optimizer.step()
 
-            # nas_model.supernetwork.save_architecture('./sn/',
-            #                                          'nas_%d' % (epoch % args['latest_num']))
+    logging.info("training and searching")
+    nas_manager.supernetwork.search_init()
+    evo_epochs = args['evo_epochs'] if args['iterator_search'] else 1
+    for evo_epoch in range(evo_epochs):
+        logging.info("training network parameters")
+        for epoch in range(args['epochs']):
+            logging.info("training network parameters for epoch %d(%d)"%(epoch, args['epochs']))
 
-            if model_sampled_cost is not None and model_pruned_cost is not None:
-                model_sampled_cost = model_sampled_cost.mean()
-                model_pruned_cost = model_pruned_cost.mean()
+            # write logger
+            logger.info(epoch)
 
-                # record architecture cost both sampled and pruned (training)
-                xp.train.__getattribute__('train_sampled_%s' % args['cost_optimization']).update(model_sampled_cost.item())
-                xp.train.__getattribute__('train_pruned_%s' % args['cost_optimization']).update(model_pruned_cost.item())
+            # lr_pol_tresh,lr_pol_val 负责网络参数学习率调整
+            # path_lr 负责网络架构参数学习率调整
+            nas_manager.adjust_lr(epoch, args['lr_pol_tresh'], args['lr_pol_val'], logger, ['path'])
 
-            # record model loss
-            xp.train.classif_loss.update(loss.item())
-            # record model accuracy
-            xp.train.accuracy.update(model_accuracy * 100 / float(inputs.size(0)))
+            for i, (inputs, labels) in enumerate(tqdm(train_loader, desc='Train', ascii=True)):
+                # anchor info
+                if nas_manager.supernetwork.anchors is not None:
+                    anchor_num = nas_manager.supernetwork.anchors.size()
+                    x.resize_(torch.Size([anchor_num])+inputs.shape[1:]).copy_(inputs[-anchor_num:,:,:,:])
+                    y.resize_(torch.Size([anchor_num])).copy_(labels[-anchor_num:])
+                    nas_manager.supernetwork.anchors.run(x, y)
 
-            # update model parameter
-            nas_model.optimizer.zero_grad()
-            loss.backward()
+                # set model status (train)
+                x.resize_(inputs.size()).copy_(inputs)
+                y.resize_(labels.size()).copy_(labels)
 
-            # clip gradient （avoid exploding）
-            torch.nn.utils.clip_grad_value_(nas_model.supernetwork.sampling_parameters.parameters(), 10)
-            torch.nn.utils.clip_grad_value_(nas_model.supernetwork.blocks.parameters(), 10)
+                # train and return predictions, loss, correct
+                nas_manager.optimizer.zero_grad()
+                loss, model_accuracy, model_sampled_cost, model_pruned_cost = \
+                    nas_manager.train(x, y, epoch=epoch)
 
-            # update parameter
-            nas_model.optimizer.step()
+                # nas_manager.supernetwork.save_architecture('./sn/',
+                #                                          'nas_%d' % (epoch % args['latest_num']))
 
-            xp.train.timer.update()
-            for metric in xp.train.metrics():
-                metric.log()
+                if model_sampled_cost is not None and model_pruned_cost is not None:
+                    model_sampled_cost = model_sampled_cost.mean()
+                    model_pruned_cost = model_pruned_cost.mean()
 
-            # if (i + 1) % lp == 0:
-            #     logger.info('\nEvaluation')
-            #
-            #     progress = epoch + (i + 1) / len(train_loader)
-            #     val_score = nas_model.eval(x, y, val_loader, 'validation')
-            #     #test_score = nas_model.eval(x, y, test_loader, 'test')
-            #     test_score = 0.0
-            #     # record model accuracy on validation and test dataset
-            #     xp.val.accuracy.update(val_score)
-            #     xp.test.accuracy.update(test_score)
-            #
-            #     msg = '[{:.2f}] Loss: {:.5f} - Cost: {:.3E} - Train: {:2.2f}% - Val: {:2.2f}% - Test: {:2.2f}%'
-            #     logger.info(msg.format(progress,
-            #                            xp.train.classif_loss.value,
-            #                            xp.train.objective_cost.value,
-            #                            xp.train.accuracy.value,
-            #                            xp.val.accuracy.value,
-            #                            xp.test.accuracy.value))
-            #
-            #     xp.val.timer.update()
-            #     xp.test.timer.update()
-            #     for metric in xp.val.metrics():
-            #         metric.log()
-            #     for metric in xp.test.metrics():
-            #         metric.log()
+                    # record architecture cost both sampled and pruned (training)
+                    xp.train.__getattribute__('train_sampled_%s' % args['cost_optimization']).update(model_sampled_cost.item())
+                    xp.train.__getattribute__('train_pruned_%s' % args['cost_optimization']).update(model_pruned_cost.item())
 
-            plotter.update_plots()
+                # record model loss
+                xp.train.classif_loss.update(loss.item())
+                # record model accuracy
+                xp.train.accuracy.update(model_accuracy * 100 / float(inputs.size(0)))
 
-            # increment training iter
-            training_iter += 1
+                # update model parameter
+                loss.backward()
 
-        # save model state
-        nas_model.supernetwork.search_and_plot('./sn/')
-        nas_model.supernetwork.search_and_save('./sn/',
-                                                 'nas_%d'%(epoch%args['latest_num']))
+                # # clip gradient （avoid exploding）
+                # torch.nn.utils.clip_grad_value_(nas_manager.supernetwork.sampling_parameters.parameters(), 10)
+                # torch.nn.utils.clip_grad_value_(nas_manager.supernetwork.blocks.parameters(), 10)
 
+                # update parameter
+                nas_manager.optimizer.step()
+
+                xp.train.timer.update()
+                for metric in xp.train.metrics():
+                    metric.log()
+
+                # if (i + 1) % lp == 0:
+                #     logger.info('\nEvaluation')
+                #
+                #     progress = epoch + (i + 1) / len(train_loader)
+                #     val_score = nas_manager.eval(x, y, val_loader, 'validation')
+                #     #test_score = nas_manager.eval(x, y, test_loader, 'test')
+                #     test_score = 0.0
+                #     # record model accuracy on validation and test dataset
+                #     xp.val.accuracy.update(val_score)
+                #     xp.test.accuracy.update(test_score)
+                #
+                #     msg = '[{:.2f}] Loss: {:.5f} - Cost: {:.3E} - Train: {:2.2f}% - Val: {:2.2f}% - Test: {:2.2f}%'
+                #     logger.info(msg.format(progress,
+                #                            xp.train.classif_loss.value,
+                #                            xp.train.objective_cost.value,
+                #                            xp.train.accuracy.value,
+                #                            xp.val.accuracy.value,
+                #                            xp.test.accuracy.value))
+                #
+                #     xp.val.timer.update()
+                #     xp.test.timer.update()
+                #     for metric in xp.val.metrics():
+                #         metric.log()
+                #     for metric in xp.test.metrics():
+                #         metric.log()
+
+                plotter.update_plots()
+
+            # save model state
+            nas_manager.supernetwork.search_and_plot('./supernetwork/')
+            nas_manager.supernetwork.search_and_save('./supernetwork/',
+                                                     'nas_%d'%(epoch%args['latest_num']))
+
+        logging.info("searching network architecture")
+        nas_manager.supernetwork.search(max_generation=1 if args['iterator_search'] else args['evo_epochs'],
+                                        population_size=args['population_size'],
+                                        epoch=evo_epoch,
+                                        folder='./supernetwork/')
 
 if __name__ == '__main__':
     logger.info('Executing main from {}'.format(os.getcwd()))

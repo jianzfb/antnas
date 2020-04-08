@@ -162,7 +162,9 @@ class Identity(NetworkBlock):
         self.params = {
             'module_list': ['Identity'],
             'name_list': ['Identity'],
-            'Identity': {}
+            'Identity': {},
+            'in_chan': 0,
+            'out_chan': 0
         }
 
     def forward(self, x, sampling=None):
@@ -191,6 +193,8 @@ class Skip(NetworkBlock):
             'module_list': ['Skip'],
             'name_list': ['Skip'],
             'Skip': {'out_chan': out_chan, 'reduction': reduction},
+            'in_chan': in_chan,
+            'out_chan': out_chan
         }
 
     def forward(self, x, sampling=None):
@@ -233,12 +237,16 @@ class ConvBn(NetworkBlock):
                        'k_size': k_size,
                        'relu': relu,
                        'dilation': dilation,
-                       'in_chan': in_chan}
+                       'in_chan': in_chan},
+            'in_chan': in_chan,
+            'out_chan': out_chan
         }
         self.structure_fixed = False
 
     def get_param_num(self, x):
-        return [0] + [self.conv.kernel_size[0]*self.conv.kernel_size[1]*self.conv.in_channels*self.conv.out_channels] + [0]*(NetworkBlock.state_num - 2)
+        return [0] + \
+               [self.conv.kernel_size[0]*self.conv.kernel_size[1]*self.conv.in_channels*self.conv.out_channels] + \
+               [0]*(NetworkBlock.state_num - 2)
 
     def forward(self, x, sampling=None):
         x = self.conv(x)
@@ -307,7 +315,9 @@ class SepConvBN(NetworkBlock):
                           'k_size': k_size,
                           'relu': relu,
                           'dilation': dilation,
-                          'in_chan': in_chan}
+                          'in_chan': in_chan},
+            'in_chan': in_chan,
+            'out_chan': out_chan
         }
         self.structure_fixed = False
 
@@ -326,7 +336,9 @@ class SepConvBN(NetworkBlock):
     def get_param_num(self, x):
         part1_params = self.depthwise_conv.kernel_size[0]*self.depthwise_conv.kernel_size[1]*self.depthwise_conv.in_channels
         part2_params = self.pointwise_conv.in_channels * self.pointwise_conv.out_channels
-        return [0] + [part1_params+part2_params] + [0]*(NetworkBlock.state_num - 2)
+        return [0] + \
+               [part1_params+part2_params] + \
+               [0]*(NetworkBlock.state_num - 2)
 
     def get_flop_cost(self, x):
         conv_in_data_size = torch.Size([1, *x.shape[1:]])
@@ -381,7 +393,9 @@ class ResizedBlock(NetworkBlock):
                              'relu': relu,
                              'k_size': k_size,
                              'scale_factor': scale_factor,
-                             'in_chan': in_chan}
+                             'in_chan': in_chan},
+            'in_chan': in_chan,
+            'out_chan': out_chan
         }
 
     def forward(self, x, sampling=None):
@@ -417,7 +431,9 @@ class AddBlock(NetworkBlock):
         self.params = {
             'module_list': ['AddBlock'],
             'name_list': ['AddBlock'],
-            'AddBlock': {}
+            'AddBlock': {},
+            'in_chan': 0,
+            'out_chan': 0
         }
 
     def forward(self, x, sampling=None):
@@ -444,7 +460,9 @@ class ConcatBlock(NetworkBlock):
         self.params = {
             'module_list': ['ConcatBlock'],
             'name_list': ['ConcatBlock'],
-            'ConcatBlock': {}
+            'ConcatBlock': {},
+            'in_chan': 0,
+            'out_chan': 0
         }
 
     def forward(self, x, sampling=None):
@@ -463,6 +481,89 @@ class ConcatBlock(NetworkBlock):
         return flop_cost
 
 
+class MergeBlock(NetworkBlock):
+    n_layers = 0
+    n_comp_steps = 1
+
+    def __init__(self, in_chan, out_chan):
+        super(MergeBlock, self).__init__()
+        self.params = {
+            'module_list': ['MergeBlock'],
+            'name_list': ['MergeBlock'],
+            'MergeBlock': {
+                'in_chan': in_chan,
+                'out_chan': out_chan
+            },
+            'in_chan': in_chan,
+            'out_chan': out_chan
+        }
+        self.conv = nn.Conv2d(in_chan, out_chan, kernel_size=1, stride=1, padding=0, bias=False)
+        self.bn = nn.BatchNorm2d(out_chan, momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1)
+        self.relu = True
+
+    def forward(self, x, sampling=None):
+        if not isinstance(x, list):
+            return x
+
+        # reduce to same size
+        target_size = -1
+        tt = []
+        for t in x:
+            if target_size < 0:
+                target_size = t.shape[2]
+
+            target_size = target_size if target_size < t.shape[2] else t.shape[2]
+
+        for t in x:
+            if target_size != t.shape[2]:
+                ks = t.shape[2] // target_size
+                tt.append(torch.nn.AvgPool2d(kernel_size=[ks, ks], padding=(ks-1)//2, stride=ks)(t))
+            else:
+                tt.append(t)
+        tt = torch.cat(tt, dim=1)
+
+        # reduce to channels
+        tt = self.conv(tt)
+        tt = self.bn(tt)
+        tt = F.relu(tt)
+
+        return tt
+
+
+class MaxPoolingBlock(NetworkBlock):
+    n_layers = 0
+    n_comp_steps = 1
+
+    def __init__(self, k_size, stride):
+        super(MaxPoolingBlock, self).__init__()
+        self.params = {
+            'module_list': ['MaxPoolingBlock'],
+            'name_list': ['MaxPoolingBlock'],
+            'MaxPoolingBlock': {
+                'k_size': k_size,
+                'stride': stride
+            },
+            'in_chan': 0,
+            'out_chan': 0
+        }
+
+        self.k_size = k_size
+        self.stride = stride
+
+    def forward(self, x, sampling=None):
+        x = torch.nn.MaxPool2d(kernel_size=self.k_size,stride=self.stride,padding=(self.k_size-1)//2)(x)
+        return x
+
+
+def _make_divisible(v, divisor=8, min_value=8):
+    if min_value is None:
+        min_value = divisor
+    new_v = max(min_value, int(v + divisor / 2) // divisor * divisor)
+    if new_v < 0.9 * v:
+        new_v += divisor
+    return new_v
+
+
 class InvertedResidualBlockWithSEHS(NetworkBlock):
     n_layers = 3
     n_comp_steps = 1
@@ -479,48 +580,67 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
                  hs=True,
                  dilation=1):
         super(InvertedResidualBlockWithSEHS, self).__init__()
+        self.params = {
+            'module_list': ['InvertedResidualBlockWithSEHS'],
+            'name_list': ['InvertedResidualBlockWithSEHS'],
+            'InvertedResidualBlockWithSEHS': {'in_chan': in_chan,
+                          'expansion': expansion,
+                          'kernel_size': kernel_size,
+                          'out_chan': out_chan,
+                          'skip': skip,
+                          'reduction': reduction,
+                          'ratio': ratio,
+                          'se': se,
+                          'hs': hs,
+                          'dilation': dilation},
+            'in_chan': in_chan,
+            'out_chan': out_chan
+        }
+
         # expansion,
+        expansion_channels = _make_divisible(in_chan * expansion)
         self.conv1 = nn.Conv2d(in_chan,
-                               in_chan * expansion,
+                               expansion_channels,
                                kernel_size=1,
                                stride=1,
                                bias=False)
-        self.bn1 = nn.BatchNorm2d(in_chan * expansion, momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1)
+        self.bn1 = nn.BatchNorm2d(expansion_channels, momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1)
 
-        self.dwconv2 = nn.Conv2d(in_chan * expansion,
-                                 in_chan * expansion,
+        self.dwconv2 = nn.Conv2d(expansion_channels,
+                                 expansion_channels,
                                  kernel_size=kernel_size,
-                                 groups=in_chan * expansion,
+                                 groups=expansion_channels,
                                  stride=2 if reduction else 1,
                                  padding=kernel_size // 2 + (kernel_size-1)*(dilation-1) // 2,
                                  bias=False,
                                  dilation=dilation)
-        self.bn2 = nn.BatchNorm2d(in_chan * expansion,momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1)
+        self.bn2 = nn.BatchNorm2d(expansion_channels,momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1)
 
         # for se
         if se:
+            squeeze_channels = _make_divisible(expansion_channels / ratio, divisor=8)
             self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
-            self.se_conv_layer_1 = nn.Conv2d(in_chan * expansion,
-                                             (in_chan * expansion) // ratio,
+            self.se_conv_layer_1 = nn.Conv2d(expansion_channels,
+                                             squeeze_channels,
                                              kernel_size=1,
                                              bias=True,
                                              stride=1,
                                              padding=0)
-            self.se_conv_layer_2 = nn.Conv2d((in_chan * expansion) // ratio,
-                                             in_chan * expansion,
+            self.se_conv_layer_2 = nn.Conv2d(squeeze_channels,
+                                             expansion_channels,
                                              kernel_size=1,
                                              bias=True,
                                              stride=1,
                                              padding=0)
 
-        self.conv3 = nn.Conv2d(in_chan * expansion,
+        self.conv3 = nn.Conv2d(expansion_channels,
                                out_chan,
                                kernel_size=1,
                                stride=1,
                                bias=False)
         self.bn3 = nn.BatchNorm2d(out_chan,momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1)
-        self.ratio = ratio
 
+        self.ratio = ratio
         self.reduction = reduction
         self.kernel_size = kernel_size
         self.in_chan = in_chan
@@ -528,10 +648,13 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
         self.expansion = expansion
         self.se = se
         self.hs = hs
-        if skip and self.in_chan == self.out_chan and (not self.reduction):
-            self.skip = True
-        else:
-            self.skip = False
+
+        self.shortcut = nn.Sequential()
+        if in_chan != out_chan and (not self.reduction):
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_chan, out_chan, kernel_size=1, stride=1, padding=0, bias=False),
+                nn.BatchNorm2d(out_chan),
+            )
 
     def forward(self, input, sampling=None):
         x = input
@@ -561,8 +684,8 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
         x = self.conv3(x)
         x = self.bn3(x)
 
-        if self.skip and self.in_chan == self.out_chan and (not self.reduction):
-            x = x + input
+        if not self.reduction:
+            x = x + self.shortcut(input)
 
         return x
 
@@ -587,9 +710,11 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
         return [0] + [params] + [0]*(NetworkBlock.state_num - 2)
 
     def get_flop_cost(self, x):
+        expansion_channels = _make_divisible(self.in_chan * self.expansion)
+
         step_1_in_size = torch.Size([1, *x.shape[1:]])
-        step_2_in_size = [1, self.in_chan*self.expansion, x.shape[2], x.shape[3]]
-        step_2_out_size = [1, self.in_chan*self.expansion, x.shape[2], x.shape[3]]
+        step_2_in_size = [1, expansion_channels, x.shape[2], x.shape[3]]
+        step_2_out_size = [1, expansion_channels, x.shape[2], x.shape[3]]
         if self.reduction:
             step_2_out_size[2] = step_2_out_size[2] // 2
             step_2_out_size[3] = step_2_out_size[3] // 2
@@ -621,8 +746,9 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
 
         flops_se = 0.0
         if self.se:
-            step_2_1_size = torch.Size([1, self.in_chan*self.expansion, 1, 1])
-            step_2_2_size = torch.Size([1, (self.in_chan * self.expansion)//self.ratio, 1, 1])
+            squeeze_channels = _make_divisible(expansion_channels / self.ratio, divisor=8)
+            step_2_1_size = torch.Size([1, expansion_channels, 1, 1])
+            step_2_2_size = torch.Size([1, squeeze_channels, 1, 1])
             step_2_3_size = torch.Size([1, self.in_chan * self.expansion, 1, 1])
             flops_se_1 = self.get_avgglobalpool_flops(self.global_pool, step_2_out_size, step_2_1_size)
             flops_se_2 = self.get_conv2d_flops(self.se_conv_layer_1, step_2_out_size, step_2_1_size)
@@ -633,8 +759,9 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
             flops_se_6 = 1 * step_2_out_size[1] * step_2_out_size[2] * step_2_out_size[3]
             flops_se = flops_se_1 + flops_se_2 + flops_se_3 + flops_se_4 + flops_se_5 + flops_se_6
 
+        # 需要修正
         flops_9 = 0
-        if self.skip and self.in_chan == self.out_chan and (not self.reduction):
+        if self.in_chan == self.out_chan and (not self.reduction):
             flops_9 = 1 * step_3_out_size[1] * step_3_out_size[2] * step_3_out_size[3]
 
         total_flops = flops_1 + \
@@ -660,7 +787,8 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
             irb_name += "_hs"
 
         irb_name += "_e%d"%self.expansion
-        if self.skip:
+
+        if not self.reduction:
             irb_name += "_skip"
 
         input_h, _ = x.shape[2:]
