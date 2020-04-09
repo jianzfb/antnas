@@ -25,22 +25,19 @@ class FrozenFixedNetwork(FixedNetwork):
         # 1.step parse x,y - (data,label)
         input = [x]
 
-        # running_graph.node[self.in_node]['input'] = [*input]
         data_dict = {}
         data_dict[self.in_node] = [*input]
 
-        model_out = None
+        node_output_dict = {}
         for node in self.traversal_order:
             cur_node = self.graph.node[node]
             input = self.format_input(data_dict[node])
 
             # 3.2.step execute node op
             out = self.blocks[cur_node['module']](input)
-
-            self.graph.node[node]['out'] = out
+            node_output_dict[node] = out
 
             if node == self.out_node:
-                model_out = out
                 break
 
             # 3.3.step set successor input
@@ -50,7 +47,4 @@ class FrozenFixedNetwork(FixedNetwork):
 
                 data_dict[succ].append(out)
 
-        return model_out
-
-    def output(self, node_name):
-        return self.graph.node[node_name]['out']
+        return node_output_dict

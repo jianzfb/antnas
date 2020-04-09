@@ -147,8 +147,8 @@ def main(args, plotter):
         logger.info('Running with cuda (GPU {})'.format(args['cuda']))
         model.to(int(args['cuda'].split(',')[0]))
         model = nn.DataParallel(model, device_ids=[int(i) for i in args['cuda'].split(',')])
-        x = x.cuda()
-        y = y.cuda()
+        x = x.cuda(torch.device('cuda:%d'%int(args['cuda'].split(',')[0])))
+        y = y.cuda(torch.device('cuda:%d'%int(args['cuda'].split(',')[0])))
     else:
         logger.warning('Running *WITHOUT* cuda')
 

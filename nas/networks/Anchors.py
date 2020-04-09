@@ -15,6 +15,7 @@ from nas.networks.FixedNetwork import *
 from nas.networks.FrozenFixedNetwork import *
 import collections
 
+
 class Anchors:
     def __init__(self, *args, **kwargs):
         self.anchor_archs = []
@@ -23,6 +24,8 @@ class Anchors:
 
         self.ffn = []
         self.arc_list = []
+        self.device_map = {}
+        self.ffn_out = {}
 
     def generate(self, arch_generator, anchor_num, folder, **kwargs):
         # 0.step build work folder
@@ -54,52 +57,66 @@ class Anchors:
             nx.write_gpickle(arch_generator.graph, architecture_path)
             self.anchor_archs.append(os.path.join(folder, "anchor_arch_%s.architecture" % anchor_index))
 
-    def load(self, archs_list, states_list, output_layer_cls, cuda_device=None):
-        # 1.step 创建结构
-        for arch_file in archs_list:
+    def load(self, archs_list, states_list, output_layer_cls, cuda_device_list=None):
+        for arch_index, arch_file in enumerate(archs_list):
+            # build architecture
             self.ffn.append(FrozenFixedNetwork(architecture=arch_file, output_layer_cls=output_layer_cls))
-        self.anchor_num = len(archs_list)
 
-        for anchor_index in range(self.anchor_num):
-            feature = []
-            for node_name in self.ffn[anchor_index].traversal_order:
-                feature.append(int(self.ffn[anchor_index].graph.node[node_name]['sampled']))
-
-            self.arc_list.append(feature)
-
-        # 2.step 迁移至GPU
-        if torch.cuda.is_available():
-            for anchor_index in range(self.anchor_num):
-                self.ffn[anchor_index].to(cuda_device)
-
-        # 3.step 加载参数
-        for anchor_index in range(self.anchor_num):
+            # reassign device
             if torch.cuda.is_available():
-                kv = torch.load(states_list[anchor_index], map_location=cuda_device)
-                new_kv = collections.OrderedDict()
-                for k,v in kv.items():
-                    new_kv['.'.join(k.split('.')[1:])] = v
+                self.ffn[arch_index].to(cuda_device_list[0])
 
-                self.ffn[anchor_index].load_state_dict(new_kv)
+                for index, cuda_device_id in enumerate(cuda_device_list):
+                    self.device_map["cuda:%d"%cuda_device_id] = index
             else:
-                kv = torch.load(states_list[anchor_index], map_location="cpu")
+                self.device_map['cpu'] = 0
+
+            # load parameter
+            if torch.cuda.is_available():
+                kv = torch.load(states_list[arch_index], map_location=torch.device("cuda:%d"%cuda_device_list[0]))
                 new_kv = collections.OrderedDict()
                 for k, v in kv.items():
                     new_kv['.'.join(k.split('.')[1:])] = v
 
-                self.ffn[anchor_index].load_state_dict(new_kv)
+                self.ffn[arch_index].load_state_dict(new_kv)
+            else:
+                kv = torch.load(states_list[arch_index], map_location="cpu")
+                new_kv = collections.OrderedDict()
+                for k, v in kv.items():
+                    new_kv['.'.join(k.split('.')[1:])] = v
+
+                self.ffn[arch_index].load_state_dict(new_kv)
+
+            # record arch
+            feature = []
+            for node_name in self.ffn[arch_index].traversal_order:
+                feature.append(int(self.ffn[arch_index].graph.node[node_name]['sampled']))
+
+            self.arc_list.append(feature)
+
+            # param no grad
+            for param in self.ffn[arch_index].parameters():
+                param.requires_grad = False
+
+            # is parallel
+            if torch.cuda.is_available():
+                self.ffn[arch_index] = nn.DataParallel(self.ffn[arch_index], cuda_device_list)
+
+        self.anchor_num = len(archs_list)
 
     def arch(self, anchor_index):
         return self.arc_list[anchor_index]
 
     def run(self, x, y):
+        self.ffn_out = {}
         for anchor_index in range(self.anchor_num):
             self.ffn[anchor_index].eval()
             with torch.no_grad():
-                self.ffn[anchor_index](x, y)
+                self.ffn_out[anchor_index] = self.ffn[anchor_index](x, y)
 
     def output(self, anchor_index, node_name):
-        return self.ffn[anchor_index].graph.node[node_name]['out']
+        output = self.ffn_out[anchor_index][node_name]
+        return output
 
     def size(self):
         return self.anchor_num

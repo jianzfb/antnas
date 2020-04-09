@@ -61,7 +61,7 @@ def argument_parser():
     parser.add_argument('-lr_pol_val', action='store', nargs='*', default=[0.1, 0.01, 0.001], type=str,
                         help='learning rate decay period')
 
-    parser.add_argument('-cuda', action='store', default='', type=str,
+    parser.add_argument('-cuda', action='store', default='0', type=str,
                         help='Enables cuda and select device')
     parser.add_argument('-latency', action='store', default='./latency.gpu.855.224_16.32.64.96.112.160_lookuptable.json',type=str,
                         help='latency lookup table')
@@ -97,10 +97,12 @@ def argument_parser():
     parser.add_argument('-model_path', dest="model_path", action='store', default="", type=str)
 
     parser.add_argument('-anchor_archs', dest="anchor_archs", action='store', default=[
-        './supernetwork/anchor_arch_0.architecture'
+        './supernetwork/anchor_arch_0.architecture',
+        './supernetwork/anchor_arch_1.architecture'
     ], type=list)
     parser.add_argument('-anchor_states', dest="anchor_states", action='store', default=[
-        './supernetwork/anchor_0_check.supernet.model'
+        './supernetwork/anchor_0_check.supernet.model',
+        './supernetwork/anchor_1_check.supernet.model'
     ], type=list)
     return parser.parse_known_args()[0]
 
@@ -187,7 +189,7 @@ def main(args, plotter):
     anchors = None
     if len(args['anchor_archs']) > 0:
         anchors = Anchors()
-        anchors.load(args['anchor_archs'], args['anchor_states'], OutLayer, 7)
+        anchors.load(args['anchor_archs'], args['anchor_states'], OutLayer, [int(c) for c in args['cuda'].split(',')])
     nas_manager.supernetwork.anchors = anchors
 
     # logger initialize
@@ -241,23 +243,24 @@ def main(args, plotter):
     if len(args.get('model_path', '')) != 0:
         logging.info('load supernetwork parameter')
         if torch.cuda.is_available():
-            nas_manager.supernetwork.to(torch.device("cuda:%d"%int(args['cuda'].split(',')[0])))
+            nas_manager.supernetwork.to(torch.device("cuda:%d" % int(args['cuda'].split(',')[0])))
 
         if torch.cuda.is_available():
             nas_manager.supernetwork.load_state_dict(torch.load(args.get('model_path'),
-                                                                map_location="cuda:%d"%int(args['cuda'].split(',')[0])))
+                                                                map_location=torch.device("cuda:%d"%int(args['cuda'].split(',')[0]))))
         else:
             nas_manager.supernetwork.load_state_dict(torch.load(args.get('model_path'),
                                                                 map_location=torch.device('cpu')))
     # set model input
     x = torch.Tensor()
     y = torch.LongTensor()
+    index = torch.as_tensor(list(range(args['bs'])))
 
     if torch.cuda.is_available():
         logger.info('Running with cuda (GPU {})'.format(args['cuda']))
         nas_manager.cuda([int(c) for c in args['cuda'].split(',')])
-        x = x.cuda()
-        y = y.cuda()
+        x = x.cuda(torch.device("cuda:%d"%int(args['cuda'].split(',')[0])))
+        y = y.cuda(torch.device("cuda:%d"%int(args['cuda'].split(',')[0])))
     else:
         logger.warning('Running *WITHOUT* cuda')
 
@@ -297,32 +300,43 @@ def main(args, plotter):
             nas_manager.adjust_lr(epoch, args['lr_pol_tresh'], args['lr_pol_val'], logger, ['path'])
 
             for i, (inputs, labels) in enumerate(tqdm(train_loader, desc='Train', ascii=True)):
-                # anchor info
-                if nas_manager.supernetwork.anchors is not None:
-                    anchor_num = nas_manager.supernetwork.anchors.size()
-                    x.resize_(torch.Size([anchor_num])+inputs.shape[1:]).copy_(inputs[-anchor_num:,:,:,:])
-                    y.resize_(torch.Size([anchor_num])).copy_(labels[-anchor_num:])
-                    nas_manager.supernetwork.anchors.run(x, y)
-
                 # set model status (train)
                 x.resize_(inputs.size()).copy_(inputs)
                 y.resize_(labels.size()).copy_(labels)
 
                 # train and return predictions, loss, correct
                 nas_manager.optimizer.zero_grad()
-                loss, model_accuracy, model_sampled_cost, model_pruned_cost = \
-                    nas_manager.train(x, y, epoch=epoch)
+                loss, model_accuracy, a, b = \
+                    nas_manager.train_with_anchor(x, y, epoch=epoch, index=index)
 
-                # nas_manager.supernetwork.save_architecture('./sn/',
-                #                                          'nas_%d' % (epoch % args['latest_num']))
+                # train arch network
+                if nas_manager.supernetwork.anchors is not None:
+                    anchor_x = x[b, :, :, :]
+                    anchor_y = y[b]
+                    nas_manager.supernetwork.anchors.run(anchor_x, anchor_y)
 
-                if model_sampled_cost is not None and model_pruned_cost is not None:
-                    model_sampled_cost = model_sampled_cost.mean()
-                    model_pruned_cost = model_pruned_cost.mean()
+                # if model_sampled_cost is not None and model_pruned_cost is not None:
+                #     model_sampled_cost = model_sampled_cost.mean()
+                #     model_pruned_cost = model_pruned_cost.mean()
+                #
+                #     # record architecture cost both sampled and pruned (training)
+                #     xp.train.__getattribute__('train_sampled_%s' % args['cost_optimization']).update(model_sampled_cost.item())
+                #     xp.train.__getattribute__('train_pruned_%s' % args['cost_optimization']).update(model_pruned_cost.item())
 
-                    # record architecture cost both sampled and pruned (training)
-                    xp.train.__getattribute__('train_sampled_%s' % args['cost_optimization']).update(model_sampled_cost.item())
-                    xp.train.__getattribute__('train_pruned_%s' % args['cost_optimization']).update(model_pruned_cost.item())
+                # anchor loss
+                anchor_consistent_loss_total = 0.0
+                if nas_manager.supernetwork.anchors is not None:
+                    for anchor_index in range(nas_manager.supernetwork.anchors.size()):
+                        anchor_consistent_loss = 0.0
+                        for k, v in a.items():
+                            anchor_node_output = nas_manager.supernetwork.anchors.output(anchor_index, k)
+                            anchor_consistent_loss += torch.mean((v-anchor_node_output)**2)
+                        anchor_consistent_loss /= len(a)
+
+                        anchor_consistent_loss_total += anchor_consistent_loss
+
+                    anchor_consistent_loss_total /= nas_manager.supernetwork.anchors.size()
+                    loss += 0.001 * anchor_consistent_loss_total
 
                 # record model loss
                 xp.train.classif_loss.update(loss.item())
@@ -331,10 +345,6 @@ def main(args, plotter):
 
                 # update model parameter
                 loss.backward()
-
-                # # clip gradient （avoid exploding）
-                # torch.nn.utils.clip_grad_value_(nas_manager.supernetwork.sampling_parameters.parameters(), 10)
-                # torch.nn.utils.clip_grad_value_(nas_manager.supernetwork.blocks.parameters(), 10)
 
                 # update parameter
                 nas_manager.optimizer.step()
@@ -374,13 +384,14 @@ def main(args, plotter):
             # save model state
             nas_manager.supernetwork.search_and_plot('./supernetwork/')
             nas_manager.supernetwork.search_and_save('./supernetwork/',
-                                                     'nas_%d'%(epoch%args['latest_num']))
+                                                     'supernetwork_state_%d'%(epoch%args['latest_num']))
 
         logging.info("searching network architecture")
         nas_manager.supernetwork.search(max_generation=1 if args['iterator_search'] else args['evo_epochs'],
                                         population_size=args['population_size'],
                                         epoch=evo_epoch,
                                         folder='./supernetwork/')
+
 
 if __name__ == '__main__':
     logger.info('Executing main from {}'.format(os.getcwd()))

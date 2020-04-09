@@ -92,6 +92,20 @@ class Manager(object):
                sample_cost.mean() if sample_cost is not None else None, \
                prune_cost.mean() if prune_cost is not None else None
 
+    def train_with_anchor(self, x, y, epoch=None, warmup=False, index=None):
+        if not self.parallel.training:
+            self.parallel.train()
+
+        # 1.step forward model
+        loss, accuracy, a, b = self.parallel(x, y, epoch=epoch, warmup=warmup, index=index)
+
+        # 2.step get last sampling
+        return loss.mean(), \
+               accuracy.sum(), \
+               a,\
+               b
+
+
     def eval(self, x, y, loader, name=''):
         if self.parallel.training:
            self.parallel.eval()
@@ -145,4 +159,4 @@ class Manager(object):
     def cuda(self, cuda_list):
         self.supernetwork.to(cuda_list[0])
         if len(cuda_list) > 1:
-            self.parallel = nn.DataParallel(self.supernetwork, [i for i in range(len(cuda_list))])
+            self.parallel = nn.DataParallel(self.supernetwork, [i for i in cuda_list])

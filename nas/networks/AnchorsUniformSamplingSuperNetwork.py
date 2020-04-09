@@ -16,25 +16,28 @@ class AnchorsUniformSamplingSuperNetwork(UniformSamplingSuperNetwork):
     def init(self, *args, **kwargs):
         super(AnchorsUniformSamplingSuperNetwork, self).init(*args, **kwargs)
 
-    def forward(self, x, y, arc=None, epoch=None, warmup=False):
+    def forward(self, x, y, arc=None, epoch=None, warmup=False, index=None):
         # 1.step parse x,y - (data,label)
         input = [x]
 
         # 2.step get sampling architecture of
-        anchor_arc = None
-        anchor_arc_index = -1
-        anchor_arc_loss = 0.0
+        anchor_num = self.anchors.size()
+        batch_size = input[0].size(0)
+        batched_sampling = None
+        anchor_arc_pos = None
         if arc is None:
             anchor_arc_list = []
-            for anchor_index in range(self.anchors.size()):
+            for anchor_index in range(anchor_num):
                 anchor_arc_list.append(self.anchors.arch(anchor_index))
             anchor_arc = torch.as_tensor(anchor_arc_list, device=x.device)
 
-            if anchor_arc is None:
-                batched_sampling = self._sample_archs_with_constraint(input[0].size(0), x.device)
-            else:
-                batched_sampling = self._sample_archs_with_constraint(input[0].size(0)-self.anchors.size(), x.device)
+            if batch_size > anchor_num:
+                batched_sampling = self._sample_archs_with_constraint(batch_size-anchor_num, x.device)
                 batched_sampling = torch.cat([batched_sampling, anchor_arc], dim=0)
+            else:
+                batched_sampling = anchor_arc
+
+            anchor_arc_pos = index[-anchor_num:]
         else:
             # search and find
             batched_sampling = arc
@@ -46,7 +49,8 @@ class AnchorsUniformSamplingSuperNetwork(UniformSamplingSuperNetwork):
         data_dict[self.in_node] = [*input]
 
         model_out = None
-        anchor_arc_loss = []
+        node_output_dict = {}
+
         for node in self.traversal_order:
             cur_node = self.net.node[node]
             # input = self.format_input(cur_node['input'])
@@ -62,11 +66,7 @@ class AnchorsUniformSamplingSuperNetwork(UniformSamplingSuperNetwork):
             out = self.blocks[cur_node['module']](input, node_sampling)
 
             if node.startswith('CELL') or node.startswith('T'):
-                if anchor_arc is not None:
-                    anchor_arc_node_output = self.anchors.output(anchor_arc_index, node)
-                    anchor_num = anchor_arc_node_output.shape[0]
-                    supernetwork_node_output = out[-anchor_num:]
-                    anchor_arc_loss.append(torch.mean((supernetwork_node_output-anchor_arc_node_output)**2))
+                node_output_dict[node] = out[-anchor_num:, :, :, :]
 
             if node == self.out_node:
                 model_out = out
@@ -86,7 +86,4 @@ class AnchorsUniformSamplingSuperNetwork(UniformSamplingSuperNetwork):
 
         # 6.step total loss
         loss = indiv_loss.mean()
-        if anchor_arc is not None:
-            loss = loss + 0.01 * torch.mean(torch.as_tensor(anchor_arc_loss))
-
-        return loss, model_accuracy, None, None
+        return loss, model_accuracy, node_output_dict, anchor_arc_pos
