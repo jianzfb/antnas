@@ -10,33 +10,23 @@ logger = logging.getLogger(__name__)
 
 class ParameterCostEvaluator(EdgeCostEvaluator):
 
-    def init_costs(self, model, main_cost):
+    def init_costs(self, model, graph, is_main_cost=False):
         with torch.no_grad():
-            input_var = (torch.ones(1, *model.input_size),)
-            graph = model.net
-
-            self.costs = torch.Tensor(graph.number_of_nodes())
-
-            graph.node[model.in_node]['input'] = [*input_var]
+            self.costs = torch.Tensor(graph.number_of_nodes(), NetworkBlock.state_num)
 
             for node in model.traversal_order:
                 cur_node = graph.node[node]
-                input_var = model.format_input(cur_node['input'])
+                input = graph.node[node]['input']
 
-                out = cur_node['module'](input_var)
+                if (isinstance(input, tuple) or isinstance(input, list)) and len(input) == 1:
+                    input = input[0]
 
-                if isinstance(cur_node['module'], NetworkBlock):
-                    cost = sum(i.numel() for i in cur_node['module'].parameters())
-                else:
-                    raise RuntimeError
+                cost = model.blocks[cur_node['module']].get_param_num(input)
 
-                if main_cost:
+                if is_main_cost:
                     cur_node['cost'] = cost
 
-                self.costs[self.path_recorder.node_index[node]] = cost
+                self.costs[self.model.arch_node_index[node]] = torch.Tensor(cost)
                 cur_node['input'] = []
 
-                for succ in graph.successors(node):
-                    if 'input' not in graph.node[succ]:
-                        graph.node[succ]['input'] = []
-                    graph.node[succ]['input'].append(out)
+            return self.costs

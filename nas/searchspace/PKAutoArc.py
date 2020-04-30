@@ -6,16 +6,15 @@ from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
 from nas.networks.SuperNetwork import *
-from nas.utils.drawers.BSNDrawer import BSNDrawer
+from nas.utils.drawers.NASDrawer import NASDrawer
 import torch
 import torch.nn as nn
+from nas.searchspace.Arc import *
 
 
-class PKAutoArc:
+class PKAutoArc(Arc):
     def __init__(self, graph):
-        self.graph = graph
-        self.blocks = nn.ModuleList([])
-        self.sampling_parameters = None
+        super(PKAutoArc, self).__init__(graph)
 
     def generate(self, head, tail, modules):
         in_name = SuperNetwork._INPUT_NODE_FORMAT.format(0, 0)
@@ -23,7 +22,8 @@ class PKAutoArc:
                             module=len(self.blocks),
                             module_params=head.params,
                             sampling_param=len(self.blocks),
-                            pos=BSNDrawer.get_draw_pos(pos=(0,0)),
+                            structure_fixed=head.structure_fixed,
+                            pos=NASDrawer.get_draw_pos(pos=(0, 0)),
                             sampled=1)
         self.blocks.append(head)
 
@@ -36,7 +36,8 @@ class PKAutoArc:
                                 module=len(self.blocks),
                                 module_params=module.params,
                                 sampling_param=len(self.blocks),
-                                pos=BSNDrawer.get_draw_pos(pos=pos),
+                                structure_fixed=module.structure_fixed,
+                                pos=NASDrawer.get_draw_pos(pos=pos),
                                 sampled=1)
             self.blocks.append(module)
 
@@ -57,7 +58,8 @@ class PKAutoArc:
                             module=len(self.blocks),
                             module_params=tail.params,
                             sampling_param=len(self.blocks),
-                            pos=BSNDrawer.get_draw_pos(pos=(0,len(modules)+1)),
+                            structure_fixed=tail.structure_fixed,
+                            pos=NASDrawer.get_draw_pos(pos=(0, len(modules) + 1)),
                             sampled=1)
         self.blocks.append(tail)
 
@@ -70,6 +72,8 @@ class PKAutoArc:
         if traversal_order[0] != in_name or traversal_order[-1] != out_name:
             raise ValueError('Seems like the given graph is broken')
 
+        self.in_node = in_name
+        self.out_node = out_name
         return in_name, out_name
 
     def save(self, folder, name):

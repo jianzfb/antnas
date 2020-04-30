@@ -158,7 +158,7 @@ class EvolutionSuperNetwork(SuperNetwork):
         if arc is None:
             batched_sampling = self.sample_arch(warmup=warmup)
         else:
-            batched_sampling = arc
+            batched_sampling = arc[0,:].view((1, arc.shape[1]))
 
         # 3.step forward network
         # 3.1.step set the input of network graph
@@ -179,7 +179,7 @@ class EvolutionSuperNetwork(SuperNetwork):
             # sampling, active = self.add_sampling(node, node_sampling, sampling, active, self.blocks[cur_node['module']].switch)
 
             # 3.2.step execute node op
-            out = self.blocks[cur_node['module']](input, node_sampling)
+            out = self.blocks[cur_node['module']](input, node_sampling.squeeze())
 
             if node == self.out_node:
                 model_out = out

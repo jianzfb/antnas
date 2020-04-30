@@ -14,6 +14,8 @@ import torch
 import math
 import random
 import functools
+from nas.networks.bayesian import *
+
 
 class Population(object):
   """Represents population - a group of Individuals,
@@ -73,7 +75,8 @@ class Nsga2(object):
                mutation_op,
                crossover_op,
                num_of_generations=100,
-               callback=None):
+               callback=None,
+               using_bayesian=False):
     self.mutation_controler = mutation_op
     self.crossover_controler = crossover_op
 
@@ -82,6 +85,7 @@ class Nsga2(object):
     self.problem = problem
     self.num_of_generations = num_of_generations
     self.callback = callback
+    self.using_bayesiasn = using_bayesian
 
   def fast_nondominated_sort(self, population):
     population.fronts = []
@@ -161,19 +165,19 @@ class Nsga2(object):
     kwargs.update({'problem': self.problem})
     children_population = None
     if self.crossover_controler is not None:
-      # crossover
+      # crossover (交叉)
       print('crossover population')
       crossover_population = \
         self.crossover_controler.crossover(population=population, **kwargs)
       children_population = crossover_population
-
+      
     if self.mutation_controler is not None:
-      # mutation
+      # mutation（变异）
       print('mutation population')
       mutation_population = \
-        self.mutation_controler.mutate(population=children_population, **kwargs)
-      children_population = mutation_population
-
+        self.mutation_controler.mutate(population=population, **kwargs)
+      children_population.population.extend(mutation_population.population)
+    
     # recalculate objectives
     print('caculate population objectives')
     for individual in children_population.population:
@@ -226,6 +230,7 @@ class Nsga2(object):
 
       # for the last genration, dont generate children
       if i != self.num_of_generations - 1:
+        # 1.step create children
         print('create children for generation %d'%i)
         children = self.__create_children(population, **kwargs)
 

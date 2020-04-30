@@ -29,11 +29,12 @@ class UniformSamplingSuperNetwork(SuperNetwork):
         input = [x]
 
         # 2.step get sampling architecture of
+        # using same architecture in batch
         if arc is None:
-            batched_sampling = self._sample_archs_with_constraint(input[0].size(0), x.device)
+            batched_sampling = torch.as_tensor([self.sample_arch()], device=x.device)
         else:
             # search and find
-            batched_sampling = arc
+            batched_sampling = arc[0, :].view((1, arc.shape[1]))
 
         # 3.step forward network
         # 3.1.step set the input of network graph
@@ -49,14 +50,11 @@ class UniformSamplingSuperNetwork(SuperNetwork):
 
             if len(input) == 0:
                 raise RuntimeError('Node {} has no inputs'.format(node))
-
             batch_size = input[0].size(0) if type(input) == list else input.size(0)
-            node_sampling = self.get_node_sampling(node, batch_size, batched_sampling)
-            # notify path recorder to add sampling
-            # sampling, active = self.add_sampling(node, node_sampling, sampling, active, self.blocks[cur_node['module']].switch)
+            node_sampling = self.get_node_sampling(node, 1, batched_sampling)
 
             # 3.2.step execute node op
-            out = self.blocks[cur_node['module']](input, node_sampling)
+            out = self.blocks[cur_node['module']](input, node_sampling.squeeze())
 
             if node == self.out_node:
                 model_out = out
@@ -94,17 +92,6 @@ class UniformSamplingSuperNetwork(SuperNetwork):
 
         # 2.step search parel front
 
-    def sampling_param_generator(self, node_name):
-        if not (node_name.startswith('CELL') or node_name.startswith('T')):
-            # 不可学习，处于永远激活状态
-            param_value = [0] + [1000000000000000] + [0] * (NetworkBlock.state_num - 2)
-            trainable = False
-        else:
-            param_value = [1.0/NetworkBlock.state_num]*NetworkBlock.state_num
-            trainable = False
-
-        return nn.Parameter(torch.Tensor(param_value), requires_grad=trainable)
-
     @property
     def n_layers(self):
         return sum([mod.n_layers for mod in self.blocks])
@@ -113,45 +100,28 @@ class UniformSamplingSuperNetwork(SuperNetwork):
     def n_comp_steps(self):
         return sum([mod.n_comp_steps for mod in self.blocks])
 
-    def get_node_sampling(self, node_name, batch_size, batched_sampling):
-        """
-        Get a batch of sampling for the given node on the given output.
-        Fires a "sampling" event with the node name and the sampling Variable.
-        :param node_name: Name of the node to sample
-        :param out: Tensor on which the sampling will be applied
-        :return: A Variable brodcastable to out's size, with all dimensions equals to one except the first one (batch)
-        """
-
-        sampling_dim = [batch_size] + [1] * 3
-        node = self.net.node[node_name]
-        node_sampling = batched_sampling[:, node['sampling_param']].contiguous().view(sampling_dim)
-
-        return node_sampling
-
     def _init_archs(self, x):
-
         pass
 
+    # def sample_arch(self):
+    #     feature = [None for _ in range(len(self.traversal_order))]
+    #     for node_name in self.traversal_order:
+    #         cur_node = self.net.node[node_name]
+    #         if not (node_name.startswith('CELL') or node_name.startswith('T')):
+    #             # 不可学习，处于永远激活状态
+    #             feature[cur_node['sampling_param']] = int(1)
+    #         else:
+    #             if not self.blocks[cur_node['module']].structure_fixed:
+    #                 feature[cur_node['sampling_param']] = int(np.random.randint(0, 2))
+    #             else:
+    #                 feature[cur_node['sampling_param']] = int(np.random.randint(0, NetworkBlock.state_num))
+    #
+    #     return feature
+
     def sample_arch(self):
-        feature = [None for _ in range(len(self.traversal_order))]
-        for node_name in self.traversal_order:
-            cur_node = self.net.node[node_name]
-            if not (node_name.startswith('CELL') or node_name.startswith('T')):
-                # 不可学习，处于永远激活状态
-                feature[cur_node['sampling_param']] = int(1)
-            else:
-                if not self.blocks[cur_node['module']].structure_fixed:
-                    feature[cur_node['sampling_param']] = int(np.random.randint(0, 2))
-                else:
-                    feature[cur_node['sampling_param']] = int(np.random.randint(0, NetworkBlock.state_num))
-
-        return feature
-
-    def _sample_archs_with_constraint(self, batch_size, device):
-        batch_size = int(batch_size)
         batch_arch_list = []
         with torch.no_grad():
-            while len(batch_arch_list) < batch_size:
+            while len(batch_arch_list) < 1:
                 feature = [None for _ in range(len(self.traversal_order))]
 
                 sampling = torch.Tensor()
@@ -198,8 +168,7 @@ class UniformSamplingSuperNetwork(SuperNetwork):
                 if satisfied_constraint:
                     batch_arch_list.append(feature)
 
-            batch_arch = torch.as_tensor(batch_arch_list, device=device)
-            return batch_arch
+            return batch_arch_list[0]
 
     def search_and_plot(self, path=None):
         if not os.path.exists(path):

@@ -43,45 +43,9 @@ def argument_parser():
                         help='momentum used by the optimizer')
     parser.add_argument('-nesterov', action='store', default=False, type=bool,
                         help='Use Nesterov for SGD momentum')
+    parser.add_argument('-architecture', action='store', default="/Users/jian/Downloads/accuray_0.8909_para_2580032_params_2580032.architecture", type=str, help="architecture path")
 
     return parser.parse_known_args()[0]
-
-
-class OutLayer(NetworkBlock):
-    n_layers = 1
-    n_comp_steps = 1
-
-    def __init__(self, out_shape, in_chan=160, bias=True):
-        super(OutLayer, self).__init__()
-        self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
-
-        self.conv_1 = nn.Conv2d(in_chan, 960, kernel_size=1, stride=1, padding=0, bias=bias)
-        self.bn = nn.BatchNorm2d(960)
-
-        self.conv_2 = nn.Conv2d(960, 1280, kernel_size=1, stride=1, padding=0, bias=bias)
-        self.conv_3 = nn.Conv2d(1280, out_shape[0], kernel_size=1, stride=1, padding=0, bias=bias)
-        self.out_shape = out_shape
-        self.params = {
-            'module_list': ['OutLayer'],
-            'name_list': ['OutLayer'],
-            'OutLayer': {'out_shape': out_shape, 'in_chan': in_chan},
-            'out': 'outname'
-        }
-
-    def forward(self, x, sampling=None):
-        x = self.conv_1(x)
-        x = self.bn(x)
-        x = F.relu6(x)
-
-        x = self.global_pool(x)
-        x = self.conv_2(x)
-        x = F.relu6(x)
-
-        x = self.conv_3(x)
-        return x.view(-1, *self.out_shape)
-
-    def get_flop_cost(self, x):
-        return [0] + [0] * (self.state_num - 1)
 
 
 # class OutLayer(NetworkBlock):
@@ -90,9 +54,13 @@ class OutLayer(NetworkBlock):
 #
 #     def __init__(self, out_shape, in_chan=160, bias=True):
 #         super(OutLayer, self).__init__()
-#         self.conv = nn.Conv2d(in_chan, out_shape[0], kernel_size=1, stride=1, padding=0, bias=bias)
 #         self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
 #
+#         self.conv_1 = nn.Conv2d(in_chan, 960, kernel_size=1, stride=1, padding=0, bias=bias)
+#         self.bn = nn.BatchNorm2d(960)
+#
+#         self.conv_2 = nn.Conv2d(960, 1280, kernel_size=1, stride=1, padding=0, bias=bias)
+#         self.conv_3 = nn.Conv2d(1280, out_shape[0], kernel_size=1, stride=1, padding=0, bias=bias)
 #         self.out_shape = out_shape
 #         self.params = {
 #             'module_list': ['OutLayer'],
@@ -102,12 +70,47 @@ class OutLayer(NetworkBlock):
 #         }
 #
 #     def forward(self, x, sampling=None):
-#         x = self.conv(x)
+#         x = self.conv_1(x)
+#         x = self.bn(x)
+#         x = F.relu6(x)
+#
 #         x = self.global_pool(x)
+#         x = self.conv_2(x)
+#         x = F.relu6(x)
+#
+#         x = self.conv_3(x)
 #         return x.view(-1, *self.out_shape)
 #
 #     def get_flop_cost(self, x):
 #         return [0] + [0] * (self.state_num - 1)
+
+
+class OutLayer(NetworkBlock):
+    n_layers = 1
+    n_comp_steps = 1
+
+    def __init__(self, out_shape, in_chan=160, bias=True):
+        super(OutLayer, self).__init__()
+        self.conv = nn.Conv2d(in_chan, out_shape[0], kernel_size=1, stride=1, padding=0, bias=bias)
+        self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
+
+        self.out_shape = out_shape
+        self.params = {
+            'module_list': ['OutLayer'],
+            'name_list': ['OutLayer'],
+            'OutLayer': {'out_shape': out_shape, 'in_chan': in_chan},
+            'out': 'outname',
+            'in_chan': in_chan,
+            'out_chan': out_shape
+        }
+
+    def forward(self, x, sampling=None):
+        x = self.conv(x)
+        x = self.global_pool(x)
+        return x.view(-1, *self.out_shape)
+
+    def get_flop_cost(self, x):
+        return [0] + [0] * (self.state_num - 1)
 
 
 def main(args, plotter):
@@ -135,9 +138,11 @@ def main(args, plotter):
     xp.test.accuracy = mlogger.metric.Simple(plotter=plotter, plot_title="val_test_accuracy", plot_legend="test")
     xp.test.timer = mlogger.metric.Timer(plotter=plotter, plot_title="Time", plot_legend="test")
 
+    NetworkBlock.bn_moving_momentum = True
     # 配置网络模型
-    model = FixedNetwork(architecture='/Users/jian/PycharmProjects/minas/supernetwork/pk_ENAS.architecture',
-                         output_layer_cls=OutLayer)
+    model = FixedNetwork(architecture=args['architecture'],
+                         output_layer_cls=OutLayer,
+                         plotter=plotter)
 
     # set model input
     x = torch.Tensor()

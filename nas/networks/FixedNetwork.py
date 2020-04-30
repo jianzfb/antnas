@@ -14,11 +14,15 @@ from nas.component.Loss import *
 from nas.component.ClassificationAccuracyEvaluator import *
 import networkx as nx
 import copy
+from nas.utils.drawers.NASDrawer import *
 
 
 class FixedNetwork(nn.Module):
     def __init__(self, *args, **kwargs):
         super(FixedNetwork, self).__init__()
+        NetworkBlock.bn_track_running_stats = True
+        NetworkBlock.bn_moving_momentum = True
+        
         architecture_path = kwargs.get('architecture', None)
         self.output_layer_cls = kwargs.get('output_layer_cls', None)
         self.graph = nx.read_gpickle(architecture_path)
@@ -55,7 +59,9 @@ class FixedNetwork(nn.Module):
                     self.blocks[cur_node['module']] = \
                         sampled_module(**cur_node['module_params'][sampled_module_name])
                 else:
-                    self.blocks[cur_node['module']] = None
+                    sampled_module_name = cur_node['module_params']['name_list'][0]
+                    self.blocks[cur_node['module']] = Zero(**cur_node['module_params'][sampled_module_name])
+                    sampled_module_name = 'ZERO'
             else:
                 sampled_module = globals()[module_list[sampled_module_index]]
                 sampled_module_name = cur_node['module_params']['name_list'][sampled_module_index]
@@ -63,7 +69,12 @@ class FixedNetwork(nn.Module):
                     sampled_module(**cur_node['module_params'][sampled_module_name])
 
             print('build node %s with sampling %s op' % (node_name, sampled_module_name))
-
+            
+        self.plotter = kwargs.get('plotter', None)
+        if self.plotter is not None:
+            self.drawer = NASDrawer(self.plotter)
+            self.drawer.draw(self.graph)
+        
     def forward(self, x, y):
         # 1.step parse x,y - (data,label)
         input = [x]

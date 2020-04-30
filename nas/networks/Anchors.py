@@ -7,7 +7,7 @@ from __future__ import unicode_literals
 from __future__ import print_function
 from nas.component.NetworkCell import *
 from nas.networks.EvolutionSuperNetwork import *
-from nas.utils.drawers.BSNDrawer import BSNDrawer
+from nas.utils.drawers.NASDrawer import NASDrawer
 from nas.component.Loss import *
 from nas.component.ClassificationAccuracyEvaluator import *
 from nas.searchspace.StageBlockCellArc import *

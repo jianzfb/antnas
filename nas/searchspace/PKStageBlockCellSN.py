@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*-
 # @Time    : 2019-07-24 11:39
-# @File    : PKSN.py
+# @File    : PKStageBlockCellSN.py
 # @Author  : jian<jian@mltalker.com>
 from __future__ import division
 from __future__ import unicode_literals
@@ -11,22 +11,22 @@ from nas.component.NetworkCell import *
 from nas.networks.UniformSamplingSuperNetwork import UniformSamplingSuperNetwork
 from nas.networks.AnchorsUniformSamplingSuperNetwork import *
 from nas.networks.EvolutionSuperNetwork import *
-from nas.utils.drawers.BSNDrawer import BSNDrawer
+from nas.utils.drawers.NASDrawer import NASDrawer
 from nas.component.Loss import *
 from nas.component.ClassificationAccuracyEvaluator import *
 from nas.searchspace.StageBlockCellArc import *
 
-__all__ = ['PKSN']
+__all__ = ['PKStageBlockCellSN']
 
 
-class PKSN(AnchorsUniformSamplingSuperNetwork):
+class PKStageBlockCellSN(UniformSamplingSuperNetwork):
     def __init__(self,
                  blocks_per_stage,
                  cells_per_block,
                  channels_per_block,
                  data_prop,
                  static_proba, *args, **kwargs):
-        super(PKSN, self).__init__(*args, **kwargs)
+        super(PKStageBlockCellSN, self).__init__(*args, **kwargs)
         NetworkBlock.state_num = 5
         self.in_chan = data_prop['in_channels']
         self.in_size = data_prop['img_dim']
@@ -41,13 +41,23 @@ class PKSN(AnchorsUniformSamplingSuperNetwork):
         self._loss = cross_entropy
         self._accuracy_evaluator = ClassificationAccuracyEvaluator()
 
+        self.blocks_per_stage = blocks_per_stage
+        self.cells_per_block = cells_per_block
+        self.channels_per_block = channels_per_block
+
         # head (固定计算节点，对应激活参数不可学习)
         head = ConvBn(self.in_chan, channels_per_block[0][0], k_size=3, stride=1, relu=True)
         # tail (固定计算节点，结构不可学习)
         tail = kwargs['out_layer']
 
         # search space（stage - block - cell）
-        self.sbca = StageBlockCellArc(CellBlock, ReductionCellBlock, AddBlock, ConvBn, self.graph)
+        self.sbca = StageBlockCellArc(CellBlock,
+                                      ReductionCellBlock,
+                                      AddBlock,
+                                      ConvBn,
+                                      self.graph,
+                                      is_cell_dense=True,
+                                      is_block_dense=True)
         in_name, out_name =\
             self.sbca.generate(head,
                                tail,
@@ -56,7 +66,7 @@ class PKSN(AnchorsUniformSamplingSuperNetwork):
                                channels_per_block)
         self.sampling_parameters = self.sbca.sampling_parameters
         self.blocks = self.sbca.blocks
-
+        
         # set graph
         self.set_graph(self.graph, in_name, out_name)
 
@@ -66,4 +76,6 @@ class PKSN(AnchorsUniformSamplingSuperNetwork):
     def accuray(self, predictions, labels):
         return self._accuracy_evaluator.accuracy(predictions, labels)
 
+    def hierarchical(self):
+        return self.sbca.hierarchical
 

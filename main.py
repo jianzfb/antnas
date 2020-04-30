@@ -12,6 +12,7 @@ from nas.dataset.datasets import get_data
 from nas.manager import *
 from nas.utils.misc import *
 from nas.networks.Anchors import *
+from nas.utils.drawers.NASDrawer import *
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ def argument_parser():
     # Experience
     parser.add_argument('-exp-name', action='store', default='', type=str, help='Experience Name')
     # Model
-    parser.add_argument('-arch', action='store', default='PKSN', type=str)
+    parser.add_argument('-arch', action='store', default='PKStageBlockCellSN', type=str)
     parser.add_argument('-deter_eval', action='store', default=False, type=bool,
                         help='Take blocks with probas >0.5 instead of sampling during evaluation')
 
@@ -75,10 +76,10 @@ def argument_parser():
     parser.add_argument('-np', '--n_parallel', dest='n_parallel', action='store', default=3, type=int,
                         help='Maximum number of module evaluation in parallel')
     parser.add_argument('-ce', '-cost_evaluation', dest='cost_evaluation', action='store',
-                        default=['comp'],
-                        type=restricted_list('comp', 'latency', 'para'))
+                        default=['param'],
+                        type=restricted_list('comp', 'latency', 'param'))
     parser.add_argument('-co', dest='cost_optimization', action='store', default='latency',
-                        type=restricted_str('comp', 'latency', 'para'))
+                        type=restricted_str('comp', 'latency', 'param'))
 
     parser.add_argument('-lambda', dest='lambda', action='store', default=1e-7, type=float,
                         help='Constant balancing the ratio classifier loss/architectural loss')
@@ -96,30 +97,56 @@ def argument_parser():
                         help='Penalty for inconsistent architecture')
     parser.add_argument('-model_path', dest="model_path", action='store', default="", type=str)
 
-    parser.add_argument('-anchor_archs', dest="anchor_archs", action='store', default=[
-        './supernetwork/anchor_arch_0.architecture',
-        './supernetwork/anchor_arch_1.architecture'
-    ], type=list)
-    parser.add_argument('-anchor_states', dest="anchor_states", action='store', default=[
-        './supernetwork/anchor_0_check.supernet.model',
-        './supernetwork/anchor_1_check.supernet.model'
-    ], type=list)
+    parser.add_argument('-anchor_archs', dest="anchor_archs", action='store', default=[], type=list)
+    parser.add_argument('-anchor_states', dest="anchor_states", action='store', default=[], type=list)
     return parser.parse_known_args()[0]
 
+
+# class OutLayer(NetworkBlock):
+#     n_layers = 1
+#     n_comp_steps = 1
+#
+#     def __init__(self, in_chan, out_shape, bias=True):
+#         super(OutLayer, self).__init__()
+#         self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
+#
+#         self.conv_1 = nn.Conv2d(in_chan, 960, kernel_size=1, stride=1, padding=0, bias=bias)
+#         self.bn = nn.BatchNorm2d(960)
+#
+#         self.conv_2 = nn.Conv2d(960, 1280, kernel_size=1, stride=1, padding=0, bias=bias)
+#         self.conv_3 = nn.Conv2d(1280, out_shape[0], kernel_size=1, stride=1, padding=0, bias=bias)
+#         self.out_shape = out_shape
+#         self.params = {
+#             'module_list': ['OutLayer'],
+#             'name_list': ['OutLayer'],
+#             'OutLayer': {'out_shape': out_shape, 'in_chan': in_chan},
+#             'out': 'outname'
+#         }
+#
+#     def forward(self, x, sampling=None):
+#         x = self.conv_1(x)
+#         x = self.bn(x)
+#         x = F.relu6(x)
+#
+#         x = self.global_pool(x)
+#         x = self.conv_2(x)
+#         x = F.relu6(x)
+#
+#         x = self.conv_3(x)
+#         return x.view(-1, *self.out_shape)
+#
+#     def get_flop_cost(self, x):
+#         return [0] + [0] * (self.state_num - 1)
 
 class OutLayer(NetworkBlock):
     n_layers = 1
     n_comp_steps = 1
 
-    def __init__(self, in_chan, out_shape, bias=True):
+    def __init__(self, out_shape, in_chan=160, bias=True):
         super(OutLayer, self).__init__()
+        self.conv = nn.Conv2d(in_chan, out_shape[0], kernel_size=1, stride=1, padding=0, bias=bias)
         self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
 
-        self.conv_1 = nn.Conv2d(in_chan, 960, kernel_size=1, stride=1, padding=0, bias=bias)
-        self.bn = nn.BatchNorm2d(960)
-
-        self.conv_2 = nn.Conv2d(960, 1280, kernel_size=1, stride=1, padding=0, bias=bias)
-        self.conv_3 = nn.Conv2d(1280, out_shape[0], kernel_size=1, stride=1, padding=0, bias=bias)
         self.out_shape = out_shape
         self.params = {
             'module_list': ['OutLayer'],
@@ -129,15 +156,8 @@ class OutLayer(NetworkBlock):
         }
 
     def forward(self, x, sampling=None):
-        x = self.conv_1(x)
-        x = self.bn(x)
-        x = F.relu6(x)
-
+        x = self.conv(x)
         x = self.global_pool(x)
-        x = self.conv_2(x)
-        x = F.relu6(x)
-
-        x = self.conv_3(x)
         return x.view(-1, *self.out_shape)
 
     def get_flop_cost(self, x):
@@ -156,8 +176,11 @@ def main(args, plotter):
     train_loader, val_loader, test_loader, data_properties = \
         get_data(args['dset'], args['bs'], args['path'], args)
 
+    # 设置visdom plotter
+    args.update({'plotter': plotter})
+
     # 创建NAS模型
-    nas_manager = Manager(args, data_properties, out_layer=OutLayer(256, (10,), True))
+    nas_manager = Manager(args, data_properties, out_layer=OutLayer((10,), 256, True))
 
     # nas_manager.build(n_layer=3, n_chan=32)
     # nas_manager.build(blocks_per_stage=[1, 1, 1, 3, 3],
@@ -181,15 +204,24 @@ def main(args, plotter):
     #                 channels_per_block=[[16], [32], [64], [96, 112], [160]])
     #
     # pk ENAS
-    nas_manager.build(blocks_per_stage=[2, 2, 1],
-                      cells_per_block=[[4, 4], [4, 4], [3]],
-                      channels_per_block=[[32, 32], [64, 128], [256]])
+    nas_manager.build(blocks_per_stage=[1, 1, 1],
+                      cells_per_block=[[6], [6], [4]],
+                      channels_per_block=[[64], [128], [256]])
+
+    #
+    # # pk ENAS
+    # nas_manager.build(blocks_per_stage=[4, 4, 1],
+    #                   cells_per_block=[[3, 3, 3, 3], [3, 3, 3, 3], [4]],
+    #                   channels_per_block=[[32, 32, 64, 64], [64, 64, 128, 128], [256]])
 
     # 构建结构Anchor
     anchors = None
+    index = None
     if len(args['anchor_archs']) > 0:
         anchors = Anchors()
         anchors.load(args['anchor_archs'], args['anchor_states'], OutLayer, [int(c) for c in args['cuda'].split(',')])
+        index = torch.as_tensor(list(range(args['bs'])))
+
     nas_manager.supernetwork.anchors = anchors
 
     # logger initialize
@@ -234,9 +266,11 @@ def main(args, plotter):
     # initialize supernetwork
     logging.info('initialize supernetwork basic info')
     nas_manager.supernetwork.init(shape=(2, data_properties['in_channels'], data_properties['img_dim'], data_properties['img_dim']),
-                                  arc_loss="comp",
+                                  arc_loss="param",
                                   data_loader=test_loader,
                                   supernetwork_manager=nas_manager)
+
+    nas_manager.supernetwork.draw()
 
     # initialize parameter
     logging.info('initialize supernetwork parameter')
@@ -247,14 +281,13 @@ def main(args, plotter):
 
         if torch.cuda.is_available():
             nas_manager.supernetwork.load_state_dict(torch.load(args.get('model_path'),
-                                                                map_location=torch.device("cuda:%d"%int(args['cuda'].split(',')[0]))))
+                                                                map_location=torch.device("cuda:%d"%int(args['cuda'].split(',')[0]))), False)
         else:
             nas_manager.supernetwork.load_state_dict(torch.load(args.get('model_path'),
-                                                                map_location=torch.device('cpu')))
+                                                                map_location=torch.device('cpu')), False)
     # set model input
     x = torch.Tensor()
     y = torch.LongTensor()
-    index = torch.as_tensor(list(range(args['bs'])))
 
     if torch.cuda.is_available():
         logger.info('Running with cuda (GPU {})'.format(args['cuda']))
@@ -306,13 +339,14 @@ def main(args, plotter):
 
                 # train and return predictions, loss, correct
                 nas_manager.optimizer.zero_grad()
-                loss, model_accuracy, a, b = \
-                    nas_manager.train_with_anchor(x, y, epoch=epoch, index=index)
 
-                # train arch network
+                loss, model_accuracy, a, b = \
+                    nas_manager.train(x, y, epoch=epoch, index=index)
+
+                # train anchor arch network
                 if nas_manager.supernetwork.anchors is not None:
-                    anchor_x = x[b, :, :, :]
-                    anchor_y = y[b]
+                    anchor_x = x
+                    anchor_y = y
                     nas_manager.supernetwork.anchors.run(anchor_x, anchor_y)
 
                 # if model_sampled_cost is not None and model_pruned_cost is not None:
@@ -327,12 +361,20 @@ def main(args, plotter):
                 anchor_consistent_loss_total = 0.0
                 if nas_manager.supernetwork.anchors is not None:
                     for anchor_index in range(nas_manager.supernetwork.anchors.size()):
+                        sample_index_in_batch = np.where(b == anchor_index)[0]
+                        if sample_index_in_batch.size == 0:
+                            continue
+                        
                         anchor_consistent_loss = 0.0
                         for k, v in a.items():
                             anchor_node_output = nas_manager.supernetwork.anchors.output(anchor_index, k)
-                            anchor_consistent_loss += torch.mean((v-anchor_node_output)**2)
-                        anchor_consistent_loss /= len(a)
 
+                            sample_a_in_batch = v[sample_index_in_batch, :, :, :]
+                            sample_anchor_node_output_in_batch = anchor_node_output[sample_index_in_batch, :, :, :]
+                            
+                            anchor_consistent_loss += torch.mean((sample_a_in_batch-sample_anchor_node_output_in_batch)**2)
+
+                        anchor_consistent_loss /= len(a)
                         anchor_consistent_loss_total += anchor_consistent_loss
 
                     anchor_consistent_loss_total /= nas_manager.supernetwork.anchors.size()

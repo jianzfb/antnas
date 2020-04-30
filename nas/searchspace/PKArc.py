@@ -6,16 +6,15 @@ from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
 from nas.networks.SuperNetwork import *
-from nas.utils.drawers.BSNDrawer import BSNDrawer
+from nas.utils.drawers.NASDrawer import NASDrawer
 import torch
 import torch.nn as nn
+from nas.searchspace.Arc import *
 
 
-class PKArc:
-    def __init__(self, graph):
-        self.graph = graph
-        self.blocks = nn.ModuleList([])
-        self.sampling_parameters = None
+class PKArc(Arc):
+    def __init__(self, graph=None):
+        super(PKArc, self).__init__(graph)
         self.node_map = {}
         self.inv_node_map = {}
 
@@ -30,7 +29,8 @@ class PKArc:
                             module=len(self.blocks),
                             module_params=module.params,
                             sampling_param=len(self.blocks),
-                            pos=BSNDrawer.get_draw_pos(pos=pos),
+                            structure_fixed=module.structure_fixed,
+                            pos=NASDrawer.get_draw_pos(pos=pos),
                             sampled=1)
         self.node_map[name] = pos_name
         self.inv_node_map[pos_name] = name
@@ -60,7 +60,8 @@ class PKArc:
                                 module=len(self.blocks),
                                 module_params=head.params,
                                 sampling_param=len(self.blocks),
-                                pos=BSNDrawer.get_draw_pos(pos=pos),
+                                structure_fixed=head.structure_fixed,
+                                pos=NASDrawer.get_draw_pos(pos=pos),
                                 sampled=1)
             self.blocks.append(head)
 
@@ -75,7 +76,8 @@ class PKArc:
                             module=len(self.blocks),
                             module_params=tail.params,
                             sampling_param=len(self.blocks),
-                            pos=BSNDrawer.get_draw_pos(pos=pos),
+                            structure_fixed=tail.structure_fixed,
+                            pos=NASDrawer.get_draw_pos(pos=pos),
                             sampled=1)
         self.blocks.append(tail)
         self.graph.add_edge(end_in_graph,
@@ -87,4 +89,6 @@ class PKArc:
         if traversal_order[0] != in_name or traversal_order[-1] != out_name:
             raise ValueError('Seems like the given graph is broken')
 
+        self.in_node = in_name
+        self.out_node = out_name
         return in_name, out_name

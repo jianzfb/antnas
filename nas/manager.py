@@ -24,6 +24,7 @@ class Manager(object):
 
         # 模型优化器
         self._optimizer = None
+        self.cuda_list = []
 
     def initialize_optimizer(self):
         if self._optimizer is not None:
@@ -79,32 +80,28 @@ class Manager(object):
         if state_dict_path is not None:
             self._model.load_state_dict(torch.load(state_dict_path, map_location='cpu'))
 
-    def train(self, x, y, epoch=None, warmup=False):
+    def train(self, x, y, epoch=None, warmup=False, index=None):
         if not self.parallel.training:
             self.parallel.train()
 
-        # 1.step forward model
-        loss, accuracy, sample_cost, prune_cost = self.parallel(x, y, epoch=epoch, warmup=warmup)
+        if index is None:
+            # 1.step forward model
+            loss, accuracy, sample_cost, prune_cost = self.parallel(x, y, epoch=epoch, warmup=warmup)
 
-        # 2.step get last sampling
-        return loss.mean(), \
-               accuracy.sum(), \
-               sample_cost.mean() if sample_cost is not None else None, \
-               prune_cost.mean() if prune_cost is not None else None
+            # 2.step get last sampling
+            return loss.mean(), \
+                   accuracy.sum(), \
+                   sample_cost.mean() if sample_cost is not None else None, \
+                   prune_cost.mean() if prune_cost is not None else None
+        else:
+            # 1.step forward model
+            loss, accuracy, a, b = self.parallel(x, y, epoch=epoch, warmup=warmup, index=index)
 
-    def train_with_anchor(self, x, y, epoch=None, warmup=False, index=None):
-        if not self.parallel.training:
-            self.parallel.train()
-
-        # 1.step forward model
-        loss, accuracy, a, b = self.parallel(x, y, epoch=epoch, warmup=warmup, index=index)
-
-        # 2.step get last sampling
-        return loss.mean(), \
-               accuracy.sum(), \
-               a,\
-               b
-
+            # 2.step get last sampling
+            return loss.mean(), \
+                   accuracy.sum(), \
+                   a, \
+                   b
 
     def eval(self, x, y, loader, name=''):
         if self.parallel.training:
@@ -160,3 +157,5 @@ class Manager(object):
         self.supernetwork.to(cuda_list[0])
         if len(cuda_list) > 1:
             self.parallel = nn.DataParallel(self.supernetwork, [i for i in cuda_list])
+            
+        self.cuda_list = cuda_list

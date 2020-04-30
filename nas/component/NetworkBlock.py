@@ -7,6 +7,7 @@ from __future__ import unicode_literals
 from __future__ import print_function
 import torch.nn.functional as F
 from torch import nn
+import numpy as np
 import torch
 import json
 import os
@@ -15,12 +16,15 @@ import os
 class NetworkBlock(nn.Module):
     state_num = 5
     bn_moving_momentum = False
+    bn_track_running_stats = False
     lookup_table = {}
 
     def __init__(self):
         super(NetworkBlock, self).__init__()
         self._params = {}
         self._structure_fixed = True
+        self._adapt_mean = None
+        self._adapt_var = None
 
     @property
     def structure_fixed(self):
@@ -171,9 +175,55 @@ class Identity(NetworkBlock):
         if sampling is None:
             return x
 
-        return x * (sampling == 1).float()
+        is_activate = (int)(sampling.item())
+        if is_activate == 1:
+            return x
+        else:
+            return torch.zeros(x.shape, device=x.device)
 
     def get_flop_cost(self, x):
+        return [0] * self.state_num
+
+
+class Zero(NetworkBlock):
+    n_layers = 0
+    n_comp_steps = 0
+
+    def __init__(self, in_chan, out_chan, reduction=False, **kwargs):
+        super(Zero, self).__init__()
+        self.structure_fixed = True
+        self.in_channels = in_chan
+        self.out_channels = out_chan
+        self.reduction = reduction
+        self.params = {
+            'module_list': ['Zero'],
+            'name_list': ['Zero'],
+            'Zero': {'out_chan': out_chan, 'reduction': reduction, 'in_chan': in_chan},
+            'in_chan': in_chan,
+            'out_chan': out_chan
+        }
+
+    def forward(self, x, sampling=None):
+        batch_size = x.size(0)
+        channels = x.size(1)
+        H = x.size(2)
+        W = x.size(3)
+        if self.reduction:
+            H = H//2
+            W = W//2
+        
+        if self.out_channels != self.in_channels:
+            return torch.zeros([batch_size, self.out_channels, H, W], device=x.device)
+        else:
+            return torch.zeros([batch_size, channels, H, W], device=x.device)
+
+    def get_flop_cost(self, x):
+        return [0] * self.state_num
+
+    def get_param_num(self, x):
+        return [0] * self.state_num
+
+    def get_latency(self, x):
         return [0] * self.state_num
 
 
@@ -181,7 +231,7 @@ class Skip(NetworkBlock):
     n_layers = 0
     n_comp_steps = 0
 
-    def __init__(self, in_chan, out_chan, reduction):
+    def __init__(self, in_chan, out_chan, reduction=False):
         super(Skip, self).__init__()
         self.in_channels = in_chan
         self.out_channels = out_chan
@@ -192,7 +242,7 @@ class Skip(NetworkBlock):
         self.params = {
             'module_list': ['Skip'],
             'name_list': ['Skip'],
-            'Skip': {'out_chan': out_chan, 'reduction': reduction},
+            'Skip': {'out_chan': out_chan, 'reduction': reduction, 'in_chan': in_chan},
             'in_chan': in_chan,
             'out_chan': out_chan
         }
@@ -210,7 +260,16 @@ class Skip(NetworkBlock):
         if sampling is None:
             return x_res
 
-        return x_res * (sampling == 1).float()
+        is_activate = (int)(sampling.item())
+        if is_activate == 1:
+            return x_res
+        else:
+            return torch.zeros(x_res.shape, device=x.device)
+
+        # if sampling is None:
+        #     return x_res
+        #
+        # return x_res * (sampling == 1).float()
 
     def get_flop_cost(self, x):
         return [0] * NetworkBlock.state_num
@@ -226,7 +285,9 @@ class ConvBn(NetworkBlock):
     def __init__(self, in_chan, out_chan, relu, k_size=3, stride=1, dilation=1):
         super(ConvBn, self).__init__()
         self.conv = nn.Conv2d(in_chan, out_chan, kernel_size=k_size, stride=stride, padding=k_size//2, bias=False, dilation=dilation)
-        self.bn = nn.BatchNorm2d(out_chan, momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1)
+        self.bn = nn.BatchNorm2d(out_chan,
+                                 momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                                 track_running_stats=NetworkBlock.bn_track_running_stats)
         self.relu = relu
         self.out_chan = out_chan
         self.params = {
@@ -257,7 +318,16 @@ class ConvBn(NetworkBlock):
         if sampling is None:
             return x
 
-        return x * (sampling == 1).float()
+        is_activate = (int)(sampling.item())
+        if is_activate == 1:
+            return x
+        else:
+            return torch.zeros(x.shape, device=x.device)
+
+        # if sampling is None:
+        #     return x
+        #
+        # return x * (sampling == 1).float()
 
     def get_flop_cost(self, x):
         conv_in_data_size = torch.Size([1, *x.shape[1:]])
@@ -303,7 +373,9 @@ class SepConvBN(NetworkBlock):
                                         dilation=dilation,
                                         bias=False)
         self.pointwise_conv = nn.Conv2d(in_chan, out_chan, kernel_size=1, stride=1, padding=0, bias=False)
-        self.bn = nn.BatchNorm2d(out_chan, momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1)
+        self.bn = nn.BatchNorm2d(out_chan,
+                                 momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                                 track_running_stats=NetworkBlock.bn_track_running_stats)
         self.relu = relu
         self.out_chan = out_chan
 
@@ -331,7 +403,16 @@ class SepConvBN(NetworkBlock):
         if sampling is None:
             return x
 
-        return x * (sampling == 1).float()
+        is_activate = (int)(sampling.item())
+        if is_activate == 1:
+            return x
+        else:
+            return torch.zeros(x.shape, device=x.device)
+
+        # if sampling is None:
+        #     return x
+        #
+        # return x * (sampling == 1).float()
 
     def get_param_num(self, x):
         part1_params = self.depthwise_conv.kernel_size[0]*self.depthwise_conv.kernel_size[1]*self.depthwise_conv.in_channels
@@ -397,6 +478,7 @@ class ResizedBlock(NetworkBlock):
             'in_chan': in_chan,
             'out_chan': out_chan
         }
+        self.structure_fixed = False
 
     def forward(self, x, sampling=None):
         x = F.upsample(x, scale_factor=self.scale_factor, mode='bilinear')
@@ -406,7 +488,16 @@ class ResizedBlock(NetworkBlock):
         if sampling is None:
             return x
 
-        return x * (sampling == 1).float()
+        is_activate = (int)(sampling.item())
+        if is_activate == 1:
+            return x
+        else:
+            return torch.zeros(x.shape, device=x.device)
+
+        # if sampling is None:
+        #     return x
+        #
+        # return x * (sampling == 1).float()
 
     def get_param_num(self, x):
         if self.conv_layer is not None:
@@ -435,6 +526,7 @@ class AddBlock(NetworkBlock):
             'in_chan': 0,
             'out_chan': 0
         }
+        self.structure_fixed = True
 
     def forward(self, x, sampling=None):
         if not isinstance(x, list):
@@ -464,6 +556,7 @@ class ConcatBlock(NetworkBlock):
             'in_chan': 0,
             'out_chan': 0
         }
+        self.structure_fixed = True
 
     def forward(self, x, sampling=None):
         if not isinstance(x, list):
@@ -498,8 +591,11 @@ class MergeBlock(NetworkBlock):
             'out_chan': out_chan
         }
         self.conv = nn.Conv2d(in_chan, out_chan, kernel_size=1, stride=1, padding=0, bias=False)
-        self.bn = nn.BatchNorm2d(out_chan, momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1)
+        self.bn = nn.BatchNorm2d(out_chan,
+                                 momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                                 track_running_stats=NetworkBlock.bn_track_running_stats)
         self.relu = True
+        self.structure_fixed = False
 
     def forward(self, x, sampling=None):
         if not isinstance(x, list):
@@ -527,7 +623,23 @@ class MergeBlock(NetworkBlock):
         tt = self.bn(tt)
         tt = F.relu(tt)
 
-        return tt
+        if sampling is None:
+            return tt
+
+        is_activate = (int)(sampling.item())
+        if is_activate == 1:
+            return tt
+        else:
+            return torch.zeros(tt.shape, device=tt.device)
+
+        # if sampling is None:
+        #     return tt
+        #
+        # return tt * (sampling == 1).float()
+
+    def get_param_num(self, x):
+        conv_param = self.conv.in_channels*self.conv.out_channels*self.conv.kernel_size[0]*self.conv.kernel_size[1]
+        return [0]+[conv_param]+[0]*(NetworkBlock.state_num-2)
 
 
 class MaxPoolingBlock(NetworkBlock):
@@ -549,6 +661,7 @@ class MaxPoolingBlock(NetworkBlock):
 
         self.k_size = k_size
         self.stride = stride
+        self.structure_fixed = True
 
     def forward(self, x, sampling=None):
         x = torch.nn.MaxPool2d(kernel_size=self.k_size,stride=self.stride,padding=(self.k_size-1)//2)(x)
@@ -580,6 +693,7 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
                  hs=True,
                  dilation=1):
         super(InvertedResidualBlockWithSEHS, self).__init__()
+        self.structure_fixed = False
         self.params = {
             'module_list': ['InvertedResidualBlockWithSEHS'],
             'name_list': ['InvertedResidualBlockWithSEHS'],
@@ -604,7 +718,9 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
                                kernel_size=1,
                                stride=1,
                                bias=False)
-        self.bn1 = nn.BatchNorm2d(expansion_channels, momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1)
+        self.bn1 = nn.BatchNorm2d(expansion_channels,
+                                  momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                                  track_running_stats=NetworkBlock.bn_track_running_stats)
 
         self.dwconv2 = nn.Conv2d(expansion_channels,
                                  expansion_channels,
@@ -614,7 +730,9 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
                                  padding=kernel_size // 2 + (kernel_size-1)*(dilation-1) // 2,
                                  bias=False,
                                  dilation=dilation)
-        self.bn2 = nn.BatchNorm2d(expansion_channels,momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1)
+        self.bn2 = nn.BatchNorm2d(expansion_channels,
+                                  momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                                  track_running_stats=NetworkBlock.bn_track_running_stats)
 
         # for se
         if se:
@@ -638,7 +756,9 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
                                kernel_size=1,
                                stride=1,
                                bias=False)
-        self.bn3 = nn.BatchNorm2d(out_chan,momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1)
+        self.bn3 = nn.BatchNorm2d(out_chan,
+                                  momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                                  track_running_stats=NetworkBlock.bn_track_running_stats)
 
         self.ratio = ratio
         self.reduction = reduction
@@ -653,7 +773,9 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
         if in_chan != out_chan and (not self.reduction):
             self.shortcut = nn.Sequential(
                 nn.Conv2d(in_chan, out_chan, kernel_size=1, stride=1, padding=0, bias=False),
-                nn.BatchNorm2d(out_chan),
+                nn.BatchNorm2d(out_chan,
+                               momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                               track_running_stats=NetworkBlock.bn_track_running_stats),
             )
 
     def forward(self, input, sampling=None):
@@ -687,7 +809,20 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
         if not self.reduction:
             x = x + self.shortcut(input)
 
-        return x
+        if sampling is None:
+            return x
+
+        is_activate = (int)(sampling.item())
+        if is_activate == 1:
+            return x
+        else:
+            return torch.zeros(x.shape, device=x.device)
+
+        # if sampling is None:
+        #     return x
+        #
+        # x = x * (sampling == 1).float()
+        # return x
 
     def get_param_num(self, x):
         conv1_param = self.conv1.in_channels*self.conv1.out_channels*self.conv1.kernel_size[0]*self.conv1.kernel_size[1]

@@ -138,8 +138,7 @@ def mobilenetv2(head, tail, prefix):
 
 # ENAS
 def ENAS(tail, prefix):
-    graph = nx.DiGraph()
-    pk = PKArc(graph)
+    pk = PKArc()
 
     # sep1_r = SeparableConv2D(64, (5, 5), use_bias=False, name='sep1', padding='same', activation='relu')(inp)
     # sep1 = BatchNormalization()(sep1_r)
@@ -294,7 +293,7 @@ def ENAS(tail, prefix):
 
     # conv5_r = Convolution2D(256, (3, 3), use_bias=False, name='conv5', padding='same', activation='relu')(concat10)
     # conv5 = BatchNormalization()(conv5_r)
-    conv_5 = ConvBn(64,256,relu=True,k_size=3)
+    conv_5 = ConvBn(64,256, relu=True, k_size=3)
     pk.add(conv_5, "conv_5")
     pk.link("merge_10", "conv_5")
 
@@ -329,6 +328,7 @@ def ENAS(tail, prefix):
 
     pk.generate(None, tail)
     pk.save('./', '%s'%prefix)
+    return pk
 
 
 # # cifar mobilenetv3-large
@@ -349,4 +349,6 @@ def ENAS(tail, prefix):
 # cifar ENAS
 # tail (固定计算节点，结构不可学习)
 tail = OutLayer(64, (10,), True)
-ENAS(tail, "ENAS")
+pk = ENAS(tail, "ENAS")
+sampled_loss, pruned_loss = pk.arc_loss([1,3,32,32], 'comp')
+print(pruned_loss)
