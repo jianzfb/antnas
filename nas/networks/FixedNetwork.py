@@ -14,16 +14,21 @@ from nas.component.Loss import *
 from nas.component.ClassificationAccuracyEvaluator import *
 import networkx as nx
 import copy
+from nas.utils.drawers.NASDrawer import *
 
 
 class FixedNetwork(nn.Module):
     def __init__(self, *args, **kwargs):
         super(FixedNetwork, self).__init__()
+        NetworkBlock.bn_track_running_stats = True
+        NetworkBlock.bn_moving_momentum = True
+        
         architecture_path = kwargs.get('architecture', None)
         self.output_layer_cls = kwargs.get('output_layer_cls', None)
         self.graph = nx.read_gpickle(architecture_path)
 
-        self._loss = cross_entropy
+        # self._loss = cross_entropy
+        self._loss = nn.CrossEntropyLoss()
         self._accuracy_evaluator = ClassificationAccuracyEvaluator()
 
         self.in_node = None
@@ -37,12 +42,12 @@ class FixedNetwork(nn.Module):
             if node_index == len(self.traversal_order) - 1:
                 self.out_node = node_name
 
-            print('build node %s op' % node_name)
             cur_node = self.graph.node[node_name]
 
             module_list = cur_node['module_params']['module_list']
             sampled_module_index = cur_node['sampled']
             sampled_module = None
+            sampled_module_name = ''
             if len(module_list) == 1:
                 if sampled_module_index == 1:
                     if node_index == len(self.traversal_order) - 1:
@@ -54,13 +59,22 @@ class FixedNetwork(nn.Module):
                     self.blocks[cur_node['module']] = \
                         sampled_module(**cur_node['module_params'][sampled_module_name])
                 else:
-                    self.blocks[cur_node['module']] = None
+                    sampled_module_name = cur_node['module_params']['name_list'][0]
+                    self.blocks[cur_node['module']] = Zero(**cur_node['module_params'][sampled_module_name])
+                    sampled_module_name = 'ZERO'
             else:
                 sampled_module = globals()[module_list[sampled_module_index]]
                 sampled_module_name = cur_node['module_params']['name_list'][sampled_module_index]
                 self.blocks[cur_node['module']] = \
                     sampled_module(**cur_node['module_params'][sampled_module_name])
 
+            print('build node %s with sampling %s op' % (node_name, sampled_module_name))
+            
+        self.plotter = kwargs.get('plotter', None)
+        if self.plotter is not None:
+            self.drawer = NASDrawer(self.plotter)
+            self.drawer.draw(self.graph)
+        
     def forward(self, x, y):
         # 1.step parse x,y - (data,label)
         input = [x]
@@ -95,8 +109,7 @@ class FixedNetwork(nn.Module):
         model_accuracy = self.accuray(model_out, y)
 
         # 6.step total loss
-        loss = indiv_loss.mean()
-        return loss, model_accuracy
+        return indiv_loss, model_accuracy
 
     def __str__(self):
         return ''
@@ -112,8 +125,4 @@ class FixedNetwork(nn.Module):
 
     def accuray(self, predictions, labels):
         return self._accuracy_evaluator.accuracy(predictions, labels)
-
-#
-# cc = FixedNetwork(architecture='/Users/jian/PycharmProjects/minas/anchor_arch_1.architecture',
-#                   output_layer_cls=OutLayer)
 

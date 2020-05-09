@@ -128,9 +128,9 @@ def get_CIFAR10(path, *args):
 
     train_set = CIFAR10(root=path, train=True, download=True, transform=train_transfrom)
     test_set = CIFAR10(root=path, train=False, download=True, transform=test_transform)
-    train_set, val_set = validation_split(train_set, train_transfrom, test_transform, val_size=val_size)
+    # train_set, val_set = validation_split(train_set, train_transfrom, test_transform, val_size=val_size)
 
-    return train_set, val_set, test_set, img_dim, in_channels, out_size
+    return train_set, None, test_set, img_dim, in_channels, out_size
 
 
 def get_CIFAR100(path, *args):
@@ -271,15 +271,15 @@ def get_data(ds_name, batch_size, path, args=None):
         raise ValueError("Dataset must in {}, got {}".format(sets.keys(), ds_name))
 
     logger.debug("N train : %d" % len(train_set))
-    logger.debug("N valid : %d" % len(val_set))
-    # logger.debug("N test : %d" % len(test_set))
+    # logger.debug("N valid : %d" % len(val_set))
+    logger.debug("N test : %d" % len(test_set))
 
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,
                               num_workers=4, drop_last=True) if train_set is not None else None
     test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False,
                              num_workers=4) if test_set is not None else None
-    val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False,
-                            num_workers=4) if val_set is not None else None
+    # val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False,
+    #                         num_workers=4) if val_set is not None else None
 
     data_properties = {
         'img_dim': img_dim,
@@ -287,7 +287,7 @@ def get_data(ds_name, batch_size, path, args=None):
         'out_size': out_size
     }
 
-    return train_loader, val_loader, test_loader, data_properties
+    return train_loader, None, test_loader, data_properties
 
 
 class PartialDataset(torch.utils.data.Dataset):

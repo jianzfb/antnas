@@ -14,6 +14,8 @@ import torch
 import math
 import random
 import functools
+from nas.networks.bayesian import *
+
 
 class Population(object):
   """Represents population - a group of Individuals,
@@ -73,7 +75,8 @@ class Nsga2(object):
                mutation_op,
                crossover_op,
                num_of_generations=100,
-               callback=None):
+               callback=None,
+               using_bayesian=False):
     self.mutation_controler = mutation_op
     self.crossover_controler = crossover_op
 
@@ -82,6 +85,7 @@ class Nsga2(object):
     self.problem = problem
     self.num_of_generations = num_of_generations
     self.callback = callback
+    self.using_bayesiasn = using_bayesian
 
   def fast_nondominated_sort(self, population):
     population.fronts = []
@@ -161,19 +165,19 @@ class Nsga2(object):
     kwargs.update({'problem': self.problem})
     children_population = None
     if self.crossover_controler is not None:
-      # crossover
+      # crossover (交叉)
       print('crossover population')
       crossover_population = \
         self.crossover_controler.crossover(population=population, **kwargs)
       children_population = crossover_population
-
+      
     if self.mutation_controler is not None:
-      # mutation
+      # mutation（变异）
       print('mutation population')
       mutation_population = \
-        self.mutation_controler.mutate(population=children_population, **kwargs)
-      children_population = mutation_population
-
+        self.mutation_controler.mutate(population=population, **kwargs)
+      children_population.population.extend(mutation_population.population)
+    
     # recalculate objectives
     print('caculate population objectives')
     for individual in children_population.population:
@@ -183,7 +187,6 @@ class Nsga2(object):
     return children_population
 
   def evolve(self, population, **kwargs):
-    self.population = population
     population_size = len(population)
     # # 1.step compute nondominated_sort and crowding distance
     # self.fast_nondominated_sort(self.population)
@@ -192,47 +195,50 @@ class Nsga2(object):
 
     # 2.step generate next children generation
     print('create children')
-    children = self.__create_children(self.population, **kwargs)
+    children = self.__create_children(population, **kwargs)
 
     # 3.step environment pooling
     for i in range(self.num_of_generations):
-      print('evolve generation %d'% i)
+      print('evolve generation %d' % i)
 
       # 3.1.step expand population
       print('extend population')
-      self.population.extend(children)
+      population.extend(children)
 
       # 3.2.step re-fast-nondominated-sort
       print('nondominated sort')
-      self.fast_nondominated_sort(self.population)
+      self.fast_nondominated_sort(population)
 
       new_population = Population()
       front_num = 0
-      while len(new_population) + len(self.population.fronts[front_num]) < population_size:
-        self.calculate_crowding_distance(self.population.fronts[front_num])
-        new_population.extend(self.population.fronts[front_num])
+      while len(new_population) + len(population.fronts[front_num]) < population_size:
+        self.calculate_crowding_distance(population.fronts[front_num])
+        new_population.extend(population.fronts[front_num])
         front_num += 1
 
       # 3.3.step sort by crowding
-      self.calculate_crowding_distance(self.population.fronts[front_num])
-      self.population.fronts[front_num] = sorted(self.population.fronts[front_num], key=functools.cmp_to_key(self.crowding_operator), reverse=True)
-      new_population.extend(self.population.fronts[front_num][0:population_size - len(new_population)])
+      self.calculate_crowding_distance(population.fronts[front_num])
+      population.fronts[front_num] = sorted(population.fronts[front_num], key=functools.cmp_to_key(self.crowding_operator), reverse=True)
+      new_population.extend(population.fronts[front_num][0:population_size - len(new_population)])
 
-      self.population = new_population
-      self.population.fronts = []
-      for individual in self.population:
+      population = new_population
+      population.fronts = []
+      for individual in population:
         individual.domination_count = 0
         individual.dominated_solutions = set()
         individual.rank = 0
 
-      print('create children for generation %d'%i)
-      children = self.__create_children(self.population, **kwargs)
+      # for the last genration, dont generate children
+      if i != self.num_of_generations - 1:
+        # 1.step create children
+        print('create children for generation %d'%i)
+        children = self.__create_children(population, **kwargs)
 
       if self.callback is not None:
         print('plot pareto front')
-        self.callback(self.population, i)
+        self.callback(population, i)
 
-    return self.population
+    return population
 
 # test nsga2
 class ZDT1(Problem):

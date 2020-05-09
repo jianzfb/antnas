@@ -6,9 +6,11 @@ from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
 from nas.networks.SuperNetwork import *
-from nas.utils.drawers.BSNDrawer import BSNDrawer
+from nas.utils.drawers.NASDrawer import NASDrawer
 import torch
 import torch.nn as nn
+from nas.searchspace.Arc import *
+
 
 '''
 StageBlockCell Architecture
@@ -23,23 +25,30 @@ stage
         cell
         cell
 '''
-class StageBlockCellArc:
+class StageBlockCellArc(Arc):
     def __init__(self,
                  cell_cls,
                  reduction_cell_cls,
                  aggregation_cls,
                  transformer_cls,
                  graph,
-                 sampling_param_generator=None):
+                 sampling_param_generator=None,
+                 is_cell_dense=False,
+                 is_block_dense=False,
+                 is_stage_dense=False):
+        super(StageBlockCellArc, self).__init__(graph)
         self.sampling_param_generator = sampling_param_generator
-        self.blocks = nn.ModuleList([])
         self.sampling_parameters = nn.ParameterList()
-        self.graph = graph
+
         self.cell_cls = cell_cls
         self.reduction_cell_cls = reduction_cell_cls
         self.transformer_cls = transformer_cls
         self.aggregation_cls = aggregation_cls
         self.pos_offset = 0
+        self.is_cell_dense = is_cell_dense
+        self.is_block_dense = is_block_dense
+        self.is_stage_dense = is_stage_dense
+        self.hierarchical = []
 
     def add_cell(self, pos, module, node_format):
         cell_node_name = node_format.format(*pos)
@@ -51,10 +60,14 @@ class StageBlockCellArc:
                             module=len(self.blocks),
                             module_params=module.params,
                             sampling_param=len(self.blocks),
-                            pos=BSNDrawer.get_draw_pos(pos=pos))
+                            structure_fixed=module.structure_fixed,
+                            pos=NASDrawer.get_draw_pos(pos=pos))
 
         if sampling_param is not None:
             self.sampling_parameters.append(sampling_param)
+        
+        # 添加到层级结构中
+        self.hierarchical[-1][-1].append(len(self.blocks))
 
         self.blocks.append(module)
         return cell_node_name
@@ -69,14 +82,20 @@ class StageBlockCellArc:
                             module=len(self.blocks),
                             module_params=module.params,
                             sampling_param=len(self.blocks),
-                            pos=BSNDrawer.get_draw_pos(pos=pos))
+                            structure_fixed=module.structure_fixed,
+                            pos=NASDrawer.get_draw_pos(pos=pos))
 
         if sampling_param is not None:
             self.sampling_parameters.append(sampling_param)
+        
+        # 添加到层级结构中
+        # if not (node_format.startswith("I") or node_format.startswith("O")):
+        #     self.hierarchical[-1][-1].append(len(self.blocks))
+        #
         self.blocks.append(module)
         return agg_node_name
 
-    def add_transformer(self, source, dest, module, src_node_format, des_node_format, transform_format, pos_shift=0):
+    def add_transformer(self, source, dest, module, src_node_format, des_node_format, transform_format):
         src_l, src_s = source
         dst_l, dst_s = dest
 
@@ -92,12 +111,18 @@ class StageBlockCellArc:
                             module=len(self.blocks),
                             module_params=module.params,
                             sampling_param=len(self.blocks),
-                            pos=BSNDrawer.get_draw_pos(source=source, dest=dest, pos_shift=pos_shift))
+                            structure_fixed=module.structure_fixed,
+                            pos=NASDrawer.get_draw_pos(source=source, dest=dest))
         self.graph.add_edge(source_name, trans_name,  width_node=trans_name)
         self.graph.add_edge(trans_name, dest_name,  width_node=trans_name)
+        
         if sampling_param is not None:
             self.sampling_parameters.append(sampling_param)
 
+        # 添加到层级结构中
+        if transform_format.startswith("T"):
+            self.hierarchical[-1][-1].append(len(self.blocks))
+        
         self.blocks.append(module)
         return trans_name
 
@@ -132,6 +157,15 @@ class StageBlockCellArc:
                         self.graph.add_edge(SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset+pre_cell_i*2+1),
                                             SuperNetwork._AGGREGATION_NODE_FORMAT.format(0, pos_offset+cell_i*2),
                                             width_node=SuperNetwork._AGGREGATION_NODE_FORMAT.format(0, pos_offset+cell_i*2))
+                    else:
+                        # 可学习连接(连接/断开连接)
+                        if self.is_cell_dense:
+                            self.add_transformer((0, pos_offset+pre_cell_i*2+1),
+                                                 (0, pos_offset + cell_i * 2),
+                                                 Skip(channles, channles, False),
+                                                 SuperNetwork._CELL_NODE_FORMAT,
+                                                 SuperNetwork._AGGREGATION_NODE_FORMAT,
+                                                 SuperNetwork._TRANSFORMATION_FORMAT)
 
         self.pos_offset += cells * 2
         return self.pos_offset
@@ -140,7 +174,9 @@ class StageBlockCellArc:
         stage_offset = self.pos_offset
         offset_per_block = []
         for block_i in range(block_num):
+            self.hierarchical[-1].append([])
             offset_per_block.append(stage_offset)
+
             if block_i == 0:
                 stage_offset = \
                     self.add_block(cells_per_block[block_i],
@@ -162,23 +198,33 @@ class StageBlockCellArc:
                         self.graph.add_edge(SuperNetwork._CELL_NODE_FORMAT.format(0, offset_per_block[pre_block_i] + cells_per_block[pre_block_i] * 2 - 1),
                                             SuperNetwork._AGGREGATION_NODE_FORMAT.format(0, offset_per_block[block_i] + 0 * 2),
                                             width_node=SuperNetwork._AGGREGATION_NODE_FORMAT.format(0, offset_per_block[block_i] + 0 * 2))
+                    else:
+                        # 可学习连接(连接/断开连接)
+                        if self.is_block_dense:
+                            self.add_transformer((0, offset_per_block[pre_block_i] + cells_per_block[pre_block_i] * 2 - 1),
+                                                 (0, offset_per_block[block_i] + 0 * 2),
+                                                 ConvBn(channles_per_block[pre_block_i],channles_per_block[block_i-1], relu=True, k_size=1),
+                                                 SuperNetwork._CELL_NODE_FORMAT,
+                                                 SuperNetwork._AGGREGATION_NODE_FORMAT,
+                                                 SuperNetwork._TRANSFORMATION_FORMAT)
 
         self.pos_offset = stage_offset
         return self.pos_offset
 
-    def generate(self, head, tail, head_channels, blocks, cells, channels):
+    def generate(self, head, tail, blocks, cells, channels):
         in_name = self.add_aggregation((0, 0), module=head, node_format=SuperNetwork._INPUT_NODE_FORMAT)
         self.pos_offset += 1
-
+        
         offset_per_stage = []
         for stage_i in range(len(blocks)):
+            self.hierarchical.append([])
             offset_per_stage.append(self.pos_offset)
             self.add_stage(blocks[stage_i],
                            cells[stage_i],
                            channels[stage_i],
-                           head_channels if stage_i == 0 else channels[stage_i - 1][-1],
+                           head.params['out_chan'] if stage_i == 0 else channels[stage_i - 1][-1],
                            stage_i == 0)
-
+                        
             if stage_i > 0:
                 # add stage edge
                 self.graph.add_edge(SuperNetwork._CELL_NODE_FORMAT.format(*(0, offset_per_stage[stage_i-1]+sum(cells[stage_i-1])*2-1)),
@@ -199,7 +245,8 @@ class StageBlockCellArc:
                             module=len(self.blocks),
                             module_params=tail.params,
                             sampling_param=len(self.blocks),
-                            pos=BSNDrawer.get_draw_pos(pos=(0, offset_per_stage[-1] + sum(cells[-1]) * 2)))
+                            structure_fixed=tail.structure_fixed,
+                            pos=NASDrawer.get_draw_pos(pos=(0, offset_per_stage[-1] + sum(cells[-1]) * 2)))
         self.graph.add_edge(
             SuperNetwork._CELL_NODE_FORMAT.format(*(0, offset_per_stage[-1] + sum(cells[-1]) * 2 - 1)),
             out_name,
@@ -209,4 +256,6 @@ class StageBlockCellArc:
             self.sampling_parameters.append(sampling_param)
         self.blocks.append(tail)
 
+        self.in_node = in_name
+        self.out_node = out_name
         return in_name, out_name

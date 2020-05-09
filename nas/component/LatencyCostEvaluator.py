@@ -13,8 +13,11 @@ class LatencyCostEvaluator(EdgeCostEvaluator):
     def __init__(self, *args, **kwargs):
         super(LatencyCostEvaluator, self).__init__(*args, **kwargs)
         # load latency lookup table
-        NetworkBlock.load_lookup_table(self.kwargs['latency'])
-        print('load latency lookup table')
+        if 'latency' in self.kwargs:
+            NetworkBlock.load_lookup_table(self.kwargs['latency'])
+            print('load latency lookup table')
+        else:
+            print('latency lookup table dont exist')
 
     def init_costs(self, model, graph, is_main_cost=False):
         print('initialize latency cost')

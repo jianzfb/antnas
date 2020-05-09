@@ -15,24 +15,20 @@ from nas.networks.crossover import *
 from nas.component.NetworkBlock import *
 from nas.networks.nsga2 import *
 from nas.networks.bayesian import *
+from nas.utils.drawers.NASDrawer import *
 import copy
 from tqdm import tqdm
 
 
 class ArchitectureModelProblem(Problem):
-  def __init__(self, super_network, data_loader, arc_loss=['latency'], cuda_avilable_list=[]):
+  def __init__(self, supernetwork_manager, data_loader, arc_loss=['latency']):
       super(ArchitectureModelProblem, self).__init__()
       self.max_objectives = [None, None]
       self.min_objectives = [None, None]
       self.goal = 'MINIMIZE'
-      self.super_network = super_network
+      self.supernetwork_manager = supernetwork_manager
       self.arc_loss = arc_loss
       self.data_loader = data_loader
-      self.parallel_run = super_network
-      self.is_cuda_avilable = False
-      if len(cuda_avilable_list) > 0:
-          self.parallel_run = nn.DataParallel(super_network, cuda_avilable_list)
-          self.is_cuda_avilable = True
 
   def generateIndividual(self):
       individual = Individual()
@@ -66,34 +62,35 @@ class ArchitectureModelProblem(Problem):
       # logits, loss, accuracy
       total_correct = 0
       total = 0
-      x,y,a = None,None,None
-      if self.is_cuda_avilable:
-        x = torch.Tensor().cuda()
-        y = torch.LongTensor().cuda()
-        a = torch.Tensor().cuda()
+      # data, label, architecture
+      x, y, a = None, None, None
+      if torch.cuda.is_available():
+        x = torch.Tensor().cuda(torch.device("cuda:%d"%self.supernetwork_manager.cuda_list[0]))
+        y = torch.LongTensor().cuda(torch.device("cuda:%d"%self.supernetwork_manager.cuda_list[0]))
+        a = torch.Tensor().cuda(torch.device("cuda:%d"%self.supernetwork_manager.cuda_list[0]))
       else:
         x = torch.Tensor()
         y = torch.LongTensor()
         a = torch.Tensor()
 
-      self.parallel_run.eval()
-      for images, labels in tqdm( self.data_loader, desc='test', ascii=True):
+      self.supernetwork_manager.parallel.eval()
+      for images, labels in tqdm(self.data_loader, desc='Test', ascii=True):
           x.resize_(images.size()).copy_(images)
           y.resize_(labels.size()).copy_(labels)
-          a.resize_([x.size(0), len(arc.features)]).copy_(torch.as_tensor(np.tile(np.array([arc.features]), (x.size(0), 1))))
+          batch_size = labels.shape[0]
+          a.resize_([batch_size, len(arc.features)]).copy_(torch.as_tensor(np.tile([arc.features], (batch_size, 1))))
 
           with torch.no_grad():
-              _, accuracy, _, _ = self.parallel_run(x, y, a)
+              _, accuracy, _, _ = self.supernetwork_manager.parallel(x, y, a)
 
           total_correct += accuracy.sum()
           total += labels.size(0)
-          break
-
+          
       accuracy = total_correct.float().item() / total
       return 1.0 - accuracy
 
   def __f2(self, arc):
-      loss = self.super_network.arc_loss(arc.features, self.arc_loss[0])
+      loss = self.supernetwork_manager.supernetwork.arc_loss(arc.features, self.arc_loss[0])
       loss = loss.numpy()[0]
       return loss
 
@@ -105,6 +102,7 @@ class SuperNetwork(nn.Module):
     _CELL_NODE_FORMAT = 'CELL_{}_{}'            # 可学习  (多种状态)
     _TRANSFORMATION_FORMAT = 'T_{}_{}-{}_{}'    # 可学习 （激活/不激活）
     _LINK_FORMAT = 'L_{}_{}-{}_{}'              # 不可学习
+    _FIXED_NODE_FORMAT = 'FIXED_{}_{}'          # 不可学习
 
     def __init__(self, *args, **kwargs):
         super(SuperNetwork, self).__init__()
@@ -143,10 +141,12 @@ class SuperNetwork(nn.Module):
 
         # global configure
         self.kwargs = kwargs
-
-        self._epoch = 0
-
         self.use_preload_arch = False
+        self.problem = None
+        self._anchors = None
+        self.plotter = kwargs.get('plotter', None)
+        self.drawer = NASDrawer(self.plotter)
+        self.visdom_window = {}
 
     def set_graph(self, network, in_node, out_node):
         self.net = network
@@ -163,8 +163,26 @@ class SuperNetwork(nn.Module):
 
         self.path_recorder = PathRecorder(self.net, self.out_node)
 
-    def init(self, shape):
-        # copy net strcture
+    @property
+    def anchors(self):
+        return self._anchors
+    @anchors.setter
+    def anchors(self, val):
+        self._anchors = val
+
+    def init(self, *args, **kwargs):
+        # input shape
+        shape = kwargs.get('shape')
+
+        # define problem
+        arc_loss = kwargs.get('arc_loss', 'latency')
+        data_loader = kwargs.get('data_loader', None)
+        supernetwork_manager = kwargs.get('supernetwork_manager', None)
+        self.problem = ArchitectureModelProblem(supernetwork_manager,
+                                                data_loader,
+                                                arc_loss=[arc_loss])
+
+        # copy net structure
         graph = copy.deepcopy(self.net)
         x = torch.ones(shape)
 
@@ -175,6 +193,7 @@ class SuperNetwork(nn.Module):
 
             if len(input) == 0:
                 raise RuntimeError('Node {} has no inputs'.format(node))
+            print(node)
 
             out = self.blocks[cur_node['module']](input)
             if node == self.out_node:
@@ -184,7 +203,7 @@ class SuperNetwork(nn.Module):
             for succ in graph.successors(node):
                 if 'input' not in graph.node[succ]:
                     graph.node[succ]['input'] = []
-                    graph.node[succ]['input'].append(out)
+                graph.node[succ]['input'].append(out)
 
         # 初始化结构信息
         for cost, cost_eval in self.arch_cost_evaluators.items():
@@ -266,13 +285,19 @@ class SuperNetwork(nn.Module):
     def get_path_recorder(self):
         return self.path_recorder
 
-    @property
-    def epoch(self):
-        return self._epoch
+    def get_node_sampling(self, node_name, batch_size, batched_sampling):
+        """
+        Get a batch of sampling for the given node on the given output.
+        Fires a "sampling" event with the node name and the sampling Variable.
+        :param node_name: Name of the node to sample
+        :param out: Tensor on which the sampling will be applied
+        :return: A Variable brodcastable to out's size, with all dimensions equals to one except the first one (batch)
+        """
+        sampling_dim = [batch_size] + [1] * 3
+        node = self.net.node[node_name]
+        node_sampling = batched_sampling[:, node['sampling_param']].contiguous().view(sampling_dim)
 
-    @epoch.setter
-    def epoch(self, val):
-        self._epoch = val
+        return node_sampling
 
     def load_static_arch(self, arch_path):
         graph = nx.read_gpickle(arch_path)
@@ -280,6 +305,12 @@ class SuperNetwork(nn.Module):
 
         for node_index, node_name in enumerate(travel):
             self.net.node[node_name]['sampled'] = graph.node[node_name]['sampled']
+
+        self.use_preload_arch = True
+
+    def set_static_arch(self, arch_sample):
+        for node_index, node in enumerate(self.traversal_order):
+            self.net.node[node]['sampled'] = arch_sample[node_index]
 
         self.use_preload_arch = True
 
@@ -343,7 +374,8 @@ class SuperNetwork(nn.Module):
         return pruned_cost
 
     def _evolution_callback_func(self, population, generation_index, arc_loss, folder):
-        print('draw pareto front')
+        # 1.step draw pareto front image
+        print('render pareto front( population size %d )'%len(population))
         # draw pareto front
         plt.figure()
         plt.title('PARETO OPTIMAL for %d GENERATION' % (generation_index))
@@ -384,15 +416,92 @@ class SuperNetwork(nn.Module):
         plt.savefig(os.path.join(folder, 'generation_%d_pareto_optimal.png'%generation_index))
         plt.close()
 
-    def search(self, **kwargs):
+        # 2.step show population architecture info distribution (on visdom)
+        if self.plotter is not None:
+            title = ""
+            if arc_loss == 'comp':
+                title = 'MULADD/FLOPS DISTRIBUTION'
+            elif arc_loss == 'latency':
+                title = "LATENCY(ms) DISTRIBUTION"
+            else:
+                title = "PARAMETER NUMBER DISTRIBUTION"
+
+            arch_error_list = [individual.objectives[0] for individual in population]
+            arch_loss_list = [individual.objectives[1] for individual in population]
+
+            # 2.1.step architecture loss distribution (直方图)
+            search_arc_loss_distribution_win = \
+                self.plotter.viz.histogram(np.array(arch_loss_list),
+                                           opts=dict(
+                                               title=title,
+                                               numbins=1000,
+                                           ),
+                                           win=None if "search_arc_loss_distribution" not in self.visdom_window else self.visdom_window['search_arc_loss_distribution'])
+            if 'search_arc_loss_distribution' not in self.visdom_window:
+                self.visdom_window['search_arc_loss_distribution'] = \
+                    search_arc_loss_distribution_win
+            
+            # 2.2.step pareto front (标签的散点图)
+            search_arc_pareto_front_win = \
+                self.plotter.viz.scatter(
+                    X=np.concatenate([np.array(arch_loss_list).reshape((-1, 1)), np.array(arch_error_list).reshape((-1, 1))], axis=1),
+                    Y=np.arange(1, len(population)+1),
+                    opts=dict(
+                        legend=['ARCH_%d'%i for i in range(1, len(population)+1)],
+                        title="PARETO FRONT",
+                    ),
+                    win=None if "search_arc_pareto_front" not in self.visdom_window else self.visdom_window['search_arc_pareto_front']
+                )
+            if 'search_arc_pareto_front' not in self.visdom_window:
+                self.visdom_window['search_arc_pareto_front'] = search_arc_pareto_front_win
+
+            # 2.3.step architecture information （热点图）
+            GENE = []
+            for i in range(len(population)):
+                feature = [population.population[i].features[self.net.node[node_name]['sampling_param']] for node_name in self.traversal_order]
+                GENE.append(feature)
+
+            search_arc_gene_chrome_win = \
+                self.plotter.viz.heatmap(
+                    np.array(GENE),
+                    opts=dict(
+                        title="POLUTATION GENE CHROME",
+                        columnnames=[node_name for node_name in self.traversal_order],
+                        rownames=['ARCH_%d'%index for index in range(1, len(population)+1)],
+                        colormap='Electric',
+                    ),
+                    win=None if "search_arc_gene_chrome" not in self.visdom_window else self.visdom_window['search_arc_gene_chrome']
+                )
+            if 'search_arc_gene_chrome' not in self.visdom_window:
+                self.visdom_window['search_arc_gene_chrome'] = search_arc_gene_chrome_win
+            
+            # 2.4.step structure sampling visualization
+            data = np.array(GENE)
+            data = data.astype(np.int32)
+            for node_index, node_name in enumerate(self.traversal_order):
+                counts = np.bincount(data[:, node_index])
+                sampling_val = np.argmax(counts)
+                self.net.node[node_name]['sampling_val'] = sampling_val
+
+            self.draw()
+    
+    def draw(self, net=None):
+        net = net if net is not None else self.net
+        self.drawer.draw(net)
+        
+    def hierarchical(self):
+        # get network hierarchical
+        return []
+        
+    def search_init(self, *args, **kwargs):
+        pass
+    
+    def search(self, *args, **kwargs):
         max_generation = kwargs.get('max_generation', 100)
         population_size = kwargs.get('population_size', 50)
-        arc_loss = kwargs.get('arc_loss', 'latency')
         crossover_multi_points = kwargs.get('corssover_multi_points', 5)
         mutation_multi_points = kwargs.get('mutation_multi_points', -1)
         folder = kwargs.get('folder', './supernetwork/')
-        data_loader = kwargs.get('data_loader', None)
-        cuda_avilable_list = kwargs.get('cuda_avilable_list', [])
 
         if not os.path.exists(folder):
             os.makedirs(folder)
@@ -410,12 +519,32 @@ class SuperNetwork(nn.Module):
                                                k1=0.8,
                                                method='based_matrices',
                                                size=population_size)
-        evolution = Nsga2(ArchitectureModelProblem(self, data_loader, arc_loss=[arc_loss], cuda_avilable_list=cuda_avilable_list),
+        evolution = Nsga2(self.problem,
                           mutation_control,
                           crossover_control,
+                          num_of_generations=max_generation,
                           callback=functools.partial(self._evolution_callback_func,
-                                                     arc_loss=arc_loss,
+                                                     arc_loss=self.problem.arc_loss,
                                                      folder=folder))
+
+        # ###############################
+        # # 临时代码，测试结构参数量统计
+        # print('step 1')
+        # features = self.sample_arch()
+        # parameter_num = 0
+        # for node in self.traversal_order:
+        #     cur_node = self.net.node[node]
+        #     sampled_state = features[cur_node['sampling_param']]
+        #     cur_node = self.net.node[node]
+        #     parameter_num += self.blocks[cur_node['module']].get_param_num(None)[sampled_state]
+        #
+        # print('step 1 loss %d', parameter_num)
+        #
+        # print('step 2')
+        # loss = self.arc_loss(features, 'param')
+        # print('step 2 loss %d', loss)
+        #
+        # ###############################
 
         # 1.step init population
         population = Population()
@@ -431,24 +560,28 @@ class SuperNetwork(nn.Module):
             cur_node = self.net.node[node_name]
             if node_name.startswith('CELL') or node_name.startswith('T'):
                 explore_position.append(cur_node['sampling_param'])
+                
+        # 2.1.step add hierarchical info
+        # stage/block/cell
+        hierarchical = self.hierarchical()
 
         elited_population = \
             evolution.evolve(population,
                              graph=self.net,
                              blocks=self.blocks,
-                             explore_position=explore_position)
+                             explore_position=explore_position,
+                             hierarchical=hierarchical)
 
         # 3.step save architecture
         for individual in elited_population:
             batched_sampling = torch.Tensor(individual.features).view(1, len(individual.features))
-            graph = copy.deepcopy(self.net)
 
             # 3.1.step prune sampling network
             sampling = torch.Tensor()
             active = torch.Tensor()
 
             for node in self.traversal_order:
-                cur_node = graph.node[node]
+                cur_node = self.net.node[node]
                 node_sampling = self.get_node_sampling(node, 1, batched_sampling)
 
                 # notify path recorder to add sampling
@@ -463,20 +596,20 @@ class SuperNetwork(nn.Module):
             # 3.2.step write to graph
             for node in self.traversal_order:
                 node_sampling_val = torch.squeeze(pruned_arch[self.path_recorder.node_index[node]]).item()
-                graph.node[node]['sampled'] = int(node_sampling_val)
+                self.net.node[node]['sampled'] = int(node_sampling_val)
 
             # 3.3.step get architecture parameter number
             parameter_num = 0
             for node in self.traversal_order:
-                sampled_state = graph.node[node]['sampled']
-                cur_node = graph.node[node]
+                sampled_state = self.net.node[node]['sampled']
+                cur_node = self.net.node[node]
                 parameter_num += self.blocks[cur_node['module']].get_param_num(None)[sampled_state]
 
             # 3.4.step save architecture
             architecture_info = ''
-            if arc_loss == 'comp':
+            if self.problem.arc_loss[0] == 'comp':
                 architecture_info = 'flops_%d' % int(individual.objectives[1])
-            elif arc_loss == 'latency':
+            elif self.problem.arc_loss[0] == 'latency':
                 architecture_info = 'latency_%0.2f' % individual.objectives[1]
             else:
                 architecture_info = 'para_%d' % int(individual.objectives[1])
@@ -485,4 +618,4 @@ class SuperNetwork(nn.Module):
                                                                             architecture_info,
                                                                             int(parameter_num))
             architecture_path = os.path.join(folder, architecture_tag)
-            nx.write_gpickle(graph, architecture_path)
+            nx.write_gpickle(self.net, architecture_path)
