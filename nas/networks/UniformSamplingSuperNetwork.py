@@ -17,7 +17,6 @@ from nas.component.PathRecorder import PathRecorder
 from nas.component.NetworkBlock import *
 import copy
 import networkx as nx
-import threading
 
 
 class UniformSamplingSuperNetwork(SuperNetwork):
@@ -61,11 +60,6 @@ class UniformSamplingSuperNetwork(SuperNetwork):
                 break
 
             # 3.3.step set successor input
-            # for succ in running_graph.successors(node):
-            #     if 'input' not in running_graph.node[succ]:
-            #         running_graph.node[succ]['input'] = []
-            #     running_graph.node[succ]['input'].append(out)
-            # 3.3.step set successor input
             for succ in self.graph.successors(node):
                 if succ not in data_dict:
                     data_dict[succ] = []
@@ -100,28 +94,19 @@ class UniformSamplingSuperNetwork(SuperNetwork):
     def n_comp_steps(self):
         return sum([mod.n_comp_steps for mod in self.blocks])
 
-    def _init_archs(self, x):
-        pass
-
-    # def sample_arch(self):
-    #     feature = [None for _ in range(len(self.traversal_order))]
-    #     for node_name in self.traversal_order:
-    #         cur_node = self.net.node[node_name]
-    #         if not (node_name.startswith('CELL') or node_name.startswith('T')):
-    #             # 不可学习，处于永远激活状态
-    #             feature[cur_node['sampling_param']] = int(1)
-    #         else:
-    #             if not self.blocks[cur_node['module']].structure_fixed:
-    #                 feature[cur_node['sampling_param']] = int(np.random.randint(0, 2))
-    #             else:
-    #                 feature[cur_node['sampling_param']] = int(np.random.randint(0, NetworkBlock.state_num))
-    #
-    #     return feature
-
-    def sample_arch(self):
-        batch_arch_list = []
+    def sample_arch(self, *args, **kwargs):
+        # get constraint condition
+        comp_min = kwargs.get('comp_min', self.arch_objective_comp_min)
+        comp_max = kwargs.get('comp_max', self.arch_objective_comp_max)
+        latency_min = kwargs.get('latency_min', self.arch_objective_latency_min)
+        latency_max = kwargs.get('latency_max', self.arch_objective_latency_max)
+        param_min = kwargs.get('param_min', self.arch_objective_param_min)
+        param_max = kwargs.get('param_max', self.arch_objective_param_max)
+        
+        # sampling satisfied feature
+        sampling_feature = None
         with torch.no_grad():
-            while len(batch_arch_list) < 1:
+            while True:
                 feature = [None for _ in range(len(self.traversal_order))]
 
                 sampling = torch.Tensor()
@@ -149,27 +134,66 @@ class UniformSamplingSuperNetwork(SuperNetwork):
                         self.path_recorder.get_arch(self.out_node, sampling, active)
                     sampled_cost, pruned_cost = \
                         cost_eval.get_costs([sampled_arc, pruned_arc])
-
-                    if self.arch_objective_comp > 0 and cost == "comp":
-                        if pruned_cost > self.arch_objective_comp:
+    
+                    if comp_max > 0 and comp_min > 0 and cost == "comp":
+                        if pruned_cost > comp_max or pruned_cost < comp_min:
                             satisfied_constraint = False
                             break
-
-                    if self.arch_objective_latency > 0 and cost == "latency":
-                        if pruned_cost > self.arch_objective_latency:
+    
+                    if latency_max and latency_min > 0 and cost == "latency":
+                        if pruned_cost > latency_max or pruned_cost < latency_min:
                             satisfied_constraint = False
                             break
-
-                    if self.arch_objective_param > 0 and cost == "param":
-                        if pruned_cost > self.arch_objective_param:
+    
+                    if param_max > 0 and param_min > 0 and cost == "param":
+                        if pruned_cost > param_max or pruned_cost < param_min:
                             satisfied_constraint = False
                             break
 
                 if satisfied_constraint:
-                    batch_arch_list.append(feature)
+                    sampling_feature = feature
+                    break
+                    
+            return sampling_feature
+    
+    def is_satisfied_constraint(self, feature):
+        sampling = torch.Tensor()
+        active = torch.Tensor()
+        for node_name in self.traversal_order:
+            cur_node = self.net.node[node_name]
+            
+            sampling, active = \
+                self.path_recorder.add_sampling(node_name,
+                                                torch.as_tensor([feature[cur_node['sampling_param']]]).reshape(
+                                                    [1, 1, 1, 1]),
+                                                sampling,
+                                                active,
+                                                self.blocks[cur_node['module']].structure_fixed)
 
-            return batch_arch_list[0]
-
+        satisfied_constraint = True
+        for cost, cost_eval in self.arch_cost_evaluators.items():
+            sampled_arc, pruned_arc = \
+                self.path_recorder.get_arch(self.out_node, sampling, active)
+            sampled_cost, pruned_cost = \
+                cost_eval.get_costs([sampled_arc, pruned_arc])
+    
+            if self.arch_objective_comp_max > 0 and self.arch_objective_comp_min > 0 and cost == "comp":
+                if pruned_cost > self.arch_objective_comp_max or pruned_cost < self.arch_objective_comp_min:
+                    satisfied_constraint = False
+                    break
+    
+            if self.arch_objective_latency_max and self.arch_objective_latency_min > 0 and cost == "latency":
+                if pruned_cost > self.arch_objective_latency_max or pruned_cost < self.arch_objective_latency_min:
+                    satisfied_constraint = False
+                    break
+    
+            if self.arch_objective_param_max > 0 and self.arch_objective_param_min > 0 and cost == "param":
+                if pruned_cost > self.arch_objective_param_max or pruned_cost < self.arch_objective_param_min:
+                    satisfied_constraint = False
+                    break
+                    
+        return satisfied_constraint
+    
     def search_and_plot(self, path=None):
         if not os.path.exists(path):
             os.makedirs(path)

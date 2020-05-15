@@ -157,9 +157,9 @@ def get_CIFAR100(path, *args):
 
     train_set = CIFAR100(root=path, train=True, download=True, transform=train_transfrom)
     test_set = CIFAR100(root=path, train=False, download=True, transform=test_transform)
-    train_set, val_set = validation_split(train_set, train_transfrom, test_transform, val_size=val_size)
+    # train_set, val_set = validation_split(train_set, train_transfrom, test_transform, val_size=val_size)
 
-    return train_set, val_set, test_set, img_dim, in_channels, out_size
+    return train_set, None, test_set, img_dim, in_channels, out_size
 
 
 def get_SVHN(path, *args):
@@ -228,7 +228,7 @@ def get_ImageNet(path, *args):
     out_size = (1000,)
 
     traindir = os.path.join(path, 'train')
-    valdir = os.path.join(path, 'val')
+    valdir = os.path.join(path, 'validation')
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
 
@@ -247,7 +247,7 @@ def get_ImageNet(path, *args):
         normalize,
     ]))
 
-    return train_set, val_set, None, img_dim, in_channels, out_size
+    return train_set, None, val_set, img_dim, in_channels, out_size
 
 
 sets = {

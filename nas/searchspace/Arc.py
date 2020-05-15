@@ -64,7 +64,7 @@ class Arc:
             input = input[0]
         return input
 
-    def arc_loss(self, shape, loss='latency'):
+    def arc_loss(self, shape, loss='latency', feature=None):
         x = torch.ones(shape)
         self.traversal_order = list(nx.topological_sort(self.graph))
         self.path_recorder = PathRecorder(self.graph, self.out_node)
@@ -73,7 +73,9 @@ class Arc:
         active = torch.Tensor()
 
         # 初始化path_recorder
-        feature = [1 for _ in range(len(self.traversal_order))]
+        if feature is None:
+            feature = [1 for _ in range(len(self.traversal_order))]
+            
         for node_name in self.traversal_order:
             cur_node = self.graph.node[node_name]
 
@@ -93,7 +95,7 @@ class Arc:
 
             if len(input) == 0:
                 raise RuntimeError('Node {} has no inputs'.format(node))
-            print(node)
+
             out = self.blocks[cur_node['module']](input)
             if node == self.out_node:
                 break
@@ -112,5 +114,43 @@ class Arc:
             self.path_recorder.get_arch(self.out_node, sampling, active)
         sampled_cost, pruned_cost = \
             self.cost_evaluators[loss].get_costs([sampled_arc, pruned_arc])
-
+        
+        # clear
+        for node in self.traversal_order:
+            if 'input' in self.graph.node[node]:
+                self.graph.node[node].pop('input')
+                
         return sampled_cost, pruned_cost
+    
+    def arc_min_max(self, shape, loss='latency'):
+        # find max/min arch
+        max_loss = -1
+        min_loss = -1
+        try_times = 1000
+        traversal_order = list(nx.topological_sort(self.graph))
+
+        while try_times > 0:
+            feature = [None for _ in range(len(traversal_order))]
+            for node_name in traversal_order:
+                cur_node = self.graph.node[node_name]
+                if not (node_name.startswith('CELL') or node_name.startswith('T')):
+                    # 不可学习，处于永远激活状态
+                    feature[cur_node['sampling_param']] = int(1)
+                else:
+                    if not self.blocks[cur_node['module']].structure_fixed:
+                        feature[cur_node['sampling_param']] = int(np.random.randint(0, 2))
+                    else:
+                        feature[cur_node['sampling_param']] = int(np.random.randint(0, NetworkBlock.state_num))
+        
+            _, pruned_cost = \
+                self.arc_loss(shape, loss=loss, feature=feature)
+        
+            if max_loss < pruned_cost or max_loss < 0:
+                max_loss = pruned_cost.item()
+        
+            if min_loss > pruned_cost or min_loss < 0:
+                min_loss = pruned_cost.item()
+        
+            try_times -= 1
+    
+        return min_loss, max_loss

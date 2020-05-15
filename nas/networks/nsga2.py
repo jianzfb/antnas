@@ -15,6 +15,7 @@ import math
 import random
 import functools
 from nas.networks.bayesian import *
+from functools import partial
 
 
 class Population(object):
@@ -85,7 +86,7 @@ class Nsga2(object):
     self.problem = problem
     self.num_of_generations = num_of_generations
     self.callback = callback
-    self.using_bayesiasn = using_bayesian
+    self.using_bayesian = using_bayesian
 
   def fast_nondominated_sort(self, population):
     population.fronts = []
@@ -234,6 +235,77 @@ class Nsga2(object):
         print('create children for generation %d'%i)
         children = self.__create_children(population, **kwargs)
 
+        # 2.step using_bayesian to expand
+        if self.using_bayesian:
+          acq_num = (int)(0.2 * population_size)
+          acq_num = acq_num if acq_num > 0 else population_size
+          
+          print('predict elite children (size=%d) by Bayesian Optimization'%acq_num)
+          bo = BayesianOptimizer(0.000000001, BOAccuracy(), None, 2.576)
+          x = []
+          y = []
+          
+          # 2.1.step fill population
+          for c in population:
+            x.append(c.features)
+            y.append(1.0-c.objectives[0])
+          
+          # 2.2.step fill children
+          for c in children:
+            x.append(c.features)
+            y.append(1.0-c.objectives[0])
+          
+          # 2.3.step fit
+          bo.fit(x, y)
+
+          # partial(network.sample_arch, comp_min=, comp_max=)
+          # 2.4.step acq some
+          bayesian_population = Population()
+          
+          min_constraint = 0
+          region_seg = 0
+          network = kwargs['network']
+
+          if network.cost_evaluation == "comp":
+            region_seg = (network.arch_objective_comp_max-network.arch_objective_comp_min)/acq_num
+            min_constraint = network.arch_objective_comp_min
+          elif network.cost_evaluation == "latency":
+            region_seg = (network.arch_objective_latency_max-network.arch_objective_latency_min)/acq_num
+            min_constraint = network.arch_objective_latency_min
+          elif network.cost_evaluation == "param":
+            region_seg = (network.arch_objective_param_max-network.arch_objective_param_min)/acq_num
+            min_constraint = network.arch_objective_param_min
+          
+          for acq_i in range(acq_num):
+            acq_min_constraint = min_constraint + region_seg*acq_i
+            acq_max_constraint = min_constraint + region_seg*(acq_i+1)
+            network_arc_sampling_func = None
+            if network.cost_evaluation == "comp":
+              network_arc_sampling_func = \
+                functools.partial(network.sample_arch,
+                                  comp_min=acq_min_constraint,
+                                  comp_max=acq_max_constraint)
+            elif network.cost_evaluation == "latency":
+              network_arc_sampling_func = \
+                functools.partial(network.sample_arch,
+                                  latency_min=acq_min_constraint,
+                                  latency_max=acq_max_constraint)
+            elif network.cost_evaluation == "param":
+              network_arc_sampling_func = \
+                functools.partial(network.sample_arch,
+                                  param_min=acq_min_constraint,
+                                  param_max=acq_max_constraint)
+            
+            suggestion_val, _ = bo.optimize_acq(network_arc_sampling_func, x, y)
+
+            new_individual = self.problem.generateIndividual()
+            new_individual.features = suggestion_val
+            
+            self.problem.calculateObjectives(new_individual)
+            bayesian_population.population.append(new_individual)
+          
+          children.extend(bayesian_population)
+      
       if self.callback is not None:
         print('plot pareto front')
         self.callback(population, i)

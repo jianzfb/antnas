@@ -28,21 +28,21 @@ class AnchorsUniformSamplingSuperNetwork(UniformSamplingSuperNetwork):
         anchor_arc_pos = None
         is_training_anchor_arc = False
         if arc is None:
-            if np.random.random() < 1.0:
+            if np.random.random() < self.anchor_arch_prob:
                 # using anchor arch
                 anchor_arc_index = np.random.randint(0, self.anchors.size())
                 anchor_arc = self.anchors.arch(anchor_arc_index)
                 batched_sampling = torch.as_tensor([anchor_arc], device=x.device)
 
                 # anchor_arc_pos = index
-                anchor_arc_pos = np.ones((batch_size), dtype=np.int32) * anchor_arc_index
+                anchor_arc_pos = torch.ones((batch_size),dtype=torch.int32, device=x.device) * anchor_arc_index
                 is_training_anchor_arc = True
             else:
                 # random select arch
                 batched_sampling = torch.as_tensor([self.sample_arch()], device=x.device)
                 
                 # anchor_arc_pos = torch.LongTensor([])
-                anchor_arc_pos = np.ones((batch_size), dtype=np.int32) * (-1)
+                anchor_arc_pos = torch.ones((batch_size), dtype=torch.int32, device=x.device) * (-1)
         else:
             # search and find
             batched_sampling = arc[0, :].view((1, arc.shape[1]))
@@ -70,9 +70,11 @@ class AnchorsUniformSamplingSuperNetwork(UniformSamplingSuperNetwork):
             # 3.2.step execute node op
             out = self.blocks[cur_node['module']](input, node_sampling.squeeze())
 
-            if is_training_anchor_arc and (node.startswith('CELL') or node.startswith('T')):
+            if is_training_anchor_arc and (arc is None) and (node.startswith('CELL') or node.startswith('T')):
                 node_output_dict[node] = out[:, :, :, :]
-
+            elif (arc is None) and (node.startswith('CELL') or node.startswith('T')):
+                node_output_dict[node] = torch.zeros(out.size(), device=out.device)
+                
             if node == self.out_node:
                 model_out = out
                 break
@@ -91,12 +93,22 @@ class AnchorsUniformSamplingSuperNetwork(UniformSamplingSuperNetwork):
 
         # 6.step total loss
         loss = indiv_loss.mean()
+        
         return loss, model_accuracy, node_output_dict, anchor_arc_pos
 
-    def sample_arch(self):
-        batch_arch_list = []
+    def sample_arch(self, *args, **kwargs):
+        # get constraint condition
+        comp_min = kwargs.get('comp_min', self.arch_objective_comp_min)
+        comp_max = kwargs.get('comp_max', self.arch_objective_comp_max)
+        latency_min = kwargs.get('latency_min', self.arch_objective_latency_min)
+        latency_max = kwargs.get('latency_max', self.arch_objective_latency_max)
+        param_min = kwargs.get('param_min', self.arch_objective_param_min)
+        param_max = kwargs.get('param_max', self.arch_objective_param_max)
+
+        # sampling satisfied feature
+        sampling_feature = None
         with torch.no_grad():
-            while len(batch_arch_list) < 1:
+            while True:
                 feature = [None for _ in range(len(self.traversal_order))]
 
                 sampling = torch.Tensor()
@@ -124,23 +136,24 @@ class AnchorsUniformSamplingSuperNetwork(UniformSamplingSuperNetwork):
                         self.path_recorder.get_arch(self.out_node, sampling, active)
                     sampled_cost, pruned_cost = \
                         cost_eval.get_costs([sampled_arc, pruned_arc])
-
-                    if self.arch_objective_comp > 0 and cost == "comp":
-                        if pruned_cost > self.arch_objective_comp:
+    
+                    if comp_max > 0 and comp_min > 0 and cost == "comp":
+                        if pruned_cost > comp_max or pruned_cost < comp_min:
                             satisfied_constraint = False
                             break
-
-                    if self.arch_objective_latency > 0 and cost == "latency":
-                        if pruned_cost > self.arch_objective_latency:
+    
+                    if latency_max and latency_min > 0 and cost == "latency":
+                        if pruned_cost > latency_max or pruned_cost < latency_min:
                             satisfied_constraint = False
                             break
-
-                    if self.arch_objective_param > 0 and cost == "param":
-                        if pruned_cost > self.arch_objective_param:
+    
+                    if param_max > 0 and param_min > 0 and cost == "param":
+                        if pruned_cost > param_max or pruned_cost < param_min:
                             satisfied_constraint = False
                             break
 
                 if satisfied_constraint:
-                    batch_arch_list.append(feature)
+                    sampling_feature = feature
+                    break
 
-            return batch_arch_list[0]
+            return sampling_feature

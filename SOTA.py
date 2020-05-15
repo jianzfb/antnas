@@ -8,46 +8,11 @@ from __future__ import print_function
 from nas.searchspace.PKAutoArc import *
 from nas.searchspace.PKArc import *
 from nas.component.NetworkBlock import *
+from nas.component.NetworkBlock import _make_divisible
+from OutLayerFactory import *
 import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-class OutLayer(NetworkBlock):
-    n_layers = 1
-    n_comp_steps = 1
-
-    def __init__(self, in_chan, out_shape, bias=True):
-        super(OutLayer, self).__init__()
-        self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
-
-        self.conv_1 = nn.Conv2d(in_chan, 960, kernel_size=1, stride=1, padding=0, bias=bias)
-        self.bn = nn.BatchNorm2d(960)
-
-        self.conv_2 = nn.Conv2d(960, 1280, kernel_size=1, stride=1, padding=0, bias=bias)
-        self.conv_3 = nn.Conv2d(1280, out_shape[0], kernel_size=1, stride=1, padding=0, bias=bias)
-        self.out_shape = out_shape
-        self.params = {
-            'module_list': ['OutLayer'],
-            'name_list': ['OutLayer'],
-            'OutLayer': {'out_shape': out_shape, 'in_chan': in_chan},
-            'out': 'outname'
-        }
-
-    def forward(self, x, sampling=None):
-        x = self.conv_1(x)
-        x = self.bn(x)
-        x = F.relu6(x)
-
-        x = self.global_pool(x)
-        x = self.conv_2(x)
-        x = F.relu6(x)
-
-        x = self.conv_3(x)
-        return x.view(-1, *self.out_shape)
-
-    def get_flop_cost(self, x):
-        return [0] + [0] * (self.state_num - 1)
 
 
 # mobilenetv3-large
@@ -87,52 +52,78 @@ def mobilenetv3_large(head, tail, prefix):
 
     graph = nx.DiGraph()
     pk = PKAutoArc(graph)
-    pk.generate(head,tail,modules)
+    pk.generate(head, tail, modules)
     pk.save('./', '%s_mobilenetv3_large'%prefix)
 
 
-# mobilenetv2
-def mobilenetv2(head, tail, prefix):
+# mobilenetv3-small
+def mobilenetv3_small(head, tail, prefix):
     modules = [
         InvertedResidualBlockWithSEHS(
-            in_chan=head.params['out_chan'], out_chan=16, kernel_size=3, reduction=False, hs=False, se=False, expansion=1),
+            in_chan=head.params['out_chan'],out_chan=16,kernel_size=3,reduction=True,hs=False,se=True,expansion=1),
         InvertedResidualBlockWithSEHS(
-            in_chan=16, out_chan=24, kernel_size=3, reduction=False, hs=False, se=False, expansion=6),
+            in_chan=16,out_chan=24,kernel_size=3,reduction=True,hs=False,se=False,expansion=72/16),
         InvertedResidualBlockWithSEHS(
-            in_chan=24, out_chan=24, kernel_size=3, reduction=False if prefix.startswith('cifar') else True, hs=False, se=False, expansion=6),
+            in_chan=24,out_chan=24,kernel_size=3,reduction=False,hs=False,se=False,expansion=88/24),
         InvertedResidualBlockWithSEHS(
-            in_chan=24, out_chan=32, kernel_size=3, reduction=True, hs=False, se=False, expansion=6),
+            in_chan=24,out_chan=40,kernel_size=5,reduction=True,hs=True,se=True,expansion=96/24),
         InvertedResidualBlockWithSEHS(
-            in_chan=32, out_chan=32, kernel_size=3, reduction=False, hs=False, se=False, expansion=6),
+            in_chan=40,out_chan=40,kernel_size=5,reduction=False,hs=True,se=True,expansion=240/40),
         InvertedResidualBlockWithSEHS(
-            in_chan=32, out_chan=32, kernel_size=3, reduction=False, hs=False, se=False, expansion=6),
+            in_chan=40,out_chan=40,kernel_size=5,reduction=False,hs=True,se=True,expansion=240/40),
         InvertedResidualBlockWithSEHS(
-            in_chan=32, out_chan=64, kernel_size=3, reduction=True, hs=False, se=False, expansion=6),
+            in_chan=40,out_chan=48,kernel_size=5,reduction=False,hs=True,se=True,expansion=120/40),
         InvertedResidualBlockWithSEHS(
-            in_chan=64, out_chan=64, kernel_size=3, reduction=False, hs=False, se=False, expansion=6),
+            in_chan=48,out_chan=48,kernel_size=5,reduction=False,hs=True,se=True,expansion=144/48),
         InvertedResidualBlockWithSEHS(
-            in_chan=64, out_chan=64, kernel_size=3, reduction=False, hs=False, se=False, expansion=6),
+            in_chan=48,out_chan=96,kernel_size=5,reduction=True,hs=True,se=True,expansion=288/48),
         InvertedResidualBlockWithSEHS(
-            in_chan=64, out_chan=64, kernel_size=3, reduction=False, hs=False, se=False, expansion=6),
+            in_chan=96,out_chan=96,kernel_size=5,reduction=False,hs=True,se=True,expansion=576/96),
         InvertedResidualBlockWithSEHS(
-            in_chan=64, out_chan=96, kernel_size=3, reduction=False, hs=False, se=False, expansion=6),
-        InvertedResidualBlockWithSEHS(
-            in_chan=96, out_chan=96, kernel_size=3, reduction=False, hs=False, se=False, expansion=6),
-        InvertedResidualBlockWithSEHS(
-            in_chan=96, out_chan=96, kernel_size=3, reduction=False, hs=False, se=False, expansion=6),
-        InvertedResidualBlockWithSEHS(
-            in_chan=96, out_chan=160, kernel_size=3, reduction=True, hs=False, se=False, expansion=6),
-        InvertedResidualBlockWithSEHS(
-            in_chan=160, out_chan=160, kernel_size=3, reduction=False, hs=False, se=False, expansion=6),
-        InvertedResidualBlockWithSEHS(
-            in_chan=160, out_chan=160, kernel_size=3, reduction=False, hs=False, se=False, expansion=6),
-        InvertedResidualBlockWithSEHS(
-            in_chan=160, out_chan=320, kernel_size=3, reduction=False, hs=False, se=False, expansion=6),
+            in_chan=96,out_chan=96,kernel_size=5,reduction=False,hs=True,se=True,expansion=576/96)
     ]
 
     graph = nx.DiGraph()
     pk = PKAutoArc(graph)
-    pk.generate(head,tail,modules)
+    pk.generate(head, tail, modules)
+    pk.save('./', '%s_mobilenetv3_small'%prefix)
+
+
+# mobilenetv3-edgetpu
+def mobilenetv3_edgetpu(head, tail, prefix):
+    pass
+
+
+# mobilenetv2
+def mobilenetv2(head, tail, prefix, width_mult=1.0):
+    # setting of inverted residual blocks
+    cfgs = [
+        # t, c, n, s
+        [1, 16, 1, 1],
+        [6, 24, 2, 2],
+        [6, 32, 3, 2],
+        [6, 64, 4, 2],
+        [6, 96, 3, 1],
+        [6, 160, 3, 2],
+        [6, 320, 1, 1],
+    ]
+    input_channel = head.params['out_chan']
+    modules = []
+    for t, c, n, s in cfgs:
+        output_channel = _make_divisible(c * width_mult, 4 if width_mult == 0.1 else 8)
+        for i in range(n):
+            modules.append(InvertedResidualBlockWithSEHS(in_chan=input_channel,
+                                                         out_chan=output_channel,
+                                                         expansion=t,
+                                                         kernel_size=3,
+                                                         reduction=True if (i == 0) and (s == 2) else False,
+                                                         se=False,
+                                                         hs=False))
+            input_channel = output_channel
+
+    graph = nx.DiGraph()
+    pk = PKAutoArc(graph)
+    pk.generate(head, tail, modules)
     pk.save('./', '%s_mobilenetv2'%prefix)
 
 
@@ -346,9 +337,18 @@ def ENAS(tail, prefix):
 # mobilenetv2(head, tail, 'cifar')
 
 
-# cifar ENAS
-# tail (固定计算节点，结构不可学习)
-tail = OutLayer(64, (10,), True)
-pk = ENAS(tail, "ENAS")
-sampled_loss, pruned_loss = pk.arc_loss([1,3,32,32], 'comp')
-print(pruned_loss)
+# # cifar ENAS
+# # tail (固定计算节点，结构不可学习)
+# tail = OutLayer(64, (10,), True)
+# pk = ENAS(tail, "ENAS")
+# sampled_loss, pruned_loss = pk.arc_loss([1,3,32,32], 'comp')
+# print(pruned_loss)
+
+
+# ImageNet mobilenetv2
+width_mult = 1.0
+input_channel = _make_divisible(32 * width_mult, 4 if width_mult == 0.1 else 8)
+head = ConvBn(3, input_channel, True, 3, 2)
+output_channel = _make_divisible(1280 * width_mult, 4 if width_mult == 0.1 else 8) if width_mult > 1.0 else 1280
+tail = ImageNetOutLayer(320, output_channel, 1000)
+mobilenetv2(head, tail, 'pk')

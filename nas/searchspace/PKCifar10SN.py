@@ -9,8 +9,6 @@ from __future__ import print_function
 import networkx as nx
 from nas.component.NetworkCell import *
 from nas.networks.UniformSamplingSuperNetwork import UniformSamplingSuperNetwork
-from nas.networks.AnchorsUniformSamplingSuperNetwork import *
-from nas.networks.EvolutionSuperNetwork import *
 from nas.utils.drawers.NASDrawer import NASDrawer
 from nas.component.Loss import *
 from nas.component.ClassificationAccuracyEvaluator import *
@@ -211,7 +209,14 @@ class PKCifar10SN(UniformSamplingSuperNetwork):
         tail = kwargs['out_layer']
 
         # search space（stage - block - cell）
-        self.sbca = StageBlockCellArc(Cifar10CellBlock, Cifar10ReductionCellBlock, AddBlock, ConvBn, self.graph, is_cell_dense=True, is_block_dense=True)
+        self.sbca = \
+            StageBlockCellArc(Cifar10CellBlock,
+                              Cifar10ReductionCellBlock,
+                              AddBlock,
+                              ConvBn,
+                              self.graph,
+                              is_cell_dense=True,
+                              is_block_dense=True)
         in_name, out_name =\
             self.sbca.generate(head,
                                tail,
