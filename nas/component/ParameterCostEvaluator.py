@@ -26,7 +26,7 @@ class ParameterCostEvaluator(EdgeCostEvaluator):
                 if is_main_cost:
                     cur_node['cost'] = cost
 
-                self.costs[self.model.arch_node_index[node]] = torch.Tensor(cost)
+                self.costs[model.arch_node_index[node]] = torch.Tensor(cost)
                 cur_node['input'] = []
 
             return self.costs

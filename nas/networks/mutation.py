@@ -22,7 +22,14 @@ class Mutation(object):
         self.k0 = kwargs.get('k0', 0.1)
         self.k1 = kwargs.get('k1', 1.0)
         self.hierarchical = kwargs.get('hierarchical', [])
+        self.network = kwargs.get('network', None)
         
+        self.pos_map = {}
+        traversal_order = list(nx.topological_sort(self.network.net))
+        for node_name in traversal_order:
+            cur_node = self.network.net.node[node_name]
+            self.pos_map[cur_node['sampling_param']] = node_name
+
     @property
     def generation(self):
         return self._generation
@@ -94,21 +101,44 @@ class Mutation(object):
             multi_points = self.multi_points if self.multi_points > 0 else int(mutation_ratio * len(explore_position))
             multi_points = min(multi_points, len(explore_position))
             if multi_points > 0:
-                mutation_position = np.random.choice(explore_position, multi_points, replace=False)
-                mutation_position = mutation_position.flatten().tolist()
-                mutation_state = []
-                for mutation_p in mutation_position:
-                    candidate_state = set(list(range(NetworkBlock.state_num)))
-                    candidate_state.discard(f[2][mutation_p])
-                    candidate_state = list(candidate_state)
-                    
-                    s = np.random.choice(candidate_state,
-                                         1,
-                                         replace=False)
-                    mutation_state.append(int(s))
+                is_ok = False
                 
-                print("individual %d mutation at %s to state %s"%(f_index, str(mutation_position), str(mutation_state)))
-                mutation_result.append((f + (mutation_position, mutation_state)))
+                while not is_ok:
+                    mutation_position = np.random.choice(explore_position, multi_points, replace=False)
+                    mutation_position = mutation_position.flatten().tolist()
+                    mutation_state = []
+                    feature = copy.deepcopy(f[2])
+                    
+                    for mutation_p in mutation_position:
+                        candidate_state = set(list(range(NetworkBlock.state_num)))
+                        candidate_state.discard(f[2][mutation_p])
+                        candidate_state = list(candidate_state)
+                        
+                        s = np.random.choice(candidate_state,
+                                             1,
+                                             replace=False)
+
+                        node_name = self.pos_map[mutation_p]
+                        node = self.network.net.node[node_name]
+
+                        if node_name.startswith("CELL") or node_name.startswith('T'):
+                            if not self.network.blocks[node['module']].structure_fixed:
+                                if s != 0 and s != 1:
+                                    s = 1
+                        else:
+                            print("shouldnt mutation at this pos %d(%s)"%(mutation_p, node_name))
+
+                        mutation_state.append(int(s))
+                        feature[mutation_p] = int(s)
+                    
+                    # 检查变异后基因是否满足约束条件
+                    if not self.network.is_satisfied_constraint(feature):
+                        continue
+                    
+                    is_ok = True
+                    
+                    print("individual %d mutation at %s to state %s"%(f_index, str(mutation_position), str(mutation_state)))
+                    mutation_result.append((f + (mutation_position, mutation_state)))
 
         return mutation_result
 
@@ -158,27 +188,27 @@ class EvolutionMutation(Mutation):
                  k0,
                  k1,
                  method='simple',
-                 adaptive=True):
+                 adaptive=True,
+                 network=None):
         super(EvolutionMutation, self).__init__(method,
                                                 multi_points,
                                                 adaptive=adaptive,
                                                 max_generation=max_generation,
                                                 k0=k0,
-                                                k1=k1)
+                                                k1=k1,
+                                                network=network)
     
     def mutate(self, *args, **kwargs):
         population = kwargs['population']
-        graph = kwargs['graph']
-        blocks = kwargs['blocks']
         explore_position = kwargs['explore_position']
         problem = kwargs['problem']
         self.hierarchical = kwargs['hierarchical']
 
-        traversal_order = list(nx.topological_sort(graph))
-        pos_map = {}
-        for node_name in traversal_order:
-            cur_node = graph.node[node_name]
-            pos_map[cur_node['sampling_param']] = node_name
+        # traversal_order = list(nx.topological_sort(graph))
+        # pos_map = {}
+        # for node_name in traversal_order:
+        #     cur_node = graph.node[node_name]
+        #     pos_map[cur_node['sampling_param']] = node_name
 
         fitness_values = []
         for individual_index, individual in enumerate(population.population):
@@ -200,24 +230,10 @@ class EvolutionMutation(Mutation):
 
                 new_individual = problem.generateIndividual()
                 mutated_feature = copy.deepcopy(population.population[individual_index].features)
-                for mutation_index, mutation_pos in enumerate(mutation_position):
-                    node_name = pos_map[mutation_pos]
-                    node = graph.node[node_name]
-        
-                    if node_name.startswith("CELL") or node_name.startswith('T'):
-                        if not blocks[node['module']].structure_fixed:
-                            mutated_state = mutation_state[mutation_index]
-                            if mutated_state != 0 and mutated_state != 1:
-                                mutated_state = 1
-                                
-                            mutated_feature[mutation_pos] = int(mutated_state)
-                        else:
-                            mutated_state = mutation_state[mutation_index]
-                            mutated_feature[mutation_pos] = int(mutated_state)
-                            print("individual %d mutation to %d at pos %d" % (individual_index,population.population[individual_index].features[mutation_pos], mutation_pos))
-                    else:
-                        print("shouldnt mutation at this pos")
-                        
+
+                for mp, ms in zip(mutation_position, mutation_state):
+                    mutated_feature[mp] = ms
+
                 new_individual.features = mutated_feature
                 new_individual.objectives = copy.deepcopy(population.population[individual_index].objectives)
                 mutation_population.population.append(new_individual)

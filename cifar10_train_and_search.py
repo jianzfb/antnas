@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*-
 # @Time    : 2019-08-19 18:22
-# @File    : main.py
+# @File    : cifar10_train_and_search.py
 # @Author  : jian<jian@mltalker.com>
 from __future__ import division
 from __future__ import unicode_literals
@@ -34,7 +34,7 @@ def argument_parser():
 
     parser.add_argument('-dset', default='CIFAR10', type=str, help='Dataset')
     parser.add_argument('-bs', action='store', default=2, type=int, help='Size of each batch')
-    parser.add_argument('-epochs', action='store', default=1, type=int,
+    parser.add_argument('-epochs', action='store', default=0, type=int,
                         help='Number of training epochs')
     parser.add_argument('-evo_epochs', action='store', default=80, type=int,
                         help='Number of architecture searching epochs')
@@ -87,10 +87,19 @@ def argument_parser():
                         help='Maximum allowed cost for architecture')
     parser.add_argument('-max_comp', dest='max_comp', action='store', default=-1, type=float,
                         help='Maximum allowed cost for architecture')
+    parser.add_argument('-min_comp', dest='min_comp', action='store', default=-1, type=float,
+                        help='Maximum allowed cost for architecture')
+    
     parser.add_argument('-max_latency', dest='max_latency', action='store', default=-1, type=float,
                         help='Maximum allowed cost for architecture')
+    parser.add_argument('-min_latency', dest='min_latency', action='store', default=-1, type=float,
+                        help='Maximum allowed cost for architecture')
+    
     parser.add_argument('-max_param', dest='max_param', action='store', default=-1, type=float,
                         help='Maximum allowed cost for architecture')
+    parser.add_argument('-min_param', dest='min_param', action='store', default=-1, type=float,
+                        help='Maximum allowed cost for architecture')
+    
     parser.add_argument('-om', dest='objective_method', action='store', default='max',
                         type=restricted_str('max', 'abs'), help='Method used to compute the cost of an architecture')
     parser.add_argument('-pen', dest='arch_penalty', action='store', default=0, type=float,
@@ -182,37 +191,10 @@ def main(args, plotter):
     # 创建NAS模型
     nas_manager = Manager(args, data_properties, out_layer=OutLayer((10,), 256, True))
 
-    # nas_manager.build(n_layer=3, n_chan=32)
-    # nas_manager.build(blocks_per_stage=[1, 1, 1, 3, 3],
-    #                 cells_per_block=[[3], [3], [3], [3, 3, 3], [3,3,3],[3,3,3]],
-    #                 channels_per_block=[[16], [32], [64], [128, 128, 128],[256,256,256]],
-    #                )
-
-    # # SegSN and SegAsppSN
-    # nas_manager.build(blocks_per_stage=[1, 1, 1, 3],
-    #                 cells_per_block=[[3], [3], [6], [6, 6, 3]],
-    #                 channels_per_block=[[16], [32], [64], [128, 256, 512]])
-
-    # # SegLargeKernelSN
-    # nas_manager.build(blocks_per_stage=[1, 1, 1, 2, 1],
-    #                 cells_per_block=[[2], [3], [4], [4, 4], [4]],
-    #                 channels_per_block=[[16], [24], [40], [80, 112], [160]])
-
-    # pk mobilenetv3-large
-    # nas_manager.build(blocks_per_stage=[1, 1, 1, 2, 1],
-    #                 cells_per_block=[[1], [2], [3], [3, 3], [6]],
-    #                 channels_per_block=[[16], [32], [64], [96, 112], [160]])
-    #
     # pk ENAS
     nas_manager.build(blocks_per_stage=[1, 1, 1],
                       cells_per_block=[[6], [6], [4]],
                       channels_per_block=[[64], [128], [256]])
-
-    #
-    # # pk ENAS
-    # nas_manager.build(blocks_per_stage=[4, 4, 1],
-    #                   cells_per_block=[[3, 3, 3, 3], [3, 3, 3, 3], [4]],
-    #                   channels_per_block=[[32, 32, 64, 64], [64, 64, 128, 128], [256]])
 
     # 构建结构Anchor
     anchors = None
@@ -236,10 +218,6 @@ def main(args, plotter):
     xp.train.timer = mlogger.metric.Timer(plotter=plotter, plot_title="Time", plot_legend="train")
     xp.train.objective_cost = mlogger.metric.Average(plotter=plotter, plot_title="objective_cost", plot_legend="architecture")
 
-    xp.val = mlogger.Container()
-    xp.val.accuracy = mlogger.metric.Simple(plotter=plotter, plot_title="val_test_accuracy", plot_legend="val")
-    xp.val.timer = mlogger.metric.Timer(plotter=plotter, plot_title="Time", plot_legend="val")
-
     xp.test = mlogger.Container()
     xp.test.accuracy = mlogger.metric.Simple(plotter=plotter, plot_title="val_test_accuracy", plot_legend="test")
     xp.test.timer = mlogger.metric.Timer(plotter=plotter, plot_title="Time", plot_legend="test")
@@ -253,15 +231,6 @@ def main(args, plotter):
                              mlogger.metric.Average(plotter=plotter,
                                                     plot_title='train_%s'%cost,
                                                     plot_legend="pruned_cost"))
-
-        xp.val.__setattr__('eval_sampled_%s' % cost,
-                           mlogger.metric.Average(plotter=plotter,
-                                                  plot_title='eval_%s' % cost,
-                                                  plot_legend="sampled_cost"))
-        xp.val.__setattr__('eval_pruned_%s' % cost,
-                           mlogger.metric.Average(plotter=plotter,
-                                                  plot_title='eval_%s' % cost,
-                                                  plot_legend="pruned_cost"))
 
     # initialize supernetwork
     logging.info('initialize supernetwork basic info')
@@ -360,6 +329,7 @@ def main(args, plotter):
                 # anchor loss
                 anchor_consistent_loss_total = 0.0
                 if nas_manager.supernetwork.anchors is not None:
+                    b = b.cpu().numpy()
                     for anchor_index in range(nas_manager.supernetwork.anchors.size()):
                         sample_index_in_batch = np.where(b == anchor_index)[0]
                         if sample_index_in_batch.size == 0:
@@ -394,32 +364,6 @@ def main(args, plotter):
                 xp.train.timer.update()
                 for metric in xp.train.metrics():
                     metric.log()
-
-                # if (i + 1) % lp == 0:
-                #     logger.info('\nEvaluation')
-                #
-                #     progress = epoch + (i + 1) / len(train_loader)
-                #     val_score = nas_manager.eval(x, y, val_loader, 'validation')
-                #     #test_score = nas_manager.eval(x, y, test_loader, 'test')
-                #     test_score = 0.0
-                #     # record model accuracy on validation and test dataset
-                #     xp.val.accuracy.update(val_score)
-                #     xp.test.accuracy.update(test_score)
-                #
-                #     msg = '[{:.2f}] Loss: {:.5f} - Cost: {:.3E} - Train: {:2.2f}% - Val: {:2.2f}% - Test: {:2.2f}%'
-                #     logger.info(msg.format(progress,
-                #                            xp.train.classif_loss.value,
-                #                            xp.train.objective_cost.value,
-                #                            xp.train.accuracy.value,
-                #                            xp.val.accuracy.value,
-                #                            xp.test.accuracy.value))
-                #
-                #     xp.val.timer.update()
-                #     xp.test.timer.update()
-                #     for metric in xp.val.metrics():
-                #         metric.log()
-                #     for metric in xp.test.metrics():
-                #         metric.log()
 
                 plotter.update_plots()
 

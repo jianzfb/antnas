@@ -712,15 +712,17 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
         }
 
         # expansion,
-        expansion_channels = _make_divisible(in_chan * expansion)
-        self.conv1 = nn.Conv2d(in_chan,
-                               expansion_channels,
-                               kernel_size=1,
-                               stride=1,
-                               bias=False)
-        self.bn1 = nn.BatchNorm2d(expansion_channels,
-                                  momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
-                                  track_running_stats=NetworkBlock.bn_track_running_stats)
+        expansion_channels = in_chan
+        if expansion != 1:
+            expansion_channels = _make_divisible(in_chan * expansion)
+            self.conv1 = nn.Conv2d(in_chan,
+                                   expansion_channels,
+                                   kernel_size=1,
+                                   stride=1,
+                                   bias=False)
+            self.bn1 = nn.BatchNorm2d(expansion_channels,
+                                      momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                                      track_running_stats=NetworkBlock.bn_track_running_stats)
 
         self.dwconv2 = nn.Conv2d(expansion_channels,
                                  expansion_channels,
@@ -768,24 +770,17 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
         self.expansion = expansion
         self.se = se
         self.hs = hs
-
-        self.shortcut = nn.Sequential()
-        if in_chan != out_chan and (not self.reduction):
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(in_chan, out_chan, kernel_size=1, stride=1, padding=0, bias=False),
-                nn.BatchNorm2d(out_chan,
-                               momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
-                               track_running_stats=NetworkBlock.bn_track_running_stats),
-            )
-
+        self.identity = (not reduction) and (in_chan == out_chan)
+        
     def forward(self, input, sampling=None):
         x = input
-        x = self.conv1(x)
-        x = self.bn1(x)
-        if self.hs:
-            x = x * (F.relu6(x + 3.0) / 6.0)
-        else:
-            x = F.relu(x)
+        if self.expansion != 1:
+            x = self.conv1(x)
+            x = self.bn1(x)
+            if self.hs:
+                x = x * (F.relu6(x + 3.0) / 6.0)
+            else:
+                x = F.relu(x)
 
         x = self.dwconv2(x)
         x = self.bn2(x)
@@ -800,15 +795,15 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
             se_x = F.relu(se_x)
 
             se_x = self.se_conv_layer_2(se_x)
-            se_x = F.relu6(se_x + 3.0) / 6.0
+            se_x = F.relu6(se_x + 3.0) / 6.0        # hard sigmoid
             x = torch.mul(se_x, x)
 
         x = self.conv3(x)
         x = self.bn3(x)
 
-        if not self.reduction:
-            x = x + self.shortcut(input)
-
+        if self.identity:
+            x = x + input
+        
         if sampling is None:
             return x
 
@@ -817,12 +812,6 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
             return x
         else:
             return torch.zeros(x.shape, device=x.device)
-
-        # if sampling is None:
-        #     return x
-        #
-        # x = x * (sampling == 1).float()
-        # return x
 
     def get_param_num(self, x):
         conv1_param = self.conv1.in_channels*self.conv1.out_channels*self.conv1.kernel_size[0]*self.conv1.kernel_size[1]

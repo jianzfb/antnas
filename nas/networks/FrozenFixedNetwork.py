@@ -20,6 +20,8 @@ import copy
 class FrozenFixedNetwork(FixedNetwork):
     def __init__(self, *args, **kwargs):
         super(FrozenFixedNetwork, self).__init__(*args, **kwargs)
+        NetworkBlock.bn_track_running_stats = False
+        NetworkBlock.bn_moving_momentum = False
 
     def forward(self, x, y):
         # 1.step parse x,y - (data,label)

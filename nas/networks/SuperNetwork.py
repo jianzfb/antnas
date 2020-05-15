@@ -120,11 +120,18 @@ class SuperNetwork(nn.Module):
         self._objective_cost = kwargs['objective_cost']
         self._objective_method = kwargs['objective_method']
         self._arch_lambda = kwargs['lambda']
-        self._objective_comp = kwargs.get('max_comp', None)
-        self._objective_latency = kwargs.get('max_latency', None)
-        self._objective_param = kwargs.get('max_param', None)
-        self.population_size = kwargs.get('population', 100)
+        self._objective_comp_max = kwargs.get('max_comp', None)
+        self._objective_comp_min = kwargs.get('min_comp', None)
 
+        self._objective_latency_max = kwargs.get('max_latency', None)
+        self._objective_latency_min = kwargs.get('min_latency', None)
+        
+        self._objective_param_max = kwargs.get('max_param', None)
+        self._objective_param_min = kwargs.get('min_param', None)
+
+        self.population_size = kwargs.get('population', 100)
+        self.cost_evaluation = kwargs["cost_evaluation"][0]
+        
         cost_evaluators = {
             'comp': ComputationalCostEvaluator,
             'latency': LatencyCostEvaluator,
@@ -166,6 +173,7 @@ class SuperNetwork(nn.Module):
     @property
     def anchors(self):
         return self._anchors
+    
     @anchors.setter
     def anchors(self, val):
         self._anchors = val
@@ -208,7 +216,79 @@ class SuperNetwork(nn.Module):
         # 初始化结构信息
         for cost, cost_eval in self.arch_cost_evaluators.items():
             cost_eval.init_costs(self, graph)
+            
+        # 获得约束搜索空间的范围 (find max/min arch)
+        auto_analyze_comp = False
+        if self.cost_evaluation == "comp" and (self.arch_objective_comp_min < 0 or self.arch_objective_comp_max < 0):
+            auto_analyze_comp = True
 
+        auto_analyze_latency = False
+        if self.cost_evaluation == "latency" and (self.arch_objective_latency_min < 0 or self.arch_objective_latency_max < 0):
+            auto_analyze_latency = True
+        
+        auto_analyze_param = False
+        if self.cost_evaluation == "param" and (self.arch_objective_param_min < 0 or self.arch_objective_param_max < 0):
+            auto_analyze_param = True
+            
+        try_times = 1000
+        while try_times > 0:
+            feature = [None for _ in range(len(self.traversal_order))]
+            
+            sampling = torch.Tensor()
+            active = torch.Tensor()
+            for node_name in self.traversal_order:
+                cur_node = self.net.node[node_name]
+                if not (node_name.startswith('CELL') or node_name.startswith('T')):
+                    # 不可学习，处于永远激活状态
+                    feature[cur_node['sampling_param']] = int(1)
+                else:
+                    if not self.blocks[cur_node['module']].structure_fixed:
+                        feature[cur_node['sampling_param']] = int(np.random.randint(0, 2))
+                    else:
+                        feature[cur_node['sampling_param']] = int(np.random.randint(0, NetworkBlock.state_num))
+                
+                sampling, active = \
+                    self.path_recorder.add_sampling(node_name,
+                                                    torch.as_tensor([feature[cur_node['sampling_param']]]).reshape([1,1,1,1]),
+                                                    sampling,
+                                                    active,
+                                                    self.blocks[cur_node['module']].structure_fixed)
+
+            sampled_arc, pruned_arc = \
+                self.path_recorder.get_arch(self.out_node, sampling, active)
+
+            for cost, cost_eval in self.arch_cost_evaluators.items():
+                _, pruned_cost = \
+                    cost_eval.get_costs([sampled_arc, pruned_arc])
+
+                pruned_cost = pruned_cost.item()
+                if cost == "comp" and auto_analyze_comp:
+                    if self.arch_objective_comp_min > pruned_cost or self.arch_objective_comp_min < 0:
+                        self.arch_objective_comp_min = pruned_cost
+                    if self.arch_objective_comp_max < pruned_cost or self.arch_objective_comp_max < 0:
+                        self.arch_objective_comp_max = pruned_cost
+                
+                if cost == "latency" or auto_analyze_latency:
+                    if self.arch_objective_latency_min > pruned_cost or self.arch_objective_latency_min < 0:
+                        self.arch_objective_latency_min = pruned_cost
+                    if self.arch_objective_latency_max < pruned_cost or self.arch_objective_latency_max < 0:
+                        self.arch_objective_latency_max = pruned_cost
+                
+                if cost == "param" or auto_analyze_param:
+                    if self.arch_objective_param_min > pruned_cost or self.arch_objective_param_min < 0:
+                        self.arch_objective_param_min = pruned_cost
+                    if self.arch_objective_param_max < pruned_cost or self.arch_objective_param_max < 0:
+                        self.arch_objective_param_max = pruned_cost
+    
+            try_times -= 1
+        
+        if self.cost_evaluation == "comp":
+            print("ARCH COMP MIN-%f,MAX-%f"%(self.arch_objective_comp_min,self.arch_objective_comp_max))
+        elif self.cost_evaluation == "latency":
+            print("ARCH LATENCY MIN-%f,MAX-%f"%(self.arch_objective_latency_min,self.arch_objective_latency_max))
+        elif self.cost_evaluation == "param":
+            print("ARCH PARAM MIN-%f,MAX-%f"%(self.arch_objective_param_min,self.arch_objective_param_max))
+        
     def forward(self, *input):
         raise NotImplementedError
 
@@ -253,17 +333,53 @@ class SuperNetwork(nn.Module):
         return self._objective_cost
 
     @property
-    def arch_objective_comp(self):
-        return self._objective_comp
+    def arch_objective_comp_max(self):
+        return self._objective_comp_max
+    
+    @arch_objective_comp_max.setter
+    def arch_objective_comp_max(self, val):
+        self._objective_comp_max = val
 
     @property
-    def arch_objective_latency(self):
-        return self._objective_latency
+    def arch_objective_comp_min(self):
+        return self._objective_comp_min
+    
+    @arch_objective_comp_min.setter
+    def arch_objective_comp_min(self, val):
+        self._objective_comp_min = val
+    
+    @property
+    def arch_objective_latency_max(self):
+        return self._objective_latency_max
+    
+    @arch_objective_latency_max.setter
+    def arch_objective_latency_max(self, val):
+        self._objective_latency_max = val
+    
+    @property
+    def arch_objective_latency_min(self):
+        return self._objective_latency_min
+    
+    @arch_objective_latency_min.setter
+    def arch_objective_latency_min(self, val):
+        self._objective_latency_min = val
+    
+    @property
+    def arch_objective_param_max(self):
+        return self._objective_param_max
+    
+    @arch_objective_param_max.setter
+    def arch_objective_param_max(self, val):
+        self._objective_param_max = val
 
     @property
-    def arch_objective_param(self):
-        return self._objective_param
-
+    def arch_objective_param_min(self):
+        return self._objective_param_min
+    
+    @arch_objective_param_min.setter
+    def arch_objective_param_min(self, val):
+        self._objective_param_min = val
+    
     @property
     def arch_objective_method(self):
         return self._objective_method
@@ -314,9 +430,12 @@ class SuperNetwork(nn.Module):
 
         self.use_preload_arch = True
 
-    def sample_arch(self):
+    def sample_arch(self, *args, **kwargs):
         raise NotImplementedError
-
+    
+    def is_satisfied_constraint(self, feature):
+        return True
+    
     def sample_arch_and_save(self, **kwargs):
         folder = kwargs.get('folder', './supernetwork/')
         arch_suffix = kwargs.get('suffix', "0")
@@ -512,20 +631,23 @@ class SuperNetwork(nn.Module):
                                              k0=1.0,
                                              k1=1.5,
                                              method='based_matrices',
-                                             adaptive=True)
+                                             adaptive=True,
+                                             network=self)
         crossover_control = EvolutionCrossover(multi_points=crossover_multi_points,
                                                max_generation=max_generation,
                                                k0=1.0,
                                                k1=0.8,
                                                method='based_matrices',
-                                               size=population_size)
+                                               size=population_size,
+                                               network=self)
         evolution = Nsga2(self.problem,
                           mutation_control,
                           crossover_control,
                           num_of_generations=max_generation,
                           callback=functools.partial(self._evolution_callback_func,
                                                      arc_loss=self.problem.arc_loss,
-                                                     folder=folder))
+                                                     folder=folder),
+                          using_bayesian=True)
 
         # ###############################
         # # 临时代码，测试结构参数量统计
@@ -567,10 +689,9 @@ class SuperNetwork(nn.Module):
 
         elited_population = \
             evolution.evolve(population,
-                             graph=self.net,
-                             blocks=self.blocks,
                              explore_position=explore_position,
-                             hierarchical=hierarchical)
+                             hierarchical=hierarchical,
+                             network=self)
 
         # 3.step save architecture
         for individual in elited_population:

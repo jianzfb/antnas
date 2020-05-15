@@ -19,6 +19,7 @@ from sklearn import gaussian_process
 import functools
 import matplotlib.pyplot as plt
 from nas.networks.metric import *
+import copy
 
 
 class BayesianOptimizer(object):
@@ -36,25 +37,24 @@ class BayesianOptimizer(object):
 
     def fit(self, x_queue, y_queue):
         self.gp.fit(x_queue, y_queue)
-        # Initialize the priority queue.
-        self.pq = queue.PriorityQueue()
         self.elem_class = Elem
         if self.metric.higher_better():
             self.elem_class = ReverseElem
 
+    def optimize_acq(self, sampilng_func, x_queue, y_queue, timeout=60):
+        # Initialize the priority queue.
+        self.pq = queue.PriorityQueue()
         for metric_value in y_queue:
             self.pq.put(self.elem_class(metric_value, None))
-
-    def optimize_acq(self, searcher, timeout=60 * 60 * 24):
+        
         start_time = time.time()
-
         t = 1.0
         t_min = self.t_min
         alpha = 0.9
         opt_acq = self._get_init_opt_acq_value()
         opt_model = None
-        opt_model_x = None
         remaining_time = timeout
+
         while not self.pq.empty() and t > t_min and remaining_time > 0:
             elem = self.pq.get()
             # simulated annealing
@@ -65,21 +65,19 @@ class BayesianOptimizer(object):
 
             ap = math.exp(temp_exp)
             if ap >= random.uniform(0, 1):
-                for model_x in searcher():
-                    # UCB acquisition function
-                    temp_acq_value = self.acq(np.expand_dims(model_x, 0))[0]
-                    self.pq.put(self.elem_class(temp_acq_value, model_x))
+                # random sampling
+                model_x = sampilng_func()
+                
+                # UCB acquisition function
+                temp_acq_value = self.acq(np.expand_dims(model_x, 0))[0]
+                self.pq.put(self.elem_class(temp_acq_value, model_x))
 
-                    if self._accept_new_acq_value(opt_acq, temp_acq_value):
-                        opt_acq = temp_acq_value
-                        opt_model = model_x
-                        opt_model_x = model_x
+                if self._accept_new_acq_value(opt_acq, temp_acq_value):
+                    opt_acq = temp_acq_value
+                    opt_model = model_x
 
             t *= alpha
             remaining_time = timeout - (time.time() - start_time)
-
-        if remaining_time < 0:
-            raise TimeoutError
 
         return opt_model, opt_acq
 
@@ -129,8 +127,8 @@ if __name__ == '__main__':
         def __init__(self):
             pass
 
-        def random(self, num):
-            return [np.array([(random.random() * 2 - 1)*20])]
+        def random(self):
+            return np.array([(random.random() * 2 - 1)*20])
 
     target_func = lambda x: x**2
 
@@ -147,12 +145,13 @@ if __name__ == '__main__':
 
     suggestion_val_list = []
     suggestion_gt_list = []
-
-    suggestion_val, suggestion_score_predicted = bo.optimize_acq(functools.partial(aa.random, 1))
-    gt_val = target_func(suggestion_val)
-    suggestion_val_list.append(suggestion_val)
-    suggestion_gt_list.append(gt_val)
-    print('predict %f gt %f'%(suggestion_score_predicted, gt_val))
+    
+    for _ in range(5):
+        suggestion_val, suggestion_score_predicted = bo.optimize_acq(aa.random,x,y)
+        gt_val = target_func(suggestion_val)
+        suggestion_val_list.append(suggestion_val)
+        suggestion_gt_list.append(gt_val)
+        print('predict %f gt %f'%(suggestion_score_predicted, gt_val))
 
     plt.scatter([x_val[0] for x_val in x],y)
     plt.scatter(suggestion_val_list, suggestion_gt_list, c='r')

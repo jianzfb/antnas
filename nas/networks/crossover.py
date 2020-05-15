@@ -15,8 +15,6 @@ import networkx as nx
 
 
 class CrossOver(object):
-    expore_gene_pos = []
-
     def __init__(self, crossover_type, multi_points, adaptive=True, **kwargs):
         self.crossover_type = crossover_type
         self.multi_points = multi_points
@@ -28,6 +26,8 @@ class CrossOver(object):
         self.k1 = kwargs.get('k1', 1.0)
         self.size = kwargs.get('size', 0)
         self.hierarchical = kwargs.get('hierarchical', [])
+        self.network = kwargs.get('network', None)
+        
 
     @property
     def generation(self):
@@ -85,64 +85,92 @@ class CrossOver(object):
         crossover_result = []
         crossover_num = self.size if self.size > 0 else N//2
         for crossover_count in range(crossover_num):
-            # selecting first chromosome
-            first_chromosome_index = np.random.choice(list(range(N)), p=chromosome_probability)
+            is_ok = False
+            try_times = 5
+            try_count = 0
+            while not is_ok and try_count < try_times:
+                # increment 1
+                try_count += 1
+                
+                # selecting first chromosome
+                first_chromosome_index = np.random.choice(list(range(N)), p=chromosome_probability)
+        
+                # selecting second chromosome
+                PCII = H[first_chromosome_index, :]/np.sum(H[first_chromosome_index, :])
+                second_chromosome_index = np.random.choice(list(range(N)), p=PCII)
+                
+                # crossover pos number
+                multi_points = self.multi_points
+                
+                # hierarchical selection
+                # stage/block/cell
+                stage_i = -1
+                block_num = 0
+                if len(self.hierarchical) > 0:
+                    stage_num = len(self.hierarchical)
+                    stage_i = np.random.randint(0, stage_num)
+                    block_num = len(self.hierarchical[stage_i])
     
-            # selecting second chromosome
-            PCII = H[first_chromosome_index, :]/np.sum(H[first_chromosome_index, :])
-            second_chromosome_index = np.random.choice(list(range(N)), p=PCII)
-            
-            # crossover pos number
-            multi_points = self.multi_points
-            
-            # hierarchical selection
-            # stage/block/cell
-            stage_i = -1
-            block_num = 0
-            if len(self.hierarchical) > 0:
-                stage_num = len(self.hierarchical)
-                stage_i = np.random.randint(0, stage_num)
-                block_num = len(self.hierarchical[stage_i])
-
-            explore_position = []
-            if stage_i >= 0 and block_num > 0:
-                if np.random.random() < 0.3:
-                    # TODO 自适应阈值修改
-                    # whole block changing
-                    block_i = np.random.randint(0, block_num)
-                    explore_position = self.hierarchical[stage_i][block_i]
-                    multi_points = len(explore_position)
-                else:
-                    # random cell crossover
-                    explore_position = kwargs['explore_position']
-
-            # selecting diff gene position
-            first_gene = AA[first_chromosome_index, :]
-            second_gene = AA[second_chromosome_index, :]
-            
-            diff_gene = first_gene-second_gene
-            diff_pos = np.where(diff_gene != 0)[0]
-            diff_pos = list(set(diff_pos.tolist()) & set(explore_position))
-            
-            if multi_points > len(diff_pos):
-                # try half
-                multi_points = multi_points//2
-            
-            if multi_points > len(diff_pos):
-                # try half
-                multi_points = multi_points//2
-            
-            if multi_points > len(diff_pos) or multi_points == 0 or len(diff_pos) == 0:
-                print('dont have enough diff gene position')
-                continue
-            
-            crossover_pos = np.random.choice(diff_pos, size=multi_points, replace=False)
-            print("crossover %d count first %d second %d selection %s"%(crossover_count,
-                                                                        first_chromosome_index,
-                                                                        second_chromosome_index,
-                                                                        str(crossover_pos.tolist())))
-            
-            crossover_result.append((first_chromosome_index, second_chromosome_index, crossover_pos.tolist()))
+                explore_position = []
+                if stage_i >= 0 and block_num > 0:
+                    if np.random.random() < 0.3:
+                        # TODO 自适应阈值修改
+                        # whole block changing
+                        block_i = np.random.randint(0, block_num)
+                        explore_position = self.hierarchical[stage_i][block_i]
+                        multi_points = len(explore_position)
+                    else:
+                        # random cell crossover
+                        explore_position = kwargs['explore_position']
+    
+                # selecting diff gene position
+                first_gene = AA[first_chromosome_index, :]
+                second_gene = AA[second_chromosome_index, :]
+                
+                diff_gene = first_gene-second_gene
+                diff_pos = np.where(diff_gene != 0)[0]
+                diff_pos = list(set(diff_pos.tolist()) & set(explore_position))
+                
+                if multi_points > len(diff_pos):
+                    # try half
+                    multi_points = multi_points//2
+                
+                if multi_points > len(diff_pos):
+                    # try half
+                    multi_points = multi_points//2
+                
+                if multi_points > len(diff_pos) or multi_points == 0 or len(diff_pos) == 0:
+                    print('dont have enough diff gene position')
+                    continue
+                
+                crossover_pos = np.random.choice(diff_pos, size=multi_points, replace=False)
+                print("crossover %d count first %d second %d selection %s"%(crossover_count,
+                                                                            first_chromosome_index,
+                                                                            second_chromosome_index,
+                                                                            str(crossover_pos.tolist())))
+                
+                # 检查变异后基因是否满足约束条件
+                crossover_feature = copy.deepcopy(first_gene)
+                crossover_feature[crossover_pos] = second_gene[crossover_pos]
+                is_1_satisfied = True
+                if not self.network.is_satisfied_constraint(crossover_feature.tolist()):
+                    is_1_satisfied = False
+                
+                crossover_feature = copy.deepcopy(second_gene)
+                crossover_feature[crossover_pos] = first_gene[crossover_pos]
+                is_2_satisfied = True
+                if not self.network.is_satisfied_constraint(crossover_feature.tolist()):
+                    is_2_satisfied = False
+                
+                if not (is_1_satisfied | is_2_satisfied):
+                    continue
+                
+                is_ok = True
+                crossover_result.append((first_chromosome_index,
+                                         second_chromosome_index,
+                                         is_1_satisfied,
+                                         is_2_satisfied,
+                                         crossover_pos.tolist()))
     
         return crossover_result
 
@@ -178,14 +206,16 @@ class EvolutionCrossover(CrossOver):
                k0,
                k1,
                method='simple',
-               size=0):
+               size=0,
+               network=None):
     super(EvolutionCrossover, self).__init__(method,
                                              multi_points,
                                              adaptive=True,
                                              max_generation=max_generation,
                                              k0=k0,
                                              k1=k1,
-                                             size=size)
+                                             size=size,
+                                             network=network)
 
   def crossover(self, *args, **kwargs):
     population = kwargs['population']
@@ -209,33 +239,26 @@ class EvolutionCrossover(CrossOver):
     print('reorganize crossover population')
     crossover_population = Population()
     for crossover_suggestion in crossover_individuals:
-        first_individual_index, second_individual_index, crossover_region = crossover_suggestion
-        if second_individual_index is not None:
+        first_individual_index, second_individual_index, is_1_ok, is_2_ok, crossover_region = crossover_suggestion
+        
+        if is_1_ok:
             crossover_1_individual = problem.generateIndividual()
             crossover_1_individual.features = copy.deepcopy(population.population[first_individual_index].features)
             crossover_1_individual.objectives = copy.deepcopy(population.population[first_individual_index].objectives)
 
+            for loc in crossover_region:
+                crossover_1_individual.features[loc] = population.population[second_individual_index].features[loc]
+
+            crossover_population.population.append(crossover_1_individual)
+        
+        if is_2_ok:
             crossover_2_individual = problem.generateIndividual()
             crossover_2_individual.features = copy.deepcopy(population.population[second_individual_index].features)
             crossover_2_individual.objectives = copy.deepcopy(population.population[second_individual_index].objectives)
 
             for loc in crossover_region:
-                crossover_1_individual.features[loc] = population.population[second_individual_index].features[loc]
                 crossover_2_individual.features[loc] = population.population[first_individual_index].features[loc]
 
-            crossover_population.population.append(crossover_1_individual)
             crossover_population.population.append(crossover_2_individual)
 
-    if len(crossover_population) < len(population):
-        select_index_list = \
-            np.random.choice(list(range(len(population))),
-                             size=len(population) - len(crossover_population),
-                             replace=False)
-        for ii in select_index_list.tolist():
-            new_individual = problem.generateIndividual()
-            new_individual.features = copy.deepcopy(population.population[ii].features)
-            new_individual.objectives = copy.deepcopy(population.population[ii].objectives)
-            crossover_population.population.append(new_individual)
-
-    # may be larger than > original population size
     return crossover_population

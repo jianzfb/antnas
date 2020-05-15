@@ -8,6 +8,9 @@ from __future__ import print_function
 
 from nas.networks.Anchors import *
 from nas.searchspace.StageBlockCellArc import *
+from nas.searchspace.PKCifar10SN import *
+from nas.searchspace.PKCifar10SN import Cifar10CellBlock
+from nas.searchspace.PKCifar10SN import Cifar10ReductionCellBlock
 import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,15 +20,11 @@ class OutLayer(NetworkBlock):
     n_layers = 1
     n_comp_steps = 1
 
-    def __init__(self, in_chan, out_shape, bias=True):
+    def __init__(self, out_shape, in_chan=160, bias=True):
         super(OutLayer, self).__init__()
+        self.conv = nn.Conv2d(in_chan, out_shape[0], kernel_size=1, stride=1, padding=0, bias=bias)
         self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
 
-        self.conv_1 = nn.Conv2d(in_chan, 960, kernel_size=1, stride=1, padding=0, bias=bias)
-        self.bn = nn.BatchNorm2d(960)
-
-        self.conv_2 = nn.Conv2d(960, 1280, kernel_size=1, stride=1, padding=0, bias=bias)
-        self.conv_3 = nn.Conv2d(1280, out_shape[0], kernel_size=1, stride=1, padding=0, bias=bias)
         self.out_shape = out_shape
         self.params = {
             'module_list': ['OutLayer'],
@@ -35,39 +34,39 @@ class OutLayer(NetworkBlock):
         }
 
     def forward(self, x, sampling=None):
-        x = self.conv_1(x)
-        x = self.bn(x)
-        x = F.relu6(x)
-
+        x = self.conv(x)
         x = self.global_pool(x)
-        x = self.conv_2(x)
-        x = F.relu6(x)
-
-        x = self.conv_3(x)
         return x.view(-1, *self.out_shape)
 
     def get_flop_cost(self, x):
         return [0] + [0] * (self.state_num - 1)
 
 
-anchornetwork_manager = AnchorNetwork()
+anchornetwork_manager = Anchors()
 
 graph = nx.DiGraph()
-sbca = StageBlockCellArc(CellBlock, ReductionCellBlock, AddBlock, ConvBn, graph)
-
+sbca = StageBlockCellArc(Cifar10CellBlock,
+                              Cifar10ReductionCellBlock,
+                              AddBlock,
+                              ConvBn,
+                              graph,
+                              is_cell_dense=True,
+                              is_block_dense=True)
 # head (固定计算节点，对应激活参数不可学习)
-head = ConvBn(3, 32, k_size=3, stride=1, relu=True)
+head = ConvBn(3, 64, k_size=3, stride=1, relu=True)
 # tail (固定计算节点，结构不可学习)
-tail = OutLayer(256, (10,), True)
+tail = OutLayer((10,), 256, True)
 
 anchornetwork_manager.generate(arch_generator=sbca,
-                               anchor_num=5,
+                               input_shape=[1,3,32,32],
+                               constraint=[0.8],
+                               arc_loss='param',
                                folder="./supernetwork/",
                                head=head,
                                tail=tail,
-                               blocks=[2, 2, 1],
-                               cells=[[4, 4], [4, 4], [3]],
-                               channels=[[32, 32], [64, 128], [256]])
+                               blocks=[1, 1, 1],
+                               cells=[[6], [6], [4]],
+                               channels=[[64], [128], [256]])
 
 
 
