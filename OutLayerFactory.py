@@ -34,6 +34,8 @@ class ImageNetOutLayer(NetworkBlock):
     def forward(self, x, sampling=None):
         x = self.conv(x)
         x = self.bn(x)
+        x = F.relu(x)
+        
         x = self.global_pool(x)
         x = x.view(x.size(0), -1)
         x = self.classifier(x)

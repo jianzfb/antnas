@@ -44,7 +44,6 @@ class StageBlockCellArc(Arc):
         self.reduction_cell_cls = reduction_cell_cls
         self.transformer_cls = transformer_cls
         self.aggregation_cls = aggregation_cls
-        self.pos_offset = 0
         self.is_cell_dense = is_cell_dense
         self.is_block_dense = is_block_dense
         self.is_stage_dense = is_stage_dense
@@ -127,7 +126,7 @@ class StageBlockCellArc(Arc):
         return trans_name
 
     def add_block(self, cells, channles, pre_block_channels, reduction=False):
-        pos_offset = self.pos_offset
+        pos_offset = self.offset
         for cell_i in range(cells):
             # Add
             self.add_aggregation((0, pos_offset+cell_i*2), self.aggregation_cls(), SuperNetwork._AGGREGATION_NODE_FORMAT)
@@ -167,11 +166,11 @@ class StageBlockCellArc(Arc):
                                                  SuperNetwork._AGGREGATION_NODE_FORMAT,
                                                  SuperNetwork._TRANSFORMATION_FORMAT)
 
-        self.pos_offset += cells * 2
-        return self.pos_offset
+        self.offset += cells * 2
+        return self.offset
 
     def add_stage(self, block_num, cells_per_block, channles_per_block, pre_stage_channels, is_first_stage):
-        stage_offset = self.pos_offset
+        stage_offset = self.offset
         offset_per_block = []
         for block_i in range(block_num):
             self.hierarchical[-1].append([])
@@ -208,17 +207,17 @@ class StageBlockCellArc(Arc):
                                                  SuperNetwork._AGGREGATION_NODE_FORMAT,
                                                  SuperNetwork._TRANSFORMATION_FORMAT)
 
-        self.pos_offset = stage_offset
-        return self.pos_offset
+        self.offset = stage_offset
+        return self.offset
 
     def generate(self, head, tail, blocks, cells, channels):
         in_name = self.add_aggregation((0, 0), module=head, node_format=SuperNetwork._INPUT_NODE_FORMAT)
-        self.pos_offset += 1
+        self.offset += 1
         
         offset_per_stage = []
         for stage_i in range(len(blocks)):
             self.hierarchical.append([])
-            offset_per_stage.append(self.pos_offset)
+            offset_per_stage.append(self.offset)
             self.add_stage(blocks[stage_i],
                            cells[stage_i],
                            channels[stage_i],

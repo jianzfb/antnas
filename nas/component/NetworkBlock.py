@@ -254,6 +254,9 @@ class Skip(NetworkBlock):
                                               (self.out_channels-self.in_channels),
                                               x.size(2),
                                               x.size(3), device=x.device)], dim=1)
+        elif self.out_channels < self.in_channels:
+            x_res = x[:, 0:self.out_channels, :, :]
+        
         if self.reduction:
             x_res = self.pool2d(x_res)
 
@@ -814,7 +817,10 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
             return torch.zeros(x.shape, device=x.device)
 
     def get_param_num(self, x):
-        conv1_param = self.conv1.in_channels*self.conv1.out_channels*self.conv1.kernel_size[0]*self.conv1.kernel_size[1]
+        conv1_param = 0
+        if self.expansion != 1:
+            conv1_param = self.conv1.in_channels*self.conv1.out_channels*self.conv1.kernel_size[0]*self.conv1.kernel_size[1]
+        
         conv2_param = self.dwconv2.kernel_size[0]*self.dwconv2.kernel_size[1]*self.dwconv2.in_channels
         conv_se_1_param = 0
         conv_se_2_param = 0
@@ -921,6 +927,126 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
                                                      "%dx%dx%dx%d"%(int(input_h), self.in_chan, int(after_h), self.out_chan))
         latency_cost = [0] + [irb_latency] + [0] * (NetworkBlock.state_num - 2)
         return latency_cost
+
+
+class ASPPBlock(NetworkBlock):
+    n_layers = 0
+    n_comp_steps = 0
+    
+    def __init__(self, in_chan, depth, atrous_rates):
+        super(ASPPBlock, self).__init__()
+        self.atrous_rates = atrous_rates
+        self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
+        # 1.step
+        self.conv_1_step = nn.Conv2d(in_chan, depth, kernel_size=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(depth)
+        
+        # 2.step
+        self.conv_2_step = nn.Conv2d(in_chan, depth, kernel_size=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(depth)
+        
+        # 3.step
+        self.atrous_conv_list = nn.ModuleList([])
+        for i, rate in enumerate(self.atrous_rates):
+            self.atrous_conv_list.append(SepConvBN(in_chan, depth, relu=True, k_size=3, dilation=rate))
+        
+        # 5.step
+        self.conv_5_step = nn.Conv2d((len(self.atrous_rates) + 2) * depth, depth, kernel_size=1, bias=False)
+        self.bn5 = nn.BatchNorm2d(depth)
+        
+        self.params = {
+            'module_list': ['ASPPBlock'],
+            'name_list': ['ASPPBlock'],
+            'ASPPBlock': {'in_chan': in_chan,
+                          'depth': depth,
+                          'atrous_rates': atrous_rates},
+            
+            'in_chan': in_chan,
+            'out_chan': depth
+        }
+        self.depth = depth
+        self.structure_fixed = False
+    
+    def forward(self, x, sampling=None):
+        h = x.shape[2]
+        w = x.shape[3]
+        branch_logits = []
+        
+        # 1.step global pooling
+        feature_1 = self.global_pool(x)
+        feature_1 = self.conv_1_step(feature_1)
+        feature_1 = self.bn1(feature_1)
+        feature_1 = F.relu(feature_1)
+        feature_1 = F.upsample(feature_1, size=[h, w])
+        branch_logits.append(feature_1)
+        
+        # 2.step 1x1 convolution
+        feature_2 = self.conv_2_step(x)
+        feature_2 = self.bn2(feature_2)
+        feature_2 = F.relu(feature_2)
+        branch_logits.append(feature_2)
+        
+        # 3.step 3x3 convolutions with different atrous rates
+        for i in range(len(self.atrous_conv_list)):
+            f = self.atrous_conv_list[i](x)
+            branch_logits.append(f)
+        
+        # 4.step concat
+        concat_logits = torch.cat(branch_logits, 1)
+        concat_logits = self.conv_5_step(concat_logits)
+        concat_logits = self.bn5(concat_logits)
+        concat_logits = F.relu(concat_logits)
+        
+        if sampling is None:
+            return concat_logits
+        
+        is_activate = (int)(sampling.item())
+        if is_activate == 1:
+            return concat_logits
+        else:
+            return torch.zeros((x.size(0), self.depth, x.size(2), x.size(3)), device=x.device)
+    
+    def get_param_num(self, x):
+        conv1_params = self.conv_1_step.kernel_size[0] * self.conv_1_step.kernel_size[
+            1] * self.conv_1_step.in_channels * self.conv_1_step.out_channels
+        conv2_params = self.conv_2_step.kernel_size[0] * self.conv_2_step.kernel_size[
+            1] * self.conv_2_step.in_channels * self.conv_2_step.out_channels
+        atrous_conv_params = 0
+        for index in range(len(self.atrous_conv_list)):
+            atrous_conv_params += self.atrous_conv_list[index].get_param_num(x)[1]
+        conv5_params = self.conv_5_step.kernel_size[0] * self.conv_5_step.kernel_size[
+            1] * self.conv_5_step.in_channels * self.conv_5_step.out_channels
+        
+        params = conv1_params + conv2_params + atrous_conv_params + conv5_params
+        return [0] + [params] + [0] * (NetworkBlock.state_num - 2)
+    
+    def get_flop_cost(self, x):
+        flops = self.get_conv2d_flops(self.conv_1_step, torch.Size((1, x.shape[1], 1, 1)),
+                                      torch.Size((1, self.depth, 1, 1)))
+        flops += self.get_bn_flops(self.bn1, torch.Size((1, self.depth, 1, 1)), torch.Size((1, self.depth, 1, 1)))
+        flops += self.get_relu_flops(None, torch.Size((1, self.depth, 1, 1)), torch.Size((1, self.depth, 1, 1)))
+        
+        flops += self.get_conv2d_flops(self.conv_2_step,
+                                       torch.Size((1, x.shape[1], x.shape[2], x.shape[3])),
+                                       torch.Size((1, self.depth, x.shape[2], x.shape[3])))
+        flops += self.get_bn_flops(self.bn2, torch.Size((1, self.depth, x.shape[2], x.shape[3])),
+                                   torch.Size((1, self.depth, x.shape[2], x.shape[3])))
+        flops += self.get_relu_flops(None, torch.Size((1, self.depth, x.shape[2], x.shape[3])),
+                                     torch.Size((1, self.depth, x.shape[2], x.shape[3])))
+        
+        for i in range(len(self.atrous_conv_list)):
+            flops += self.atrous_conv_list[i].get_flop_cost(x)[1]
+        
+        flops += self.get_conv2d_flops(self.conv_5_step,
+                                       torch.Size(
+                                           (1, (len(self.atrous_rates) + 2) * self.depth, x.shape[2], x.shape[3])),
+                                       torch.Size((1, self.depth, x.shape[2], x.shape[3])))
+        flops += self.get_bn_flops(self.bn5, torch.Size((1, self.depth, x.shape[2], x.shape[3])),
+                                   torch.Size((1, self.depth, x.shape[2], x.shape[3])))
+        flops += self.get_relu_flops(None, torch.Size((1, self.depth, x.shape[2], x.shape[3])),
+                                     torch.Size((1, self.depth, x.shape[2], x.shape[3])))
+        
+        return [0] + [flops] + [0] * (NetworkBlock.state_num - 2)
 
 
 if __name__ == '__main__':

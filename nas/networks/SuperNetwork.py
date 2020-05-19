@@ -202,6 +202,8 @@ class SuperNetwork(nn.Module):
             if len(input) == 0:
                 raise RuntimeError('Node {} has no inputs'.format(node))
             print(node)
+            if node=='FIXED_0_30':
+                print('ss')
 
             out = self.blocks[cur_node['module']](input)
             if node == self.out_node:
@@ -230,7 +232,8 @@ class SuperNetwork(nn.Module):
         if self.cost_evaluation == "param" and (self.arch_objective_param_min < 0 or self.arch_objective_param_max < 0):
             auto_analyze_param = True
             
-        try_times = 1000
+        # TODO 临时修改
+        try_times = 10
         while try_times > 0:
             feature = [None for _ in range(len(self.traversal_order))]
             

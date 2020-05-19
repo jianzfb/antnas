@@ -37,6 +37,7 @@ class Arc:
 
         self.path_recorder = None
         self.traversal_order = None
+        self._offset = 0
 
     @property
     def in_node(self):
@@ -63,7 +64,15 @@ class Arc:
         if (isinstance(input, tuple) or isinstance(input, list)) and len(input) == 1:
             input = input[0]
         return input
-
+    
+    @property
+    def offset(self):
+        return self._offset
+    
+    @offset.setter
+    def offset(self, val):
+        self._offset = val
+    
     def arc_loss(self, shape, loss='latency', feature=None):
         x = torch.ones(shape)
         self.traversal_order = list(nx.topological_sort(self.graph))
