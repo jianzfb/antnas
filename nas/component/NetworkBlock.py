@@ -269,11 +269,6 @@ class Skip(NetworkBlock):
         else:
             return torch.zeros(x_res.shape, device=x.device)
 
-        # if sampling is None:
-        #     return x_res
-        #
-        # return x_res * (sampling == 1).float()
-
     def get_flop_cost(self, x):
         return [0] * NetworkBlock.state_num
 
@@ -326,11 +321,6 @@ class ConvBn(NetworkBlock):
             return x
         else:
             return torch.zeros(x.shape, device=x.device)
-
-        # if sampling is None:
-        #     return x
-        #
-        # return x * (sampling == 1).float()
 
     def get_flop_cost(self, x):
         conv_in_data_size = torch.Size([1, *x.shape[1:]])
@@ -412,11 +402,6 @@ class SepConvBN(NetworkBlock):
         else:
             return torch.zeros(x.shape, device=x.device)
 
-        # if sampling is None:
-        #     return x
-        #
-        # return x * (sampling == 1).float()
-
     def get_param_num(self, x):
         part1_params = self.depthwise_conv.kernel_size[0]*self.depthwise_conv.kernel_size[1]*self.depthwise_conv.in_channels
         part2_params = self.pointwise_conv.in_channels * self.pointwise_conv.out_channels
@@ -496,11 +481,6 @@ class ResizedBlock(NetworkBlock):
             return x
         else:
             return torch.zeros(x.shape, device=x.device)
-
-        # if sampling is None:
-        #     return x
-        #
-        # return x * (sampling == 1).float()
 
     def get_param_num(self, x):
         if self.conv_layer is not None:
@@ -598,7 +578,7 @@ class MergeBlock(NetworkBlock):
                                  momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
                                  track_running_stats=NetworkBlock.bn_track_running_stats)
         self.relu = True
-        self.structure_fixed = False
+        self.structure_fixed = True
 
     def forward(self, x, sampling=None):
         if not isinstance(x, list):
@@ -625,20 +605,8 @@ class MergeBlock(NetworkBlock):
         tt = self.conv(tt)
         tt = self.bn(tt)
         tt = F.relu(tt)
-
-        if sampling is None:
-            return tt
-
-        is_activate = (int)(sampling.item())
-        if is_activate == 1:
-            return tt
-        else:
-            return torch.zeros(tt.shape, device=tt.device)
-
-        # if sampling is None:
-        #     return tt
-        #
-        # return tt * (sampling == 1).float()
+        
+        return tt
 
     def get_param_num(self, x):
         conv_param = self.conv.in_channels*self.conv.out_channels*self.conv.kernel_size[0]*self.conv.kernel_size[1]
@@ -853,9 +821,13 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
 
         step_3_in_size = torch.Size([1, step_2_out_size[1], step_2_out_size[2],step_2_out_size[3]])
         step_3_out_size = torch.Size([1, self.out_chan, step_2_out_size[2], step_2_out_size[3]])
-
-        flops_1 = self.get_conv2d_flops(self.conv1, step_1_in_size, step_2_in_size)
-        flops_2 = self.get_bn_flops(self.bn1, step_2_in_size, step_2_in_size)
+        
+        flops_1 = 0.0
+        flops_2 = 0.0
+        if self.expansion != 1:
+            flops_1 = self.get_conv2d_flops(self.conv1, step_1_in_size, step_2_in_size)
+            flops_2 = self.get_bn_flops(self.bn1, step_2_in_size, step_2_in_size)
+        
         flops_3 = 0.0
         if self.hs:
             flops_3 = self.get_hs_flops(None, step_2_in_size, step_2_in_size)
@@ -904,7 +876,7 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
                       flops_8 + \
                       flops_9 + flops_se
 
-        flop_cost = [0] + [total_flops] * (self.state_num - 1)
+        flop_cost = [0] + [total_flops] * (NetworkBlock.state_num - 2)
         return flop_cost
 
     def get_latency(self, x):
@@ -1049,18 +1021,119 @@ class ASPPBlock(NetworkBlock):
         return [0] + [flops] + [0] * (NetworkBlock.state_num - 2)
 
 
-if __name__ == '__main__':
-    # 1.step test convbn flops
-    # a = ConvBn(128, 256, True, 3)
-    # t = torch.ones((1,128,10,10))
-    # b = a.get_flop_cost(t)
-    # print(b)
+class LargekernelConv(NetworkBlock):
+    n_layers = 1
+    n_comp_steps = 1
 
-    # # 2.step test sepconvbn
-    # a = SepConvBN(128,256,True,3)
-    # t = torch.ones((1,128,10,10))
-    # b = a.get_flop_cost(t)
-    # print(b)
+    def __init__(self, in_chan, out_chan, k_size=3, bias=True):
+        super(LargekernelConv, self).__init__()
 
-    # 3.step test
-    pass
+        self.params = {
+            'module_list': ['LargekernelConv'],
+            'name_list': ['LargekernelConv'],
+            'LargekernelConv': {'in_chan': in_chan,
+                                'out_chan': out_chan,
+                                'k_size': k_size,
+                                'bias': bias},
+            'in_chan': in_chan,
+            'out_chan': out_chan
+        }
+
+        self.left_conv1 = nn.Conv2d(in_chan,
+                                    out_chan,
+                                    kernel_size=[k_size, 1],
+                                    stride=1,
+                                    padding=[k_size//2, 0],
+                                    bias=True)
+        self.left_conv2 = nn.Conv2d(out_chan,
+                                    out_chan,
+                                    kernel_size=[1, k_size],
+                                    stride=1,
+                                    padding=[0, k_size//2],
+                                    bias=True)
+
+        self.right_conv1 = nn.Conv2d(in_chan,
+                                     out_chan,
+                                     kernel_size=[1, k_size],
+                                     stride=1,
+                                     padding=[0, k_size//2],
+                                     bias=True)
+        self.right_conv2 = nn.Conv2d(out_chan,
+                                     out_chan,
+                                     kernel_size=[k_size, 1],
+                                     stride=1,
+                                     padding=[k_size//2, 0],
+                                     bias=True)
+
+        self.conv1 = nn.Conv2d(out_chan,
+                               out_chan,
+                               kernel_size=3,
+                               padding=1,
+                               bias=True)
+        self.conv2 = nn.Conv2d(out_chan,
+                               out_chan,
+                               kernel_size=3,
+                               padding=1,
+                               bias=True)
+
+        self.in_chan = in_chan
+        self.out_chan = out_chan
+        self.structure_fixed = False
+
+    def forward(self, x, sampling=None):
+        left_x1 = self.left_conv1(x)
+        left_x2 = self.left_conv2(left_x1)
+        right_x1 = self.right_conv1(x)
+        right_x2 = self.right_conv2(right_x1)
+        x = left_x2 + right_x2
+
+        x_res = self.conv1(x)
+        x_res = F.relu(x_res)
+        x_res = self.conv2(x_res)
+
+        x = x + x_res
+
+        if sampling is None:
+            return x
+
+        is_activate = (int)(sampling.item())
+        if is_activate == 1:
+            return x
+        else:
+            return torch.zeros(x.shape, device=x.device)
+
+    def get_param_num(self, x):
+        left_conv1_params = self.left_conv1.kernel_size[0]*self.left_conv1.kernel_size[1]*self.left_conv1.in_channels*self.left_conv1.out_channels
+        left_conv2_params = self.left_conv2.kernel_size[0]*self.left_conv2.kernel_size[1]*self.left_conv2.in_channels*self.left_conv2.out_channels
+        right_conv1_params = self.right_conv1.kernel_size[0]*self.right_conv1.kernel_size[1]*self.right_conv1.in_channels*self.right_conv1.out_channels
+        right_conv2_params = self.right_conv2.kernel_size[0]*self.right_conv2.kernel_size[1]*self.right_conv2.in_channels*self.right_conv2.out_channels
+
+        conv1_params = self.conv1.kernel_size[0]*self.conv1.kernel_size[1]*self.conv1.in_channels*self.conv1.out_channels
+        conv2_params = self.conv2.kernel_size[0]*self.conv2.kernel_size[1]*self.conv2.in_channels*self.conv2.out_channels
+
+        params = left_conv1_params+\
+                 left_conv2_params+\
+                 right_conv1_params+\
+                 right_conv2_params+\
+                 conv1_params+\
+                 conv2_params
+
+        return [0] + [params] + [0]*(NetworkBlock.state_num - 2)
+
+    def get_flop_cost(self, x):
+        conv_in_data_size = torch.Size([1, *x.shape[1:]])
+        conv_out_data_size = torch.Size([1, self.out_chan, x.shape[-1], x.shape[-1]])
+
+        flops_1 = self.get_conv2d_flops(self.left_conv1, conv_in_data_size, conv_out_data_size)
+        flops_2 = self.get_conv2d_flops(self.left_conv2, conv_out_data_size, conv_out_data_size)
+        flops_3 = self.get_conv2d_flops(self.right_conv1, conv_in_data_size, conv_out_data_size)
+        flops_4 = self.get_conv2d_flops(self.right_conv2, conv_out_data_size, conv_out_data_size)
+
+        flops_5 = 0
+        flops_5 += self.get_conv2d_flops(self.conv1, conv_out_data_size, conv_out_data_size)
+        flops_5 += conv_out_data_size.numel() / conv_out_data_size[0]
+        flops_5 += self.get_conv2d_flops(self.conv2, conv_out_data_size, conv_out_data_size)
+        
+        flop_cost = flops_1+flops_2+flops_3+flops_4+flops_5
+        return [0] + [flop_cost] + [0]*(self.state_num - 2)
+
