@@ -167,6 +167,10 @@ class SuperNetwork(nn.Module):
         # TODO Allow several input and/or output nodes
         if self.traversal_order[0] != in_node or self.traversal_order[-1] != out_node:
             raise ValueError('Seems like the given graph is broken')
+        
+        # save graph
+        architecture_path = os.path.join("./supernetwork.architecture")
+        nx.write_gpickle(self.graph, architecture_path)
 
         self.path_recorder = PathRecorder(self.net, self.out_node)
 
@@ -201,9 +205,6 @@ class SuperNetwork(nn.Module):
 
             if len(input) == 0:
                 raise RuntimeError('Node {} has no inputs'.format(node))
-            print(node)
-            if node=='FIXED_0_30':
-                print('ss')
 
             out = self.blocks[cur_node['module']](input)
             if node == self.out_node:

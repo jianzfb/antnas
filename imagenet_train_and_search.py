@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*-
 # @Time    : 2019-08-19 18:22
-# @File    : cifar10_train_and_search.py
+# @File    : imagenet_train_and_search.py
 # @Author  : jian<jian@mltalker.com>
 from __future__ import division
 from __future__ import unicode_literals
@@ -13,6 +13,7 @@ from nas.manager import *
 from nas.utils.misc import *
 from nas.networks.Anchors import *
 from nas.utils.drawers.NASDrawer import *
+from OutLayerFactory import *
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ def argument_parser():
     # Experience
     parser.add_argument('-exp-name', action='store', default='', type=str, help='Experience Name')
     # Model
-    parser.add_argument('-arch', action='store', default='PKStageBlockCellSN', type=str)
+    parser.add_argument('-arch', action='store', default='PKImageNetSN', type=str)
     parser.add_argument('-deter_eval', action='store', default=False, type=bool,
                         help='Take blocks with probas >0.5 instead of sampling during evaluation')
 
@@ -33,41 +34,47 @@ def argument_parser():
                         help='path for the execution')
 
     parser.add_argument('-dset', default='ImageNet', type=str, help='Dataset')
-    parser.add_argument('-bs', action='store', default=2, type=int, help='Size of each batch')
-    parser.add_argument('-epochs', action='store', default=0, type=int,
+    parser.add_argument('-bs', action='store', default=256, type=int, help='Size of each batch')
+    parser.add_argument('-epochs', action='store', default=150, type=int,
                         help='Number of training epochs')
-    parser.add_argument('-evo_epochs', action='store', default=80, type=int,
+    parser.add_argument('-evo_epochs', action='store', default=50, type=int,
                         help='Number of architecture searching epochs')
-    parser.add_argument('-warmup_epochs', action='store', default=0, type=int,
+    parser.add_argument('-warmup', action='store', default=0, type=int,
                         help='warmup epochs before searching architecture')
     parser.add_argument('-iterator_search', action='store', default=False, type=bool,
                         help='is iterator search')
-    parser.add_argument('-population_size', action='store', default=2, type=int,
+    parser.add_argument('-population_size', action='store', default=50, type=int,
                         help='population size for NSGAII')
 
     parser.add_argument('-optim', action='store', default='SGD', type=str,
                         help='Optimization method')
     parser.add_argument('-nesterov', action='store', default=False, type=bool,
                         help='Use Nesterov for SGD momentum')
-    parser.add_argument('-lr', action='store', default=0.1, type=float, help='Learning rate')
+    parser.add_argument('-lr', action='store', default=0.05, type=float, help='Learning rate')
     parser.add_argument('-path_lr', action='store', default=1e-3, type=float, help='path learning rate')
+    
+    parser.add_argument('--lr_decay', type=str, default='cos',
+                        help='mode for learning rate decay')
+    parser.add_argument('--schedule', type=int, nargs='+', default=[150, 225],
+                        help='decrease learning rate at these epochs.')
+
+    parser.add_argument('--gamma', type=float, default=0.1,
+                        help='LR is multiplied by gamma on schedule.')
+    parser.add_argument('--epochs_drop', type=int, default=10, help='for step mode')
+
     parser.add_argument('-momentum', action='store', default=0.9, type=float,
                         help='momentum used by the optimizer')
     parser.add_argument('-wd', dest='weight_decay', action='store', default=1e-4, type=float,
                         help='weight decay used during optimisation')
 
     parser.add_argument('-latest_num', action='store', default=1, type=int,help='save the latest number model state')
-    parser.add_argument('-lr_pol_tresh', action='store', default=[150, 225], type=str,
-                        help='learning rate decay rate')
-    parser.add_argument('-lr_pol_val', action='store', nargs='*', default=[0.1, 0.01, 0.001], type=str,
-                        help='learning rate decay period')
-
-    parser.add_argument('-cuda', action='store', default='0', type=str,
+    
+    parser.add_argument('-cuda', action='store', default='0,1,2,3,4,5,6,7', type=str,
                         help='Enables cuda and select device')
     parser.add_argument('-latency', action='store', default='./latency.gpu.855.224_16.32.64.96.112.160_lookuptable.json',type=str,
                         help='latency lookup table')
 
-    parser.add_argument('-draw_env', default='CIFAR10PK', type=str, help='Visdom drawing environment')
+    parser.add_argument('-draw_env', default='ImageNetPK-1', type=str, help='Visdom drawing environment')
 
     parser.add_argument('-static_proba', action='store', default=-1, type=restricted_float(0, 1),
                         help='sample a static binary weight with given proba for each stochastic Node.')
@@ -111,68 +118,6 @@ def argument_parser():
     return parser.parse_known_args()[0]
 
 
-# class OutLayer(NetworkBlock):
-#     n_layers = 1
-#     n_comp_steps = 1
-#
-#     def __init__(self, in_chan, out_shape, bias=True):
-#         super(OutLayer, self).__init__()
-#         self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
-#
-#         self.conv_1 = nn.Conv2d(in_chan, 960, kernel_size=1, stride=1, padding=0, bias=bias)
-#         self.bn = nn.BatchNorm2d(960)
-#
-#         self.conv_2 = nn.Conv2d(960, 1280, kernel_size=1, stride=1, padding=0, bias=bias)
-#         self.conv_3 = nn.Conv2d(1280, out_shape[0], kernel_size=1, stride=1, padding=0, bias=bias)
-#         self.out_shape = out_shape
-#         self.params = {
-#             'module_list': ['OutLayer'],
-#             'name_list': ['OutLayer'],
-#             'OutLayer': {'out_shape': out_shape, 'in_chan': in_chan},
-#             'out': 'outname'
-#         }
-#
-#     def forward(self, x, sampling=None):
-#         x = self.conv_1(x)
-#         x = self.bn(x)
-#         x = F.relu6(x)
-#
-#         x = self.global_pool(x)
-#         x = self.conv_2(x)
-#         x = F.relu6(x)
-#
-#         x = self.conv_3(x)
-#         return x.view(-1, *self.out_shape)
-#
-#     def get_flop_cost(self, x):
-#         return [0] + [0] * (self.state_num - 1)
-
-class OutLayer(NetworkBlock):
-    n_layers = 1
-    n_comp_steps = 1
-
-    def __init__(self, out_shape, in_chan=160, bias=True):
-        super(OutLayer, self).__init__()
-        self.conv = nn.Conv2d(in_chan, out_shape[0], kernel_size=1, stride=1, padding=0, bias=bias)
-        self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
-
-        self.out_shape = out_shape
-        self.params = {
-            'module_list': ['OutLayer'],
-            'name_list': ['OutLayer'],
-            'OutLayer': {'out_shape': out_shape, 'in_chan': in_chan},
-            'out': 'outname'
-        }
-
-    def forward(self, x, sampling=None):
-        x = self.conv(x)
-        x = self.global_pool(x)
-        return x.view(-1, *self.out_shape)
-
-    def get_flop_cost(self, x):
-        return [0] + [0] * (self.state_num - 1)
-
-
 def main(args, plotter):
     if torch.cuda.is_available():
         print('CUDA is OK')
@@ -189,46 +134,19 @@ def main(args, plotter):
     args.update({'plotter': plotter})
 
     # 创建NAS模型
-    nas_manager = Manager(args, data_properties, out_layer=OutLayer((10,), 256, True))
+    nas_manager = Manager(args, data_properties, out_layer=ImageNetOutLayer(320, 128, 1000))
 
-    # nas_manager.build(n_layer=3, n_chan=32)
-    # nas_manager.build(blocks_per_stage=[1, 1, 1, 3, 3],
-    #                 cells_per_block=[[3], [3], [3], [3, 3, 3], [3,3,3],[3,3,3]],
-    #                 channels_per_block=[[16], [32], [64], [128, 128, 128],[256,256,256]],
-    #                )
-
-    # # SegSN and SegAsppSN
-    # nas_manager.build(blocks_per_stage=[1, 1, 1, 3],
-    #                 cells_per_block=[[3], [3], [6], [6, 6, 3]],
-    #                 channels_per_block=[[16], [32], [64], [128, 256, 512]])
-
-    # # SegLargeKernelSN
-    # nas_manager.build(blocks_per_stage=[1, 1, 1, 2, 1],
-    #                 cells_per_block=[[2], [3], [4], [4, 4], [4]],
-    #                 channels_per_block=[[16], [24], [40], [80, 112], [160]])
-
-    # pk mobilenetv3-large
-    nas_manager.build(blocks_per_stage=[1, 1, 1, 2, 1],
-                    cells_per_block=[[1], [2], [3], [3, 3], [6]],
-                    channels_per_block=[[16], [32], [64], [96, 112], [160]])
-
-    # # pk ENAS
-    # nas_manager.build(blocks_per_stage=[1, 1, 1],
-    #                   cells_per_block=[[6], [6], [4]],
-    #                   channels_per_block=[[64], [128], [256]])
-
-    #
-    # # pk ENAS
-    # nas_manager.build(blocks_per_stage=[4, 4, 1],
-    #                   cells_per_block=[[3, 3, 3, 3], [3, 3, 3, 3], [4]],
-    #                   channels_per_block=[[32, 32, 64, 64], [64, 64, 128, 128], [256]])
+    # pk mobilenetv2
+    nas_manager.build(blocks_per_stage=[1, 1, 1, 2, 2],
+                      cells_per_block=[[2], [2], [3], [4, 4], [3, 3]],
+                      channels_per_block=[[16], [24], [32], [64, 96], [160, 320]])
 
     # 构建结构Anchor
     anchors = None
     index = None
     if len(args['anchor_archs']) > 0:
         anchors = Anchors()
-        anchors.load(args['anchor_archs'], args['anchor_states'], OutLayer, [int(c) for c in args['cuda'].split(',')])
+        anchors.load(args['anchor_archs'], args['anchor_states'], ImageNetOutLayer, [int(c) for c in args['cuda'].split(',')])
         index = torch.as_tensor(list(range(args['bs'])))
 
     nas_manager.supernetwork.anchors = anchors
@@ -244,6 +162,7 @@ def main(args, plotter):
     xp.train.rewards = mlogger.metric.Average(plotter=plotter, plot_title="rewards",plot_legend="train")
     xp.train.timer = mlogger.metric.Timer(plotter=plotter, plot_title="Time", plot_legend="train")
     xp.train.objective_cost = mlogger.metric.Average(plotter=plotter, plot_title="objective_cost", plot_legend="architecture")
+    xp.train.learning_rate = mlogger.metric.Simple(plotter=plotter, plot_title="LR", plot_legend="train")
 
     xp.val = mlogger.Container()
     xp.val.accuracy = mlogger.metric.Simple(plotter=plotter, plot_title="val_test_accuracy", plot_legend="val")
@@ -307,11 +226,13 @@ def main(args, plotter):
         logger.warning('Running *WITHOUT* cuda')
 
     # training and searching iterately
-    if args['warmup_epochs'] > 0:
-        warmup_lr = nas_manager.adjust_lr(0, args['lr_pol_tresh'], args['lr_pol_val'], logger, ['path'])
-        logging.info('warmup supernetwork with fixed LR %f'%warmup_lr)
-        for warmup_epoch in range(args['warmup_epochs']):
+    if args['warmup'] > 0:
+        for warmup_epoch in range(args['warmup']):
             for i, (inputs, labels) in enumerate(tqdm(train_loader, desc='Train', ascii=True)):
+                # adjust learning rate
+                warmup_lr = nas_manager.adjust_lr(args, warmup_epoch, i, len(train_loader), logger)
+                xp.train.learning_rate.update(warmup_lr)
+
                 # set model status (train)
                 x.resize_(inputs.size()).copy_(inputs)
                 y.resize_(labels.size()).copy_(labels)
@@ -331,17 +252,17 @@ def main(args, plotter):
     evo_epochs = args['evo_epochs'] if args['iterator_search'] else 1
     for evo_epoch in range(evo_epochs):
         logging.info("training network parameters")
-        for epoch in range(args['epochs']):
+        for epoch in range(args['warmup'], args['epochs']+args['warmup']):
             logging.info("training network parameters for epoch %d(%d)"%(epoch, args['epochs']))
 
             # write logger
             logger.info(epoch)
 
-            # lr_pol_tresh,lr_pol_val 负责网络参数学习率调整
-            # path_lr 负责网络架构参数学习率调整
-            nas_manager.adjust_lr(epoch, args['lr_pol_tresh'], args['lr_pol_val'], logger, ['path'])
-
             for i, (inputs, labels) in enumerate(tqdm(train_loader, desc='Train', ascii=True)):
+                # adjust learning rate
+                lr = nas_manager.adjust_lr(args, epoch, i, len(train_loader), logger)
+                xp.train.learning_rate.update(lr)
+                
                 # set model status (train)
                 x.resize_(inputs.size()).copy_(inputs)
                 y.resize_(labels.size()).copy_(labels)
@@ -357,14 +278,6 @@ def main(args, plotter):
                     anchor_x = x
                     anchor_y = y
                     nas_manager.supernetwork.anchors.run(anchor_x, anchor_y)
-
-                # if model_sampled_cost is not None and model_pruned_cost is not None:
-                #     model_sampled_cost = model_sampled_cost.mean()
-                #     model_pruned_cost = model_pruned_cost.mean()
-                #
-                #     # record architecture cost both sampled and pruned (training)
-                #     xp.train.__getattribute__('train_sampled_%s' % args['cost_optimization']).update(model_sampled_cost.item())
-                #     xp.train.__getattribute__('train_pruned_%s' % args['cost_optimization']).update(model_pruned_cost.item())
 
                 # anchor loss
                 anchor_consistent_loss_total = 0.0

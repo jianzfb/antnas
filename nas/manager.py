@@ -9,6 +9,8 @@ from torch.autograd import Variable
 from torch import optim
 from tqdm import tqdm
 from nas.searchspace.SearchSpace import *
+from math import cos, pi
+import math
 
 
 class Manager(object):
@@ -75,6 +77,20 @@ class Manager(object):
 
         # initialize model
         self.initialize()
+        
+        # initialize model parameter
+        for sub_m in self._model.modules():
+            if isinstance(sub_m, nn.Conv2d):
+                n = sub_m.kernel_size[0] * sub_m.kernel_size[1] * sub_m.out_channels
+                sub_m.weight.data.normal_(0, math.sqrt(2. / n))
+                if sub_m.bias is not None:
+                    sub_m.bias.data.zero_()
+            elif isinstance(sub_m, nn.BatchNorm2d):
+                sub_m.weight.data.fill_(1)
+                sub_m.bias.data.zero_()
+            elif isinstance(sub_m, nn.Linear):
+                sub_m.weight.data.normal_(0, 0.01)
+                sub_m.bias.data.zero_()
 
         # load checkpoint
         if state_dict_path is not None:
@@ -133,24 +149,35 @@ class Manager(object):
     def supernetwork(self):
         return self._supernetwork
 
-    def adjust_lr(self, epoch, tresh, val, logger=None, except_groups=None):
+    def adjust_lr(self, args, epoch, iteration, num_iter, logger=None, except_groups=None):
         if except_groups is None:
-            except_groups = []
-        assert len(tresh) == len(val) - 1
-        i = 0
-        while i < len(tresh) and epoch > tresh[i]:
-            i += 1
-        lr = val[i]
+            except_groups = ['path']
 
-        if logger is not None:
-            logger.info('Setting learning rate to {:.5f}'.format(lr))
+        warmup_epoch = args['warmup']
+        warmup_iter = warmup_epoch * num_iter
+        current_iter = iteration + epoch * num_iter
+        max_iter = args['epochs'] * num_iter
+
+        if args['lr_decay'] == 'step':
+            lr = args['lr'] * (
+                    args['gamma'] ** ((current_iter - warmup_iter) // (args['epochs_drop'] * num_iter - warmup_iter)))
+        elif args['lr_decay'] == 'cos':
+            lr = args['lr'] * (1 + cos(pi * (current_iter - warmup_iter) / (max_iter - warmup_iter))) / 2
+        elif args['lr_decay'] == 'linear':
+            lr = args['lr'] * (1 - (current_iter - warmup_iter) / (max_iter - warmup_iter))
+        elif args['lr_decay'] == 'schedule':
+            count = sum([1 for s in args['schedule'] if s <= epoch])
+            lr = args['lr'] * pow(args['gamma'], count)
+        else:
+            raise ValueError('Unknown lr mode {}'.format(args['lr_decay']))
+
+        if epoch < warmup_epoch:
+            lr = args['lr'] * current_iter / warmup_iter
 
         for param_group in self.optimizer.param_groups:
             if param_group['name'] not in except_groups:
                 param_group['lr'] = lr
-            elif logger is not None:
-                logger.info('{} - {}'.format(param_group['name'], param_group['lr']))
-
+                
         return lr
 
     def cuda(self, cuda_list):

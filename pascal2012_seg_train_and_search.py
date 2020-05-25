@@ -39,7 +39,7 @@ def argument_parser():
                         help='Number of training epochs')
     parser.add_argument('-evo_epochs', action='store', default=80, type=int,
                         help='Number of architecture searching epochs')
-    parser.add_argument('-warmup_epochs', action='store', default=0, type=int,
+    parser.add_argument('-warmup', action='store', default=0, type=int,
                         help='warmup epochs before searching architecture')
     parser.add_argument('-iterator_search', action='store', default=False, type=bool,
                         help='is iterator search')
@@ -52,17 +52,26 @@ def argument_parser():
                         help='Use Nesterov for SGD momentum')
     parser.add_argument('-lr', action='store', default=0.1, type=float, help='Learning rate')
     parser.add_argument('-path_lr', action='store', default=1e-3, type=float, help='path learning rate')
+    parser.add_argument('--lr_decay', type=str, default='cos',
+                        help='mode for learning rate decay')
+    parser.add_argument('--schedule', type=int, nargs='+', default=[150, 225],
+                        help='decrease learning rate at these epochs.')
+
+    parser.add_argument('--gamma', type=float, default=0.1,
+                        help='LR is multiplied by gamma on schedule.')
+    parser.add_argument('--epochs_drop', type=int, default=10, help='for step mode')
+    
     parser.add_argument('-momentum', action='store', default=0.9, type=float,
                         help='momentum used by the optimizer')
     parser.add_argument('-wd', dest='weight_decay', action='store', default=1e-4, type=float,
                         help='weight decay used during optimisation')
     
     parser.add_argument('-latest_num', action='store', default=1, type=int, help='save the latest number model state')
-    parser.add_argument('-lr_pol_tresh', action='store', default=[150, 225], type=str,
-                        help='learning rate decay rate')
-    parser.add_argument('-lr_pol_val', action='store', nargs='*', default=[0.1, 0.01, 0.001], type=str,
-                        help='learning rate decay period')
-    
+    # parser.add_argument('-lr_pol_tresh', action='store', default=[150, 225], type=str,
+    #                     help='learning rate decay rate')
+    # parser.add_argument('-lr_pol_val', action='store', nargs='*', default=[0.1, 0.01, 0.001], type=str,
+    #                     help='learning rate decay period')
+    #
     parser.add_argument('-cuda', action='store', default='0', type=str,
                         help='Enables cuda and select device')
     parser.add_argument('-latency', action='store',
@@ -235,11 +244,13 @@ def main(args, plotter):
         logger.warning('Running *WITHOUT* cuda')
     
     # training and searching iterately
-    if args['warmup_epochs'] > 0:
-        warmup_lr = nas_manager.adjust_lr(0, args['lr_pol_tresh'], args['lr_pol_val'], logger, ['path'])
-        logging.info('warmup supernetwork with fixed LR %f' % warmup_lr)
-        for warmup_epoch in range(args['warmup_epochs']):
+    if args['warmup'] > 0:
+        for warmup_epoch in range(args['warmup']):
             for i, (inputs, labels) in enumerate(tqdm(train_loader, desc='Train', ascii=True)):
+                # adjust learning rate
+                warmup_lr = nas_manager.adjust_lr(args, warmup_epoch, i, len(train_loader), logger)
+                xp.train.learning_rate.update(warmup_lr)
+
                 # set model status (train)
                 x.resize_(inputs.size()).copy_(inputs)
                 y.resize_(labels.size()).copy_(labels)
@@ -261,17 +272,17 @@ def main(args, plotter):
     evo_epochs = args['evo_epochs'] if args['iterator_search'] else 1
     for evo_epoch in range(evo_epochs):
         logging.info("training network parameters")
-        for epoch in range(args['epochs']):
+        for epoch in range(args['warmup'], args['epochs']+args['warmup']):
             logging.info("training network parameters for epoch %d(%d)" % (epoch, args['epochs']))
             
             # write logger
             logger.info(epoch)
             
-            # lr_pol_tresh,lr_pol_val 负责网络参数学习率调整
-            # path_lr 负责网络架构参数学习率调整
-            nas_manager.adjust_lr(epoch, args['lr_pol_tresh'], args['lr_pol_val'], logger, ['path'])
-            
             for i, (inputs, labels) in enumerate(tqdm(train_loader, desc='Train', ascii=True)):
+                # adjust learning rate
+                lr = nas_manager.adjust_lr(args, epoch, i, len(train_loader), logger)
+                xp.train.learning_rate.update(lr)
+    
                 # set model status (train)
                 x.resize_(inputs.size()).copy_(inputs)
                 y.resize_(labels.size()).copy_(labels)
