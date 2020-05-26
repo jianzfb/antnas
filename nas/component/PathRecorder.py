@@ -5,7 +5,6 @@ import torch
 import numpy as np
 from nas.component.NetworkBlock import *
 from torch.autograd import Variable
-from nas.utils.globalval import *
 
 
 class PathRecorder(object):
