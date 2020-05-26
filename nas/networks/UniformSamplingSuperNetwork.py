@@ -93,7 +93,7 @@ class UniformSamplingSuperNetwork(SuperNetwork):
     @property
     def n_comp_steps(self):
         return sum([mod.n_comp_steps for mod in self.blocks])
-
+    
     def sample_arch(self, *args, **kwargs):
         # get constraint condition
         comp_min = kwargs.get('comp_min', self.arch_objective_comp_min)

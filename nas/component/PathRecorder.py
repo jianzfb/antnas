@@ -23,63 +23,6 @@ class PathRecorder(object):
             self.node_index[node] = i
             self.rev_node_index[i] = node
 
-        # update by multi threading
-        self.global_sampling = None
-        self.median_sampling = None
-        self.global_path_sampling_stats = None
-        self.n_samplings = 0
-
-    def update_global_sampling(self, used_nodes, active):
-        global lock
-        lock.acquire()
-        self.n_samplings += 1
-        mean_sampling = used_nodes.mean(1).squeeze()
-
-        if self.global_sampling is None:
-            self.global_sampling = mean_sampling
-        else:
-            self.global_sampling += (1 / self.n_samplings) * (mean_sampling - self.global_sampling)
-
-        if self.median_sampling is None:
-            self.median_sampling = [used_nodes]
-        else:
-            self.median_sampling.append(used_nodes)
-
-        # 统计每一节点采样次数
-        if self.global_path_sampling_stats is None:
-            self.global_path_sampling_stats = np.zeros((self.n_nodes,
-                                                        self.n_nodes,
-                                                        NetworkBlock.state_num,
-                                                        NetworkBlock.state_num))
-
-        sampling_nodes_np_data = used_nodes.data.cpu().numpy()
-        for node_name in nx.topological_sort(self.graph):
-            left_node_index = self.node_index[node_name]
-            left_node_sampling_state = sampling_nodes_np_data[left_node_index].tolist()
-
-            for successor_name in self.graph.successors(node_name):
-                right_node_index = self.node_index[successor_name]
-                right_node_sampling_state = sampling_nodes_np_data[right_node_index].tolist()
-
-                if not node_name.startswith("F") or not successor_name.startswith("F"):
-                    for left_s, right_s in zip(left_node_sampling_state, right_node_sampling_state):
-                        self.global_path_sampling_stats[left_node_index,
-                                                        right_node_index,
-                                                        int(left_s),
-                                                        int(right_s)] += 1.0
-
-        lock.release()
-
-    def update(self, sampling, active):
-        self.update_global_sampling(sampling, active)
-
-    def get_and_reset(self):
-        multi_cards_sampling = torch.cat(self.median_sampling,-1)
-        median_sampling = multi_cards_sampling.median(1).values
-        self.median_sampling = None
-
-        return median_sampling
-
     def add_sampling(self, node_name, node_sampling, sampling, active, structure_fixed):
         node_sampling = node_sampling.float()
         if isinstance(node_sampling, torch.Tensor):
@@ -140,30 +83,6 @@ class PathRecorder(object):
             res.append(nodes)
         return res
 
-    # def get_graph_paths(self, out_node):
-    #     sampled, pruned = self.get_architectures(out_node)
-    #
-    #     real_paths = []
-    #     for i in range(pruned.size(1)):  # for each batch element
-    #         path = [self.rev_node_index[ind] for ind, used in enumerate(pruned[:, i]) if used == 1]
-    #         real_paths.append(path)
-    #
-    #     res = self.get_used_nodes(pruned.t())
-    #
-    #     assert real_paths == res
-    #
-    #     sampling_paths = []
-    #     for i in range(sampled.size(1)):  # for each batch element
-    #         path = dict((self.rev_node_index[ind], elt) for ind, elt in enumerate(sampled[:, i]))
-    #         sampling_paths.append(path)
-    #
-    #     self.update_global_sampling(pruned)
-    #
-    #     return real_paths, sampling_paths
-
-    def get_posterior_weights(self):
-        return dict((self.rev_node_index[ind], elt) for ind, elt in enumerate(self.global_sampling))
-
     def get_consistence(self, node, sampling, active):
         """
         Get an indicator of consistence for each sampled architecture up to the given node in last batch.
@@ -189,14 +108,3 @@ class PathRecorder(object):
 
     def get_pruned_arch(self, out_node, sampling, active):
         return active[self.node_index[out_node]] * sampling
-
-    def get_state(self):
-        return {'node_index': self.node_index,
-                'rev_node_index': self.rev_node_index,
-                'global_sampling': self.global_sampling,
-                'n_samplings': self.n_samplings}
-
-    def load_state(self, state):
-        for key, val in state.items():
-            assert hasattr(self, key)
-            setattr(self, key, val)

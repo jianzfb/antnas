@@ -295,7 +295,7 @@ class SuperNetwork(nn.Module):
         
         # launch arc sampling thread
         print('launch archtecture sampling thread')
-        supernetwork_manager.arctecture_sampling_thread.start()
+        supernetwork_manager.launchSamplingArcProcess()
         
     def forward(self, *input):
         raise NotImplementedError
@@ -439,6 +439,7 @@ class SuperNetwork(nn.Module):
         self.use_preload_arch = True
 
     def sample_arch(self, *args, **kwargs):
+        # support Thread reentry
         raise NotImplementedError
     
     def is_satisfied_constraint(self, feature):

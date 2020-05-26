@@ -30,7 +30,7 @@ class Manager(object):
         self._optimizer = None
         self.cuda_list = []
         self.arctecture_queue = queue.Queue(128)
-        self.arctecture_sampling_thread = None
+        self.arctecture_sampling_thread_list = None
         self.arctecture = None
 
     def initialize_optimizer(self):
@@ -80,13 +80,18 @@ class Manager(object):
                 sub_m.bias.data.zero_()
 
         # 3.step 初始化结构采样线程
-        self.arctecture_sampling_thread = threading.Thread(target=self.runSamplingArc,daemon=True)
+        self.arctecture_sampling_thread_list = \
+            [threading.Thread(target=self.__samplingArcFunc, daemon=True) for _ in range(2)]
         
-    def runSamplingArc(self):
+    def __samplingArcFunc(self):
         while True:
             arc = self._supernetwork.sample_arch()
             self.arctecture_queue.put(arc)
-            
+    
+    def launchSamplingArcProcess(self):
+        for t in self.arctecture_sampling_thread_list:
+            t.start()
+    
     @property
     def optimizer(self):
         return self._optimizer
