@@ -11,6 +11,8 @@ from tqdm import tqdm
 from nas.searchspace.SearchSpace import *
 from math import cos, pi
 import math
+import queue
+import threading
 
 
 class Manager(object):
@@ -27,6 +29,9 @@ class Manager(object):
         # 模型优化器
         self._optimizer = None
         self.cuda_list = []
+        self.arctecture_queue = queue.Queue(128)
+        self.arctecture_sampling_thread = None
+        self.arctecture = None
 
     def initialize_optimizer(self):
         if self._optimizer is not None:
@@ -57,8 +62,31 @@ class Manager(object):
         return self._optimizer
 
     def initialize(self):
+        # 1.step 初始化优化器
         self.initialize_optimizer()
+        
+        # 2.step 初始化模型参数
+        for sub_m in self._model.modules():
+            if isinstance(sub_m, nn.Conv2d):
+                n = sub_m.kernel_size[0] * sub_m.kernel_size[1] * sub_m.out_channels
+                sub_m.weight.data.normal_(0, math.sqrt(2. / n))
+                if sub_m.bias is not None:
+                    sub_m.bias.data.zero_()
+            elif isinstance(sub_m, nn.BatchNorm2d):
+                sub_m.weight.data.fill_(1)
+                sub_m.bias.data.zero_()
+            elif isinstance(sub_m, nn.Linear):
+                sub_m.weight.data.normal_(0, 0.01)
+                sub_m.bias.data.zero_()
 
+        # 3.step 初始化结构采样线程
+        self.arctecture_sampling_thread = threading.Thread(target=self.runSamplingArc,daemon=True)
+        
+    def runSamplingArc(self):
+        while True:
+            arc = self._supernetwork.sample_arch()
+            self.arctecture_queue.put(arc)
+            
     @property
     def optimizer(self):
         return self._optimizer
@@ -75,23 +103,9 @@ class Manager(object):
         self._model = self._search_space.build(**search_space_args)
         self._supernetwork = self._model
 
-        # initialize model
+        # initialize
         self.initialize()
         
-        # initialize model parameter
-        for sub_m in self._model.modules():
-            if isinstance(sub_m, nn.Conv2d):
-                n = sub_m.kernel_size[0] * sub_m.kernel_size[1] * sub_m.out_channels
-                sub_m.weight.data.normal_(0, math.sqrt(2. / n))
-                if sub_m.bias is not None:
-                    sub_m.bias.data.zero_()
-            elif isinstance(sub_m, nn.BatchNorm2d):
-                sub_m.weight.data.fill_(1)
-                sub_m.bias.data.zero_()
-            elif isinstance(sub_m, nn.Linear):
-                sub_m.weight.data.normal_(0, 0.01)
-                sub_m.bias.data.zero_()
-
         # load checkpoint
         if state_dict_path is not None:
             self._model.load_state_dict(torch.load(state_dict_path, map_location='cpu'))
@@ -99,10 +113,25 @@ class Manager(object):
     def train(self, x, y, epoch=None, warmup=False, index=None):
         if not self.parallel.training:
             self.parallel.train()
+        
+        # sampling architecture
+        if self.arctecture is None:
+            if torch.cuda.is_available():
+                self.arctecture = torch.Tensor().cuda(torch.device("cuda:%d"%self.cuda_list[0]))
+            else:
+                self.arctecture = torch.Tensor()
 
+        if torch.cuda.is_available():
+            sampling_arc = [self.arctecture_queue.get() for _ in range(len(self.cuda_list))]
+            self.arctecture.resize_(len(self.cuda_list), len(sampling_arc[0])).copy_(torch.as_tensor(sampling_arc))
+        else:
+            sampling_arc = [self.arctecture_queue.get()]
+            self.arctecture.resize_(1, len(sampling_arc[0])).copy_(torch.as_tensor(sampling_arc))
+        
         if index is None:
             # 1.step forward model
-            loss, accuracy, sample_cost, prune_cost = self.parallel(x, y, epoch=epoch, warmup=warmup)
+            loss, accuracy, sample_cost, prune_cost = \
+                self.parallel(x, y, self.arctecture, epoch=epoch, warmup=warmup)
 
             # 2.step get last sampling
             return loss.mean(), \
@@ -111,7 +140,8 @@ class Manager(object):
                    prune_cost.mean() if prune_cost is not None else None
         else:
             # 1.step forward model
-            loss, accuracy, a, b = self.parallel(x, y, epoch=epoch, warmup=warmup, index=index)
+            loss, accuracy, a, b = \
+                self.parallel(x, y, self.arctecture, epoch=epoch, warmup=warmup, index=index)
 
             # 2.step get last sampling
             return loss.mean(), \

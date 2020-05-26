@@ -219,7 +219,7 @@ class SuperNetwork(nn.Module):
         # 初始化结构信息
         for cost, cost_eval in self.arch_cost_evaluators.items():
             cost_eval.init_costs(self, graph)
-            
+
         # 获得约束搜索空间的范围 (find max/min arch)
         auto_analyze_comp = False
         if self.cost_evaluation == "comp" and (self.arch_objective_comp_min < 0 or self.arch_objective_comp_max < 0):
@@ -292,6 +292,10 @@ class SuperNetwork(nn.Module):
             print("ARCH LATENCY MIN-%f,MAX-%f"%(self.arch_objective_latency_min,self.arch_objective_latency_max))
         elif self.cost_evaluation == "param":
             print("ARCH PARAM MIN-%f,MAX-%f"%(self.arch_objective_param_min,self.arch_objective_param_max))
+        
+        # launch arc sampling thread
+        print('launch archtecture sampling thread')
+        supernetwork_manager.arctecture_sampling_thread.start()
         
     def forward(self, *input):
         raise NotImplementedError
