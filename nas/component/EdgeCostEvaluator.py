@@ -4,7 +4,6 @@
 # @Author  : jian<jian@mltalker.com>
 from nas.component.CostEvaluator import CostEvaluator
 import torch
-from nas.utils.globalval import *
 
 
 class EdgeCostEvaluator(CostEvaluator):

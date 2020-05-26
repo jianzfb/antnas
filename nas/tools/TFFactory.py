@@ -1,13 +1,13 @@
 # -*- coding: UTF-8 -*-
 # @Time    : 2019-09-14 08:46
-# @File    : nasfactory.py
+# @File    : TFFactory.py
 # @Author  : jian<jian@mltalker.com>
 from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
 
 import networkx as nx
-from nas.tools.advancednasblock import *
+from nas.tools.TFBlock import *
 import tensorflow as tf
 
 slim = tf.contrib.slim
@@ -179,10 +179,15 @@ class NasFactory(object):
 
             input_feature = format_input(input_feature)
             if 'out' in cur_node['module_params']:
-                outputs = _build_out_node(cur_node, node_index, input_feature,
+                outputs = _build_out_node(cur_node,
+                                          node_index,
+                                          input_feature,
                                           out_layers[cur_node['module_params']['out']])
             else:
-                outputs = self._build_node(cur_node, node_index, node_name, input_feature)
+                outputs = self._build_node(cur_node,
+                                           node_index,
+                                           node_name,
+                                           input_feature)
 
             layers_map[node_name] = outputs
             input_feature = []

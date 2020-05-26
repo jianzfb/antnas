@@ -15,6 +15,7 @@ from nas.searchspace.Arc import *
 class PKAutoArc(Arc):
     def __init__(self, graph):
         super(PKAutoArc, self).__init__(graph)
+        self._names = []
 
     def generate(self, head, tail, modules):
         in_name = SuperNetwork._INPUT_NODE_FORMAT.format(0, 0)
@@ -31,6 +32,9 @@ class PKAutoArc(Arc):
             module_index += 1
 
             module_name = SuperNetwork._FIXED_NODE_FORMAT.format(0, module_index)
+            # push to _names
+            self._names.append(module_name)
+            
             pos = (0, module_index)
             self.graph.add_node(module_name,
                                 module=len(self.blocks),
@@ -46,12 +50,16 @@ class PKAutoArc(Arc):
                 self.graph.add_edge(SuperNetwork._FIXED_NODE_FORMAT.format(0, module_index-1),
                                     SuperNetwork._FIXED_NODE_FORMAT.format(0, module_index),
                                     width_node=SuperNetwork._FIXED_NODE_FORMAT.format(0, module_index))
-
+            
         # link head to arc
         self.graph.add_edge(SuperNetwork._INPUT_NODE_FORMAT.format(0, 0),
                             SuperNetwork._FIXED_NODE_FORMAT.format(0, 1),
                             width_node=SuperNetwork._FIXED_NODE_FORMAT.format(0, 1))
-
+        
+        if tail is None:
+            self.offset = len(modules) + 1
+            return in_name, ""
+        
         # link arc to tail
         out_name = SuperNetwork._OUTPUT_NODE_FORMAT.format(0, len(modules) + 1)
         self.graph.add_node(out_name,
@@ -66,7 +74,9 @@ class PKAutoArc(Arc):
         self.graph.add_edge(SuperNetwork._FIXED_NODE_FORMAT.format(0, len(modules)),
                             SuperNetwork._OUTPUT_NODE_FORMAT.format(0, len(modules)+1),
                             width_node=SuperNetwork._OUTPUT_NODE_FORMAT.format(0, len(modules)+1))
-
+        
+        self.offset = len(modules) + 2
+        
         # TODO Allow several input and/or output nodes
         traversal_order = list(nx.topological_sort(self.graph))
         if traversal_order[0] != in_name or traversal_order[-1] != out_name:
@@ -79,3 +89,7 @@ class PKAutoArc(Arc):
     def save(self, folder, name):
         architecture_path = os.path.join(folder, 'pk_%s.architecture'%name)
         nx.write_gpickle(self.graph, architecture_path)
+    
+    @property
+    def names(self):
+        return self._names

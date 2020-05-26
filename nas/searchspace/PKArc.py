@@ -35,6 +35,7 @@ class PKArc(Arc):
         self.node_map[name] = pos_name
         self.inv_node_map[pos_name] = name
         self.blocks.append(module)
+        self.offset = len(self.blocks)
 
     def link(self, from_name, to_name):
         if from_name not in self.node_map:
@@ -68,7 +69,7 @@ class PKArc(Arc):
             self.graph.add_edge(in_name,
                                 front_in_graph,
                                 width_node=front_in_graph)
-
+        
         # link arc to tail
         pos = (0, len(self.blocks))
         out_name = SuperNetwork._OUTPUT_NODE_FORMAT.format(*pos)
@@ -83,7 +84,9 @@ class PKArc(Arc):
         self.graph.add_edge(end_in_graph,
                             out_name,
                             width_node=out_name)
-
+        
+        self.offset = self.offset + 2
+        
         # TODO Allow several input and/or output nodes
         traversal_order = list(nx.topological_sort(self.graph))
         if traversal_order[0] != in_name or traversal_order[-1] != out_name:

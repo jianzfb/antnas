@@ -71,6 +71,7 @@ class Mutation(object):
             mutation_ratio = alpha[f[0]]
             
             # 1.step hierarchical selection
+            explore_position = kwargs['explore_position']
             # stage/block/cell
             stage_i = -1
             block_num = 0

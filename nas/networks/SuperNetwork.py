@@ -167,6 +167,10 @@ class SuperNetwork(nn.Module):
         # TODO Allow several input and/or output nodes
         if self.traversal_order[0] != in_node or self.traversal_order[-1] != out_node:
             raise ValueError('Seems like the given graph is broken')
+        
+        # save graph
+        architecture_path = os.path.join("./supernetwork.architecture")
+        nx.write_gpickle(self.graph, architecture_path)
 
         self.path_recorder = PathRecorder(self.net, self.out_node)
 
@@ -201,7 +205,6 @@ class SuperNetwork(nn.Module):
 
             if len(input) == 0:
                 raise RuntimeError('Node {} has no inputs'.format(node))
-            print(node)
 
             out = self.blocks[cur_node['module']](input)
             if node == self.out_node:
@@ -216,7 +219,7 @@ class SuperNetwork(nn.Module):
         # 初始化结构信息
         for cost, cost_eval in self.arch_cost_evaluators.items():
             cost_eval.init_costs(self, graph)
-            
+
         # 获得约束搜索空间的范围 (find max/min arch)
         auto_analyze_comp = False
         if self.cost_evaluation == "comp" and (self.arch_objective_comp_min < 0 or self.arch_objective_comp_max < 0):
@@ -229,58 +232,59 @@ class SuperNetwork(nn.Module):
         auto_analyze_param = False
         if self.cost_evaluation == "param" and (self.arch_objective_param_min < 0 or self.arch_objective_param_max < 0):
             auto_analyze_param = True
-            
-        try_times = 1000
-        while try_times > 0:
-            feature = [None for _ in range(len(self.traversal_order))]
-            
-            sampling = torch.Tensor()
-            active = torch.Tensor()
-            for node_name in self.traversal_order:
-                cur_node = self.net.node[node_name]
-                if not (node_name.startswith('CELL') or node_name.startswith('T')):
-                    # 不可学习，处于永远激活状态
-                    feature[cur_node['sampling_param']] = int(1)
-                else:
-                    if not self.blocks[cur_node['module']].structure_fixed:
-                        feature[cur_node['sampling_param']] = int(np.random.randint(0, 2))
+        
+        if auto_analyze_comp or auto_analyze_latency or auto_analyze_param:
+            try_times = 1000
+            while try_times > 0:
+                feature = [None for _ in range(len(self.traversal_order))]
+                
+                sampling = torch.Tensor()
+                active = torch.Tensor()
+                for node_name in self.traversal_order:
+                    cur_node = self.net.node[node_name]
+                    if not (node_name.startswith('CELL') or node_name.startswith('T')):
+                        # 不可学习，处于永远激活状态
+                        feature[cur_node['sampling_param']] = int(1)
                     else:
-                        feature[cur_node['sampling_param']] = int(np.random.randint(0, NetworkBlock.state_num))
-                
-                sampling, active = \
-                    self.path_recorder.add_sampling(node_name,
-                                                    torch.as_tensor([feature[cur_node['sampling_param']]]).reshape([1,1,1,1]),
-                                                    sampling,
-                                                    active,
-                                                    self.blocks[cur_node['module']].structure_fixed)
-
-            sampled_arc, pruned_arc = \
-                self.path_recorder.get_arch(self.out_node, sampling, active)
-
-            for cost, cost_eval in self.arch_cost_evaluators.items():
-                _, pruned_cost = \
-                    cost_eval.get_costs([sampled_arc, pruned_arc])
-
-                pruned_cost = pruned_cost.item()
-                if cost == "comp" and auto_analyze_comp:
-                    if self.arch_objective_comp_min > pruned_cost or self.arch_objective_comp_min < 0:
-                        self.arch_objective_comp_min = pruned_cost
-                    if self.arch_objective_comp_max < pruned_cost or self.arch_objective_comp_max < 0:
-                        self.arch_objective_comp_max = pruned_cost
-                
-                if cost == "latency" or auto_analyze_latency:
-                    if self.arch_objective_latency_min > pruned_cost or self.arch_objective_latency_min < 0:
-                        self.arch_objective_latency_min = pruned_cost
-                    if self.arch_objective_latency_max < pruned_cost or self.arch_objective_latency_max < 0:
-                        self.arch_objective_latency_max = pruned_cost
-                
-                if cost == "param" or auto_analyze_param:
-                    if self.arch_objective_param_min > pruned_cost or self.arch_objective_param_min < 0:
-                        self.arch_objective_param_min = pruned_cost
-                    if self.arch_objective_param_max < pruned_cost or self.arch_objective_param_max < 0:
-                        self.arch_objective_param_max = pruned_cost
+                        if not self.blocks[cur_node['module']].structure_fixed:
+                            feature[cur_node['sampling_param']] = int(np.random.randint(0, 2))
+                        else:
+                            feature[cur_node['sampling_param']] = int(np.random.randint(0, NetworkBlock.state_num))
+                    
+                    sampling, active = \
+                        self.path_recorder.add_sampling(node_name,
+                                                        torch.as_tensor([feature[cur_node['sampling_param']]]).reshape([1,1,1,1]),
+                                                        sampling,
+                                                        active,
+                                                        self.blocks[cur_node['module']].structure_fixed)
     
-            try_times -= 1
+                sampled_arc, pruned_arc = \
+                    self.path_recorder.get_arch(self.out_node, sampling, active)
+    
+                for cost, cost_eval in self.arch_cost_evaluators.items():
+                    _, pruned_cost = \
+                        cost_eval.get_costs([sampled_arc, pruned_arc])
+    
+                    pruned_cost = pruned_cost.item()
+                    if cost == "comp" and auto_analyze_comp:
+                        if self.arch_objective_comp_min > pruned_cost or self.arch_objective_comp_min < 0:
+                            self.arch_objective_comp_min = pruned_cost
+                        if self.arch_objective_comp_max < pruned_cost or self.arch_objective_comp_max < 0:
+                            self.arch_objective_comp_max = pruned_cost
+                    
+                    if cost == "latency" or auto_analyze_latency:
+                        if self.arch_objective_latency_min > pruned_cost or self.arch_objective_latency_min < 0:
+                            self.arch_objective_latency_min = pruned_cost
+                        if self.arch_objective_latency_max < pruned_cost or self.arch_objective_latency_max < 0:
+                            self.arch_objective_latency_max = pruned_cost
+                    
+                    if cost == "param" or auto_analyze_param:
+                        if self.arch_objective_param_min > pruned_cost or self.arch_objective_param_min < 0:
+                            self.arch_objective_param_min = pruned_cost
+                        if self.arch_objective_param_max < pruned_cost or self.arch_objective_param_max < 0:
+                            self.arch_objective_param_max = pruned_cost
+        
+                try_times -= 1
         
         if self.cost_evaluation == "comp":
             print("ARCH COMP MIN-%f,MAX-%f"%(self.arch_objective_comp_min,self.arch_objective_comp_max))
@@ -288,6 +292,10 @@ class SuperNetwork(nn.Module):
             print("ARCH LATENCY MIN-%f,MAX-%f"%(self.arch_objective_latency_min,self.arch_objective_latency_max))
         elif self.cost_evaluation == "param":
             print("ARCH PARAM MIN-%f,MAX-%f"%(self.arch_objective_param_min,self.arch_objective_param_max))
+        
+        # launch arc sampling thread
+        print('launch archtecture sampling thread')
+        supernetwork_manager.launchSamplingArcProcess()
         
     def forward(self, *input):
         raise NotImplementedError
@@ -431,6 +439,7 @@ class SuperNetwork(nn.Module):
         self.use_preload_arch = True
 
     def sample_arch(self, *args, **kwargs):
+        # support Thread reentry
         raise NotImplementedError
     
     def is_satisfied_constraint(self, feature):

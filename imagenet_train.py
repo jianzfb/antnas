@@ -16,6 +16,7 @@ from nas.dataset.datasets import get_data
 from nas.networks.FixedNetwork import *
 from OutLayerFactory import *
 from math import cos, pi
+import math
 
 
 logging.basicConfig(level=logging.INFO)
@@ -29,7 +30,7 @@ def argument_parser():
     parser.add_argument('-path', default='/Users/jian/Downloads/dataset', type=str,
                         help='path for the execution')
 
-    parser.add_argument('-dset', default='ImageNet', type=str, help='Dataset')
+    parser.add_argument('-dset', default='CIFAR10', type=str, help='Dataset')
     parser.add_argument('-bs', action='store', default=2, type=int, help='Size of each batch')
     parser.add_argument('-epochs', action='store', default=150, type=int,
                         help='Number of training epochs')
@@ -121,7 +122,24 @@ def main(args, plotter):
     model = FixedNetwork(architecture=args['architecture'],
                          output_layer_cls=ImageNetOutLayer,
                          plotter=plotter)
+    
+    # 初始化模型权重
+    def initialize_weights():
+        for sub_m in model.modules():
+            if isinstance(sub_m, nn.Conv2d):
+                n = sub_m.kernel_size[0] * sub_m.kernel_size[1] * sub_m.out_channels
+                sub_m.weight.data.normal_(0, math.sqrt(2. / n))
+                if sub_m.bias is not None:
+                    sub_m.bias.data.zero_()
+            elif isinstance(sub_m, nn.BatchNorm2d):
+                sub_m.weight.data.fill_(1)
+                sub_m.bias.data.zero_()
+            elif isinstance(sub_m, nn.Linear):
+                sub_m.weight.data.normal_(0, 0.01)
+                sub_m.bias.data.zero_()
 
+    initialize_weights()
+    
     # set model input
     x = torch.Tensor()
     y = torch.LongTensor()

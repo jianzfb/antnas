@@ -103,6 +103,7 @@ class CrossOver(object):
                 multi_points = self.multi_points
                 
                 # hierarchical selection
+                explore_position = kwargs['explore_position']
                 # stage/block/cell
                 stage_i = -1
                 block_num = 0
@@ -111,7 +112,6 @@ class CrossOver(object):
                     stage_i = np.random.randint(0, stage_num)
                     block_num = len(self.hierarchical[stage_i])
     
-                explore_position = []
                 if stage_i >= 0 and block_num > 0:
                     if np.random.random() < 0.3:
                         # TODO 自适应阈值修改

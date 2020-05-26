@@ -23,7 +23,7 @@ class UniformSamplingSuperNetwork(SuperNetwork):
     def __init__(self, *args, **kwargs):
         super(UniformSamplingSuperNetwork, self).__init__(*args, **kwargs)
 
-    def forward(self, x, y, arc=None, epoch=None, warmup=False):
+    def forward(self, x, y, arc, epoch=None, warmup=False):
         # 1.step parse x,y - (data,label)
         input = [x]
 
@@ -34,7 +34,7 @@ class UniformSamplingSuperNetwork(SuperNetwork):
         else:
             # search and find
             batched_sampling = arc[0, :].view((1, arc.shape[1]))
-
+        
         # 3.step forward network
         # 3.1.step set the input of network graph
         # running_graph.node[self.in_node]['input'] = [*input]
@@ -93,7 +93,7 @@ class UniformSamplingSuperNetwork(SuperNetwork):
     @property
     def n_comp_steps(self):
         return sum([mod.n_comp_steps for mod in self.blocks])
-
+    
     def sample_arch(self, *args, **kwargs):
         # get constraint condition
         comp_min = kwargs.get('comp_min', self.arch_objective_comp_min)
