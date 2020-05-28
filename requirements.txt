@@ -10,3 +10,4 @@ plotly==2
 numpy
 tensorflow
 easydict
+mlogger
