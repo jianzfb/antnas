@@ -78,7 +78,7 @@ class NetworkBlock(nn.Module):
         return 0.0
 
     @staticmethod
-    def get_conv2d_flops(m, x_size, y_size):
+    def get_conv2d_flops(m, x_size=None, y_size=None):
         cin = m.in_channels
         cout = m.out_channels
         kh, kw = m.kernel_size
@@ -98,13 +98,13 @@ class NetworkBlock(nn.Module):
         return total_ops
 
     @staticmethod
-    def get_bn_flops(m, x_size, y_size=None):
+    def get_bn_flops(m=None, x_size=None, y_size=None):
         nelements = 1 * x_size[1] * x_size[2] * x_size[3]
         total_ops = 4 * nelements
         return total_ops
 
     @staticmethod
-    def get_relu_flops(m, x_size, y_size=None):
+    def get_relu_flops(m=None, x_size=None, y_size=None):
         # nelements = 1 * x_size[1] * x_size[2] * x_size[3]
         nelements = x_size.numel() / x_size[0]
         total_ops = nelements
@@ -358,6 +358,10 @@ class SepConvBN(NetworkBlock):
                                         padding=k_size // 2 + (dilation-1)*(k_size-1)//2,
                                         dilation=dilation,
                                         bias=False)
+        self.depthwise_bn = nn.BatchNorm2d(in_chan,
+                                           momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                                           track_running_stats=NetworkBlock.bn_track_running_stats)
+
         self.pointwise_conv = nn.Conv2d(in_chan, out_chan, kernel_size=1, stride=1, padding=0, bias=False)
         self.bn = nn.BatchNorm2d(out_chan,
                                  momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
@@ -381,6 +385,9 @@ class SepConvBN(NetworkBlock):
 
     def forward(self, x, sampling=None):
         x = self.depthwise_conv(x)
+        x = self.depthwise_bn(x)
+        x = F.relu(x)
+
         x = self.pointwise_conv(x)
         x = self.bn(x)
         if self.relu:
@@ -389,7 +396,7 @@ class SepConvBN(NetworkBlock):
         if sampling is None:
             return x
 
-        is_activate = (int)(sampling.item())
+        is_activate = int(sampling.item())
         if is_activate == 1:
             return x
         else:
@@ -403,20 +410,26 @@ class SepConvBN(NetworkBlock):
                [0]*(NetworkBlock.state_num - 2)
 
     def get_flop_cost(self, x):
-        conv_in_data_size = torch.Size([1, *x.shape[1:]])
-        conv_out_data_size = torch.Size([1,
-                                         self.out_chan,
-                                         x.shape[-1]//self.depthwise_conv.stride[0],
-                                         x.shape[-1]//self.depthwise_conv.stride[1]])
+        depthwise_out_data_size = torch.Size([1,
+                                              self.depthwise_conv.out_channels,
+                                              x.shape[-1] // self.depthwise_conv.stride[0],
+                                              x.shape[-1] // self.depthwise_conv.stride[1]])
+        pointwise_out_data_size = torch.Size([1,
+                                              self.pointwise_conv.out_channels,
+                                              x.shape[-1] // self.depthwise_conv.stride[0],
+                                              x.shape[-1] // self.depthwise_conv.stride[1]])
 
-        flops_1 = self.get_conv2d_flops(self.depthwise_conv, conv_in_data_size, conv_out_data_size)
-        flops_2 = self.get_conv2d_flops(self.pointwise_conv, conv_out_data_size, conv_out_data_size)
-        flops_3 = self.get_bn_flops(self.bn, conv_out_data_size, conv_out_data_size)
-        flops_4 = 0
+        flops_1 = self.get_conv2d_flops(m=self.depthwise_conv, y_size=depthwise_out_data_size)
+        flops_2 = self.get_bn_flops(x_size=depthwise_out_data_size)
+        flops_3 = self.get_relu_flops(depthwise_out_data_size)
+
+        flops_4 = self.get_conv2d_flops(m=self.pointwise_conv, y_size=pointwise_out_data_size)
+        flops_5 = self.get_bn_flops(x_size=pointwise_out_data_size)
+        flops_6 = 0
         if self.relu:
-            flops_4 = self.get_relu_flops(None, conv_out_data_size, conv_out_data_size)
+            flops_6 = self.get_relu_flops(x_size=pointwise_out_data_size)
 
-        total_flops = flops_1 + flops_2 + flops_3 + flops_4
+        total_flops = flops_1 + flops_2 + flops_3 + flops_4 + flops_5 + flops_6
         flop_cost = [0] + [total_flops] + [0] * (self.state_num - 2)
         return flop_cost
 
