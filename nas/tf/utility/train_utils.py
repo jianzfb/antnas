@@ -1,7 +1,7 @@
 # @Time    : 2019-05-09 14:18
 # @Author  : zhangchenming
 import tensorflow as tf
-from nas.tf_convertor.config import config_param
+from nas.tf.config import config_param
 
 
 def get_cross_entry_loss(logits, labels, num_classes, ignore_label):

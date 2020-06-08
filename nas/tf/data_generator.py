@@ -1,7 +1,7 @@
 import os
 import tensorflow as tf
-from nas.tf_convertor import preprocess_utils
-from nas.tf_convertor.config import config_param
+from nas.tf import preprocess_utils
+from nas.tf.config import config_param
 
 
 def get_filenames(is_training, data_dir):

@@ -1,9 +1,9 @@
 import tensorflow as tf
-from nas.tf_convertor.utility import train_utils
-from nas.tf_convertor.config import config_param
-from nas.tf_convertor.utility import get_dataset_colormap
+from nas.tf.utility import train_utils
+from nas.tf.config import config_param
+from nas.tf.utility import get_dataset_colormap
 
-from nas.tf_convertor.builder.nasfactory import *
+from nas.tf.builder.nasfactory import *
 
 slim = tf.contrib.slim
 

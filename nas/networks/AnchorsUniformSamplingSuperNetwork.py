@@ -17,7 +17,7 @@ class AnchorsUniformSamplingSuperNetwork(UniformSamplingSuperNetwork):
     def init(self, *args, **kwargs):
         super(AnchorsUniformSamplingSuperNetwork, self).init(*args, **kwargs)
 
-    def forward(self, x, y, arc=None, epoch=None, warmup=False, index=None):
+    def forward(self, x, y, arc=None, epoch=None, warmup=False):
         # 1.step parse x,y - (data,label)
         input = [x]
 
@@ -27,26 +27,18 @@ class AnchorsUniformSamplingSuperNetwork(UniformSamplingSuperNetwork):
         batched_sampling = None
         anchor_arc_pos = None
         is_training_anchor_arc = False
-        if arc is None:
-            if np.random.random() < self.anchor_arch_prob:
-                # using anchor arch
-                anchor_arc_index = np.random.randint(0, self.anchors.size())
-                anchor_arc = self.anchors.arch(anchor_arc_index)
-                batched_sampling = torch.as_tensor([anchor_arc], device=x.device)
-
-                # anchor_arc_pos = index
-                anchor_arc_pos = torch.ones((batch_size),dtype=torch.int32, device=x.device) * anchor_arc_index
-                is_training_anchor_arc = True
-            else:
-                # random select arch
-                batched_sampling = torch.as_tensor([self.sample_arch()], device=x.device)
-                
-                # anchor_arc_pos = torch.LongTensor([])
-                anchor_arc_pos = torch.ones((batch_size), dtype=torch.int32, device=x.device) * (-1)
+        if np.random.random() < self.anchor_arch_prob and self.training:
+            # using anchor arch
+            anchor_arc_index = np.random.randint(0, self.anchors.size())
+            anchor_arc = self.anchors.arch(anchor_arc_index)
+            batched_sampling = torch.as_tensor([anchor_arc], device=x.device)
+    
+            anchor_arc_pos = torch.ones((batch_size), dtype=torch.int32, device=x.device) * anchor_arc_index
+            is_training_anchor_arc = True
         else:
-            # search and find
             batched_sampling = arc[0, :].view((1, arc.shape[1]))
-
+            anchor_arc_pos = torch.ones((batch_size), dtype=torch.int32, device=x.device) * (-1)
+        
         # 3.step forward network
         # 3.1.step set the input of network graph
         # running_graph.node[self.in_node]['input'] = [*input]

@@ -312,9 +312,6 @@ class SuperNetwork(nn.Module):
             input = input[0]
         return input
 
-    def arch_loss(self, *args, **kwargs):
-        raise NotImplementedError
-
     def arch_optimize(self, *args, **kwargs):
         raise NotImplementedError
 

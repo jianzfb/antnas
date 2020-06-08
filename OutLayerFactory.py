@@ -18,7 +18,9 @@ class ImageNetOutLayer(NetworkBlock):
         self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
         
         self.conv = nn.Conv2d(in_chan, out_chan, kernel_size=1, stride=1, padding=0, bias=False)
-        self.bn = nn.BatchNorm2d(out_chan)
+        self.bn = nn.BatchNorm2d(out_chan,
+                                 momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                                 track_running_stats=NetworkBlock.bn_track_running_stats)
         
         self.classifier = nn.Linear(out_chan, num_classes)
         

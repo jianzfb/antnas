@@ -133,30 +133,27 @@ class Manager(object):
             sampling_arc = [self.arctecture_queue.get()]
             self.arctecture.resize_(1, len(sampling_arc[0])).copy_(torch.as_tensor(sampling_arc))
         
-        if index is None:
-            # 1.step forward model
-            loss, accuracy, sample_cost, prune_cost = \
-                self.parallel(x, y, self.arctecture, epoch=epoch, warmup=warmup)
+        # 1.step forward model
+        loss, accuracy, a, b = \
+            self.parallel(x, y, self.arctecture, epoch=epoch, warmup=warmup)
 
-            # 2.step get last sampling
-            return loss.mean(), \
-                   accuracy.sum(), \
-                   sample_cost.mean() if sample_cost is not None else None, \
-                   prune_cost.mean() if prune_cost is not None else None
-        else:
-            # 1.step forward model
-            loss, accuracy, a, b = \
-                self.parallel(x, y, self.arctecture, epoch=epoch, warmup=warmup, index=index)
-
-            # 2.step get last sampling
-            return loss.mean(), \
-                   accuracy.sum(), \
-                   a, \
-                   b
+        # 2.step get last sampling
+        return loss.mean(), \
+               accuracy.sum(), \
+               a, \
+               b
 
     def eval(self, x, y, loader, name=''):
         if self.parallel.training:
            self.parallel.eval()
+        
+        # random sampling architecture
+        if torch.cuda.is_available():
+            sampling_arc = [self.arctecture_queue.get() for _ in range(len(self.cuda_list))]
+            self.arctecture.resize_(len(self.cuda_list), len(sampling_arc[0])).copy_(torch.as_tensor(sampling_arc))
+        else:
+            sampling_arc = [self.arctecture_queue.get()]
+            self.arctecture.resize_(1, len(sampling_arc[0])).copy_(torch.as_tensor(sampling_arc))
 
         total_correct = 0
         total = 0
@@ -165,7 +162,7 @@ class Manager(object):
             y.resize_(labels.size()).copy_(labels)
 
             with torch.no_grad():
-                _, accuracy, _, _ = self.parallel(Variable(x), Variable(y))
+                _, accuracy, _, _ = self.parallel(x, y, self.arctecture)
 
             total_correct += accuracy.sum()
             total += labels.size(0)

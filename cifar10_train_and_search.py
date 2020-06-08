@@ -207,11 +207,9 @@ def main(args, plotter):
 
     # 构建结构Anchor
     anchors = None
-    index = None
     if len(args['anchor_archs']) > 0:
         anchors = Anchors()
         anchors.load(args['anchor_archs'], args['anchor_states'], OutLayer, [int(c) for c in args['cuda'].split(',')])
-        index = torch.as_tensor(list(range(args['bs'])))
 
     nas_manager.supernetwork.anchors = anchors
 
@@ -322,7 +320,7 @@ def main(args, plotter):
                 nas_manager.optimizer.zero_grad()
 
                 loss, model_accuracy, a, b = \
-                    nas_manager.train(x, y, epoch=epoch, index=index)
+                    nas_manager.train(x, y, epoch=epoch)
 
                 # train anchor arch network
                 if nas_manager.supernetwork.anchors is not None:

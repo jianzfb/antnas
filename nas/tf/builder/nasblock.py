@@ -1,11 +1,3 @@
-# -*- coding: UTF-8 -*-
-# @Time    : 2019-09-20 20:00
-# @File    : TFBlock.py
-# @Author  : jian<jian@mltalker.com>
-from __future__ import division
-from __future__ import unicode_literals
-from __future__ import print_function
-
 import tensorflow as tf
 
 slim = tf.contrib.slim
@@ -21,7 +13,7 @@ def hard_sigmoid(inputs):
     return result
 
 
-class TFBlock(object):
+class NasBlock(object):
     def __init__(self):
         pass
 
@@ -38,7 +30,7 @@ def _make_divisible(v, divisor=8, min_value=8):
     return new_v
 
 
-class InvertedResidualBlockWithSEHS(TFBlock):
+class InvertedResidualBlockWithSEHS(NasBlock):
     def __init__(self):
         super(InvertedResidualBlockWithSEHS, self).__init__()
 
@@ -57,7 +49,7 @@ class InvertedResidualBlockWithSEHS(TFBlock):
             input_shape = inputs.get_shape().as_list()
             if expansion != 1:
                 expansion_channels = _make_divisible(input_shape[3] * expansion)
-
+            
                 # expand no bias
                 x = slim.conv2d(x,
                                 num_outputs=expansion_channels,
@@ -66,14 +58,14 @@ class InvertedResidualBlockWithSEHS(TFBlock):
                                 activation_fn=hard_swish if hs else tf.nn.relu,
                                 normalizer_fn=slim.batch_norm,
                                 padding='SAME')
-
+        
             # stride = kwargs.get('stride', 1)
             # if reduction and stride == 1:
             #     stride = 2
             stride = 1
             if reduction:
                 stride = 2
-
+        
             # depthwise no bias
             rate = kwargs.get('dilation', 1)
             x = slim.separable_conv2d(x,
@@ -85,11 +77,11 @@ class InvertedResidualBlockWithSEHS(TFBlock):
                                       normalizer_fn=slim.batch_norm,
                                       depth_multiplier=1,
                                       padding='SAME')
-
+        
             if se:
                 x_channels = x.get_shape().as_list()[3]
                 squeeze_channels = _make_divisible(x_channels / ratio, divisor=8)
-    
+            
                 se_x = tf.reduce_mean(x, axis=[1, 2], keep_dims=True)
                 se_x = slim.conv2d(se_x,
                                    num_outputs=squeeze_channels,
@@ -106,7 +98,7 @@ class InvertedResidualBlockWithSEHS(TFBlock):
                                    normalizer_fn=None,
                                    padding='SAME')
                 x = tf.multiply(se_x, x)
-
+        
             # pointwise no bias
             x = slim.conv2d(x,
                             num_outputs=out_chan,
@@ -115,13 +107,13 @@ class InvertedResidualBlockWithSEHS(TFBlock):
                             activation_fn=None,
                             normalizer_fn=slim.batch_norm,
                             padding='SAME')
-
+        
             if input_shape[-1] == out_chan and (stride == 1):
                 x = tf.add(x, inputs)
             return x
 
 
-class ConcatBlock(TFBlock):
+class ConcatBlock(NasBlock):
     def __init__(self):
         super(ConcatBlock, self).__init__()
 
@@ -134,7 +126,7 @@ class ConcatBlock(TFBlock):
             return tf.concat(inputs, axis=3)
 
 
-class SepConvBN(TFBlock):
+class SepConvBN(NasBlock):
     def __init__(self):
         super(SepConvBN, self).__init__()
 
@@ -145,8 +137,8 @@ class SepConvBN(TFBlock):
                                       num_outputs=None,
                                       kernel_size=k_size,
                                       stride=stride,
-                                      activation_fn=None,
-                                      normalizer_fn=None,
+                                      activation_fn=tf.nn.relu,
+                                      normalizer_fn=slim.batch_norm,
                                       rate=dilation,
                                       padding='SAME')
             x = slim.conv2d(x,
@@ -157,29 +149,29 @@ class SepConvBN(TFBlock):
             return x
 
 
-# class Identity(TFBlock):
-#     def __init__(self, ):
-#         super(Identity, self).__init__()
-#
-#     def __call__(self, inputs, out_chan, scope, **kwargs):
-#         with tf.variable_scope(scope, 'Identity', [inputs]):
-#             inputs = tf.identity(inputs)
-#             input_shape = inputs.get_shape().as_list()
-#             if out_chan is not None and int(input_shape[-1]) != out_chan:
-#                 # 1x1 conv
-#                 inputs = slim.conv2d(inputs,
-#                                      num_outputs=out_chan,
-#                                      kernel_size=1,
-#                                      stride=1,
-#                                      activation_fn=None,
-#                                      normalizer_fn=slim.batch_norm,
-#                                      rate=1,
-#                                      padding='SAME')
-#
-#             return inputs
-#
+class Identity(NasBlock):
+    def __init__(self, ):
+        super(Identity, self).__init__()
 
-class ConvBn(TFBlock):
+    def __call__(self, inputs, out_chan, scope, **kwargs):
+        with tf.variable_scope(scope, 'Identity', [inputs]):
+            inputs = tf.identity(inputs)
+            input_shape = inputs.get_shape().as_list()
+            if out_chan is not None and int(input_shape[-1]) != out_chan:
+                # 1x1 conv
+                inputs = slim.conv2d(inputs,
+                                     num_outputs=out_chan,
+                                     kernel_size=1,
+                                     stride=1,
+                                     activation_fn=None,
+                                     normalizer_fn=slim.batch_norm,
+                                     rate=1,
+                                     padding='SAME')
+
+            return inputs
+
+
+class ConvBn(NasBlock):
     def __init__(self):
         super(ConvBn, self).__init__()
 
@@ -196,13 +188,14 @@ class ConvBn(TFBlock):
                                padding='SAME')
 
 
-class AddBlock(TFBlock):
+class AddBlock(NasBlock):
     def __init__(self):
         super(AddBlock, self).__init__()
 
     def __call__(self, inputs, scope, **kwargs):
         if not isinstance(inputs, list):
             with tf.variable_scope(scope, 'AddBlock', [inputs]):
+                # inputs = tf.identity(inputs)
                 return inputs
 
         with tf.variable_scope(scope, 'AddBlock', inputs):
@@ -225,7 +218,7 @@ class AddBlock(TFBlock):
             return a
 
 
-class Skip(TFBlock):
+class Skip(NasBlock):
     def __init__(self):
         super(Skip, self).__init__()
 
@@ -241,14 +234,14 @@ class Skip(TFBlock):
                 inputs = tf.concat((inputs, pad), axis=3)
             elif out_chan < int(input_shape[-1]):
                 inputs = inputs[:, :, :, 0:out_chan]
-            
+        
             if reduction:
                 inputs = slim.avg_pool2d(inputs, kernel_size=2, stride=2)
-
+        
             return inputs
 
 
-class ResizedBlock(TFBlock):
+class ResizedBlock(NasBlock):
     def __init__(self):
         super(ResizedBlock, self).__init__()
 
@@ -270,7 +263,7 @@ class ResizedBlock(TFBlock):
             return x
 
 
-class ASPPBlock(TFBlock):
+class ASPPBlock(NasBlock):
     def __init__(self):
         super(ASPPBlock, self).__init__()
 
@@ -325,7 +318,7 @@ class ASPPBlock(TFBlock):
             return res
 
 
-class LargekernelConv(TFBlock):
+class LargekernelConv(NasBlock):
     def __init__(self):
         super(LargekernelConv, self).__init__()
 

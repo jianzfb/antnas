@@ -1,5 +1,5 @@
 import networkx as nx
-from nas.tf_convertor.builder.advancednasblock import *
+from nas.tf.builder.nasblock import *
 import tensorflow as tf
 
 slim = tf.contrib.slim

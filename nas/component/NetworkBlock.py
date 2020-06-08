@@ -902,11 +902,17 @@ class ASPPBlock(NetworkBlock):
         self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
         # 1.step
         self.conv_1_step = nn.Conv2d(in_chan, depth, kernel_size=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(depth)
+        self.bn1 = nn.BatchNorm2d(depth,
+                                  momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                                  track_running_stats=NetworkBlock.bn_track_running_stats
+                                  )
         
         # 2.step
         self.conv_2_step = nn.Conv2d(in_chan, depth, kernel_size=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(depth)
+        self.bn2 = nn.BatchNorm2d(depth,
+                                  momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                                  track_running_stats=NetworkBlock.bn_track_running_stats
+                                  )
         
         # 3.step
         self.atrous_conv_list = nn.ModuleList([])
@@ -915,7 +921,10 @@ class ASPPBlock(NetworkBlock):
         
         # 5.step
         self.conv_5_step = nn.Conv2d((len(self.atrous_rates) + 2) * depth, depth, kernel_size=1, bias=False)
-        self.bn5 = nn.BatchNorm2d(depth)
+        self.bn5 = nn.BatchNorm2d(depth,
+                                  momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                                  track_running_stats=NetworkBlock.bn_track_running_stats
+                                  )
         
         self.params = {
             'module_list': ['ASPPBlock'],

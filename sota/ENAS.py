@@ -1,10 +1,11 @@
 # -*- coding: UTF-8 -*-
-# @Time    : 2020-04-01 12:54
-# @File    : SOTA.py
+# @Time    : 2020-06-08 09:03
+# @File    : ENAS.py
 # @Author  : jian<jian@mltalker.com>
 from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
+
 from nas.searchspace.PKAutoArc import *
 from nas.searchspace.PKArc import *
 from nas.component.NetworkBlock import *
@@ -13,119 +14,6 @@ from OutLayerFactory import *
 import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-# mobilenetv3-large
-def mobilenetv3_large(head, tail, prefix):
-    modules = [
-        InvertedResidualBlockWithSEHS(
-            in_chan=head.params['out_chan'],out_chan=16,kernel_size=3,reduction=False,hs=False,se=False,expansion=1),
-        InvertedResidualBlockWithSEHS(
-            in_chan=16,out_chan=24,kernel_size=3,reduction=True,hs=False,se=False,expansion=4),
-        InvertedResidualBlockWithSEHS(
-            in_chan=24,out_chan=24,kernel_size=3,reduction=False,hs=False,se=False,expansion=3),
-        InvertedResidualBlockWithSEHS(
-            in_chan=24,out_chan=40,kernel_size=5,reduction=True,hs=False,se=True,expansion=3),
-        InvertedResidualBlockWithSEHS(
-            in_chan=40,out_chan=40,kernel_size=5,reduction=False,hs=False,se=True,expansion=3),
-        InvertedResidualBlockWithSEHS(
-            in_chan=40,out_chan=40,kernel_size=5,reduction=False,hs=False,se=True,expansion=3),
-        InvertedResidualBlockWithSEHS(
-            in_chan=40,out_chan=80,kernel_size=3,reduction=True,hs=True,se=False,expansion=6),
-        InvertedResidualBlockWithSEHS(
-            in_chan=80,out_chan=80,kernel_size=3,reduction=False,hs=True,se=False,expansion=2.5),
-        InvertedResidualBlockWithSEHS(
-            in_chan=80,out_chan=80,kernel_size=3,reduction=False,hs=True,se=False,expansion=184/80),
-        InvertedResidualBlockWithSEHS(
-            in_chan=80,out_chan=80,kernel_size=3,reduction=False,hs=True,se=False,expansion=184/80),
-        InvertedResidualBlockWithSEHS(
-            in_chan=80,out_chan=112,kernel_size=3,reduction=False,hs=True,se=True,expansion=6),
-        InvertedResidualBlockWithSEHS(
-            in_chan=112,out_chan=112,kernel_size=3,reduction=False,hs=True,se=True,expansion=6),
-        InvertedResidualBlockWithSEHS(
-            in_chan=112,out_chan=160,kernel_size=5,reduction=True,hs=True,se=True,expansion=6),
-        InvertedResidualBlockWithSEHS(
-            in_chan=160,out_chan=160,kernel_size=5,reduction=False,hs=True,se=True,expansion=6),
-        InvertedResidualBlockWithSEHS(
-            in_chan=160,out_chan=160,kernel_size=5,reduction=False,hs=True,se=True,expansion=6),
-    ]
-
-    graph = nx.DiGraph()
-    pk = PKAutoArc(graph)
-    pk.generate(head, tail, modules)
-    pk.save('./', '%s_mobilenetv3_large'%prefix)
-
-
-# mobilenetv3-small
-def mobilenetv3_small(head, tail, prefix):
-    modules = [
-        InvertedResidualBlockWithSEHS(
-            in_chan=head.params['out_chan'],out_chan=16,kernel_size=3,reduction=True,hs=False,se=True,expansion=1),
-        InvertedResidualBlockWithSEHS(
-            in_chan=16,out_chan=24,kernel_size=3,reduction=True,hs=False,se=False,expansion=72/16),
-        InvertedResidualBlockWithSEHS(
-            in_chan=24,out_chan=24,kernel_size=3,reduction=False,hs=False,se=False,expansion=88/24),
-        InvertedResidualBlockWithSEHS(
-            in_chan=24,out_chan=40,kernel_size=5,reduction=True,hs=True,se=True,expansion=96/24),
-        InvertedResidualBlockWithSEHS(
-            in_chan=40,out_chan=40,kernel_size=5,reduction=False,hs=True,se=True,expansion=240/40),
-        InvertedResidualBlockWithSEHS(
-            in_chan=40,out_chan=40,kernel_size=5,reduction=False,hs=True,se=True,expansion=240/40),
-        InvertedResidualBlockWithSEHS(
-            in_chan=40,out_chan=48,kernel_size=5,reduction=False,hs=True,se=True,expansion=120/40),
-        InvertedResidualBlockWithSEHS(
-            in_chan=48,out_chan=48,kernel_size=5,reduction=False,hs=True,se=True,expansion=144/48),
-        InvertedResidualBlockWithSEHS(
-            in_chan=48,out_chan=96,kernel_size=5,reduction=True,hs=True,se=True,expansion=288/48),
-        InvertedResidualBlockWithSEHS(
-            in_chan=96,out_chan=96,kernel_size=5,reduction=False,hs=True,se=True,expansion=576/96),
-        InvertedResidualBlockWithSEHS(
-            in_chan=96,out_chan=96,kernel_size=5,reduction=False,hs=True,se=True,expansion=576/96)
-    ]
-
-    graph = nx.DiGraph()
-    pk = PKAutoArc(graph)
-    pk.generate(head, tail, modules)
-    pk.save('./', '%s_mobilenetv3_small'%prefix)
-
-
-# mobilenetv3-edgetpu
-def mobilenetv3_edgetpu(head, tail, prefix):
-    pass
-
-
-# mobilenetv2
-def mobilenetv2(head, tail, prefix, width_mult=1.0):
-    # setting of inverted residual blocks
-    cfgs = [
-        # t, c, n, s
-        [1, 16, 1, 1],
-        [6, 24, 2, 2],
-        [6, 32, 3, 2],
-        [6, 64, 4, 2],
-        [6, 96, 3, 1],
-        [6, 160, 3, 2],
-        [6, 320, 1, 1],
-    ]
-    input_channel = head.params['out_chan']
-    modules = []
-    for t, c, n, s in cfgs:
-        output_channel = _make_divisible(c * width_mult, 4 if width_mult == 0.1 else 8)
-        for i in range(n):
-            modules.append(InvertedResidualBlockWithSEHS(in_chan=input_channel,
-                                                         out_chan=output_channel,
-                                                         expansion=t,
-                                                         kernel_size=3,
-                                                         reduction=True if (i == 0) and (s == 2) else False,
-                                                         se=False,
-                                                         hs=False))
-            input_channel = output_channel
-
-    graph = nx.DiGraph()
-    pk = PKAutoArc(graph)
-    pk.generate(head, tail, modules)
-    pk.save('./', '%s_mobilenetv2'%prefix)
-
 
 # ENAS
 def ENAS(tail, prefix):
@@ -322,33 +210,9 @@ def ENAS(tail, prefix):
     return pk
 
 
-# # cifar mobilenetv3-large
-# # head (固定计算节点，对应激活参数不可学习)
-# head = ConvBn(3, 16, k_size=3, stride=1, relu=True)
-# # tail (固定计算节点，结构不可学习)
-# tail = OutLayer(160, (10,), True)
-# mobilenetv3_large(head,tail, "./")
-
-# # cifar mobilenetv2
-# # head (固定计算节点，对应激活参数不可学习)
-# head = ConvBn(3, 32, k_size=3, stride=1, relu=True)
-# # tail (固定计算节点，结构不可学习)
-# tail = OutLayer(320, (10,), True)
-# mobilenetv2(head, tail, 'cifar')
-
-
 # # cifar ENAS
 # # tail (固定计算节点，结构不可学习)
 # tail = OutLayer(64, (10,), True)
 # pk = ENAS(tail, "ENAS")
 # sampled_loss, pruned_loss = pk.arc_loss([1,3,32,32], 'comp')
 # print(pruned_loss)
-
-
-# ImageNet mobilenetv2
-width_mult = 1.0
-input_channel = _make_divisible(32 * width_mult, 4 if width_mult == 0.1 else 8)
-head = ConvBn(3, input_channel, True, 3, 2)
-output_channel = _make_divisible(1280 * width_mult, 4 if width_mult == 0.1 else 8) if width_mult > 1.0 else 1280
-tail = ImageNetOutLayer(320, output_channel, 1000)
-mobilenetv2(head, tail, 'pk')

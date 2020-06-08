@@ -1,6 +1,6 @@
 # @Time    : 2019/10/22 10:43
 # @Author  : zhangchenming
-from nas.tf_convertor.builder.nasfactory import *
+from nas.tf.builder.nasfactory import *
 
 
 def gettime(images, is_training, arch):

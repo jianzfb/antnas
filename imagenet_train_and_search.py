@@ -134,7 +134,7 @@ def main(args, plotter):
     args.update({'plotter': plotter})
 
     # 创建NAS模型
-    nas_manager = Manager(args, data_properties, out_layer=ImageNetOutLayer(320, 128, 1000))
+    nas_manager = Manager(args, data_properties, out_layer=ImageNetOutLayer(320, 1280, 1000))
 
     # pk mobilenetv2
     nas_manager.build(blocks_per_stage=[1, 1, 1, 2, 2],
@@ -143,11 +143,9 @@ def main(args, plotter):
 
     # 构建结构Anchor
     anchors = None
-    index = None
     if len(args['anchor_archs']) > 0:
         anchors = Anchors()
         anchors.load(args['anchor_archs'], args['anchor_states'], ImageNetOutLayer, [int(c) for c in args['cuda'].split(',')])
-        index = torch.as_tensor(list(range(args['bs'])))
 
     nas_manager.supernetwork.anchors = anchors
 
@@ -164,10 +162,6 @@ def main(args, plotter):
     xp.train.objective_cost = mlogger.metric.Average(plotter=plotter, plot_title="objective_cost", plot_legend="architecture")
     xp.train.learning_rate = mlogger.metric.Simple(plotter=plotter, plot_title="LR", plot_legend="train")
 
-    xp.val = mlogger.Container()
-    xp.val.accuracy = mlogger.metric.Simple(plotter=plotter, plot_title="val_test_accuracy", plot_legend="val")
-    xp.val.timer = mlogger.metric.Timer(plotter=plotter, plot_title="Time", plot_legend="val")
-
     xp.test = mlogger.Container()
     xp.test.accuracy = mlogger.metric.Simple(plotter=plotter, plot_title="val_test_accuracy", plot_legend="test")
     xp.test.timer = mlogger.metric.Timer(plotter=plotter, plot_title="Time", plot_legend="test")
@@ -181,16 +175,6 @@ def main(args, plotter):
                              mlogger.metric.Average(plotter=plotter,
                                                     plot_title='train_%s'%cost,
                                                     plot_legend="pruned_cost"))
-
-        xp.val.__setattr__('eval_sampled_%s' % cost,
-                           mlogger.metric.Average(plotter=plotter,
-                                                  plot_title='eval_%s' % cost,
-                                                  plot_legend="sampled_cost"))
-        xp.val.__setattr__('eval_pruned_%s' % cost,
-                           mlogger.metric.Average(plotter=plotter,
-                                                  plot_title='eval_%s' % cost,
-                                                  plot_legend="pruned_cost"))
-
     # initialize supernetwork
     logging.info('initialize supernetwork basic info')
     nas_manager.supernetwork.init(shape=(2, data_properties['in_channels'], data_properties['img_dim'], data_properties['img_dim']),
@@ -239,7 +223,8 @@ def main(args, plotter):
 
                 # train and return predictions, loss, correct
                 nas_manager.optimizer.zero_grad()
-                loss, model_accuracy, model_sampled_cost, model_pruned_cost = nas_manager.train(x, y, epoch=warmup_epoch, warmup=True)
+                loss, model_accuracy, model_sampled_cost, model_pruned_cost = \
+                    nas_manager.train(x, y, epoch=warmup_epoch, warmup=True)
 
                 # update model parameter
                 loss.backward()
@@ -257,7 +242,8 @@ def main(args, plotter):
 
             # write logger
             logger.info(epoch)
-
+            
+            # training architecture parameter
             for i, (inputs, labels) in enumerate(tqdm(train_loader, desc='Train', ascii=True)):
                 # adjust learning rate
                 lr = nas_manager.adjust_lr(args, epoch, i, len(train_loader), logger)
@@ -271,7 +257,7 @@ def main(args, plotter):
                 nas_manager.optimizer.zero_grad()
 
                 loss, model_accuracy, a, b = \
-                    nas_manager.train(x, y, epoch=epoch, index=index)
+                    nas_manager.train(x, y, epoch=epoch)
 
                 # train anchor arch network
                 if nas_manager.supernetwork.anchors is not None:
@@ -318,35 +304,20 @@ def main(args, plotter):
                 for metric in xp.train.metrics():
                     metric.log()
 
-                # if (i + 1) % lp == 0:
-                #     logger.info('\nEvaluation')
-                #
-                #     progress = epoch + (i + 1) / len(train_loader)
-                #     val_score = nas_manager.eval(x, y, val_loader, 'validation')
-                #     #test_score = nas_manager.eval(x, y, test_loader, 'test')
-                #     test_score = 0.0
-                #     # record model accuracy on validation and test dataset
-                #     xp.val.accuracy.update(val_score)
-                #     xp.test.accuracy.update(test_score)
-                #
-                #     msg = '[{:.2f}] Loss: {:.5f} - Cost: {:.3E} - Train: {:2.2f}% - Val: {:2.2f}% - Test: {:2.2f}%'
-                #     logger.info(msg.format(progress,
-                #                            xp.train.classif_loss.value,
-                #                            xp.train.objective_cost.value,
-                #                            xp.train.accuracy.value,
-                #                            xp.val.accuracy.value,
-                #                            xp.test.accuracy.value))
-                #
-                #     xp.val.timer.update()
-                #     xp.test.timer.update()
-                #     for metric in xp.val.metrics():
-                #         metric.log()
-                #     for metric in xp.test.metrics():
-                #         metric.log()
-
                 plotter.update_plots()
 
+            # test random sampling architecture accuracy
+            if (epoch + 1) % 2 == 0:
+                acc_score = nas_manager.eval(x, y, test_loader, 'Test')
+                xp.test.accuracy.update(acc_score)
+                xp.test.timer.update()
+                for metric in xp.test.metrics():
+                    metric.log()
+                    
+                logging.info("accuracy %f on test dataset after epoch %d" % (acc_score, epoch))
+
             # save model state
+            logger.info("plot and save search space")
             nas_manager.supernetwork.search_and_plot('./supernetwork/')
             nas_manager.supernetwork.search_and_save('./supernetwork/',
                                                      'supernetwork_state_%d'%(epoch%args['latest_num']))

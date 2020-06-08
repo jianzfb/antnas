@@ -1,9 +1,9 @@
 import tensorflow as tf
 import argparse
 
-from nas.tf_convertor.model import deeplabv3plus
-from nas.tf_convertor.config import config_param
-from nas.tf_convertor import data_generator
+from nas.tf.model import deeplabv3plus
+from nas.tf.config import config_param
+from nas.tf import data_generator
 
 parser = argparse.ArgumentParser(description='test nas on voc')
 parser.add_argument('-arch', action='store', type=str)

@@ -29,11 +29,8 @@ class UniformSamplingSuperNetwork(SuperNetwork):
 
         # 2.step get sampling architecture of
         # using same architecture in batch
-        if arc is None:
-            batched_sampling = torch.as_tensor([self.sample_arch()], device=x.device)
-        else:
-            # search and find
-            batched_sampling = arc[0, :].view((1, arc.shape[1]))
+        assert(arc is not None)
+        batched_sampling = arc[0, :].view((1, arc.shape[1]))
         
         # 3.step forward network
         # 3.1.step set the input of network graph
