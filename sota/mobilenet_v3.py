@@ -1,6 +1,6 @@
 # @Time    : 2020/5/28 10:16
 # @Author  : zhangchenming
-from nas.searchspace.PKAutoArc import *
+from antnas.searchspace.PKAutoArc import *
 
 
 def mobilenetv3_large(head, tail, prefix):

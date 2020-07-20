@@ -6,10 +6,10 @@ from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
 
-from nas.searchspace.PKAutoArc import *
-from nas.searchspace.PKArc import *
-from nas.component.NetworkBlock import *
-from nas.component.NetworkBlock import _make_divisible
+from antnas.searchspace.PKAutoArc import *
+from antnas.searchspace.PKArc import *
+from antnas.component.NetworkBlock import *
+from antnas.component.NetworkBlock import _make_divisible
 from OutLayerFactory import *
 import logging
 logging.basicConfig(level=logging.INFO)

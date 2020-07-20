@@ -6,11 +6,11 @@ from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
 
-from nas.networks.Anchors import *
-from nas.searchspace.StageBlockCellArc import *
-from nas.searchspace.PKCifar10SN import *
-from nas.searchspace.PKCifar10SN import Cifar10CellBlock
-from nas.searchspace.PKCifar10SN import Cifar10ReductionCellBlock
+from antnas.networks.Anchors import *
+from antnas.searchspace.StageBlockCellArc import *
+from antnas.searchspace.PKCifar10SN import *
+from antnas.searchspace.PKCifar10SN import Cifar10CellBlock
+from antnas.searchspace.PKCifar10SN import Cifar10ReductionCellBlock
 import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*-
 # @Time    : 2020-03-30 23:18
-# @File    : train.py
+# @File    : cifar10_train.py
 # @Author  : jian<jian@mltalker.com>
 from __future__ import division
 from __future__ import unicode_literals
@@ -12,8 +12,8 @@ import torch
 from torch import optim
 from tqdm import tqdm
 import argparse
-from nas.dataset.datasets import get_data
-from nas.networks.FixedNetwork import *
+from antnas.dataset.datasets import get_data
+from antnas.networks.FixedNetwork import *
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

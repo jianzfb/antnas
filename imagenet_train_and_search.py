@@ -8,11 +8,11 @@ from __future__ import print_function
 import logging
 
 import mlogger
-from nas.dataset.datasets import get_data
-from nas.manager import *
-from nas.utils.misc import *
-from nas.networks.Anchors import *
-from nas.utils.drawers.NASDrawer import *
+from antnas.dataset.datasets import get_data
+from antnas.manager import *
+from antnas.utils.misc import *
+from antnas.networks.Anchors import *
+from antnas.utils.drawers.NASDrawer import *
 from OutLayerFactory import *
 
 logging.basicConfig(level=logging.INFO)

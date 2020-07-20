@@ -7,12 +7,13 @@ from __future__ import unicode_literals
 from __future__ import print_function
 import logging
 
-import mlogger
-from nas.dataset.datasets import get_data
-from nas.manager import *
-from nas.utils.misc import *
-from nas.networks.Anchors import *
-from nas.utils.drawers.NASDrawer import *
+from antnas.dataset.datasets import get_data
+from antnas.manager import *
+from antnas.utils.misc import *
+from antnas.networks.Anchors import *
+from antnas.utils.drawers.NASDrawer import *
+import antvis.client.mlogger as mlogger
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -182,7 +183,7 @@ class OutLayer(NetworkBlock):
         return [0] + [0] * (self.state_num - 1)
 
 
-def main(args, plotter):
+def main(args):
     if torch.cuda.is_available():
         print('CUDA is OK')
 
@@ -193,9 +194,6 @@ def main(args, plotter):
     # 获得数据集
     train_loader, val_loader, test_loader, data_properties = \
         get_data(args['dset'], args['bs'], args['path'], args)
-
-    # 设置visdom plotter
-    args.update({'plotter': plotter})
 
     # 创建NAS模型
     nas_manager = Manager(args, data_properties, out_layer=OutLayer((10,), 256, True))
@@ -215,30 +213,21 @@ def main(args, plotter):
 
     # logger initialize
     xp = mlogger.Container()
-    xp.config = mlogger.Config(plotter=plotter)
-    xp.epoch = mlogger.metric.Simple()
-
     xp.train = mlogger.Container()
-    xp.train.classif_loss = mlogger.metric.Average(plotter=plotter, plot_title="classif_loss", plot_legend="train")
-    xp.train.accuracy = mlogger.metric.Average(plotter=plotter, plot_title="accuracy", plot_legend="train")
-    xp.train.rewards = mlogger.metric.Average(plotter=plotter, plot_title="rewards",plot_legend="train")
-    xp.train.timer = mlogger.metric.Timer(plotter=plotter, plot_title="Time", plot_legend="train")
-    xp.train.objective_cost = mlogger.metric.Average(plotter=plotter, plot_title="objective_cost", plot_legend="architecture")
-    xp.train.learning_rate = mlogger.metric.Simple(plotter=plotter, plot_title="LR", plot_legend="train")
+    xp.train.classif_loss = mlogger.metric.Average(plot_title="classif_loss")
+    xp.train.accuracy = mlogger.metric.Average(plot_title="accuracy")
+    xp.train.rewards = mlogger.metric.Average(plot_title="rewards")
+    xp.train.objective_cost = mlogger.metric.Average(plot_title="objective_cost")
+    xp.train.learning_rate = mlogger.metric.Simple(plot_title="LR")
 
     xp.test = mlogger.Container()
-    xp.test.accuracy = mlogger.metric.Simple(plotter=plotter, plot_title="val_test_accuracy", plot_legend="test")
-    xp.test.timer = mlogger.metric.Timer(plotter=plotter, plot_title="Time", plot_legend="test")
+    xp.test.accuracy = mlogger.metric.Simple(plot_title="val_test_accuracy")
 
     for cost in args['cost_evaluation']:
         xp.train.__setattr__('train_sampled_%s'%cost,
-                            mlogger.metric.Average(plotter=plotter,
-                                                   plot_title='train_%s'%cost,
-                                                   plot_legend="sampled_cost"))
+                            mlogger.metric.Average(plot_title='train_%s'%cost))
         xp.train.__setattr__('train_pruned_%s'%cost,
-                             mlogger.metric.Average(plotter=plotter,
-                                                    plot_title='train_%s'%cost,
-                                                    plot_legend="pruned_cost"))
+                             mlogger.metric.Average(plot_title='train_%s'%cost))
 
     # initialize supernetwork
     logging.info('initialize supernetwork basic info')
@@ -371,11 +360,8 @@ def main(args, plotter):
                 # update parameter
                 nas_manager.optimizer.step()
 
-                xp.train.timer.update()
                 for metric in xp.train.metrics():
                     metric.log()
-
-                plotter.update_plots()
 
             # save model state
             nas_manager.supernetwork.search_and_plot('./supernetwork/')
@@ -392,9 +378,7 @@ def main(args, plotter):
 if __name__ == '__main__':
     logger.info('Executing main from {}'.format(os.getcwd()))
     args = vars(argument_parser())
-
-    plotter = mlogger.VisdomPlotter({'env': args['draw_env'],
-                                     'server': 'http://localhost',
-                                     'port': 8097},
-                                    manual_update=True)
-    main(args, plotter)
+    
+    # 配置mlogger
+    mlogger.config('127.0.0.1', 8999, 'me', 'QW')
+    main(args)
