@@ -18,6 +18,7 @@ from antnas.networks.bayesian import *
 from antnas.utils.drawers.NASDrawer import *
 import copy
 from tqdm import tqdm
+import antvis.client.mlogger as mlogger
 
 
 class ArchitectureModelProblem(Problem):
@@ -85,7 +86,7 @@ class ArchitectureModelProblem(Problem):
 
           total_correct += accuracy.sum()
           total += labels.size(0)
-          
+
       accuracy = total_correct.float().item() / total
       return 1.0 - accuracy
 
@@ -151,9 +152,11 @@ class SuperNetwork(nn.Module):
         self.use_preload_arch = False
         self.problem = None
         self._anchors = None
-        self.plotter = kwargs.get('plotter', None)
-        self.drawer = NASDrawer(self.plotter)
-        self.visdom_window = {}
+        self.drawer = NASDrawer()
+        # mlogger
+        self.search_log = mlogger.Container()
+        self.search_log.arch_loss = mlogger.complex.Bar('arc loss')
+        self.search_log.gene = mlogger.complex.Heatmap('gene')
 
     def set_graph(self, network, in_node, out_node):
         self.net = network
@@ -206,6 +209,7 @@ class SuperNetwork(nn.Module):
             if len(input) == 0:
                 raise RuntimeError('Node {} has no inputs'.format(node))
 
+            print(node)
             out = self.blocks[cur_node['module']](input)
             if node == self.out_node:
                 break
@@ -542,77 +546,82 @@ class SuperNetwork(nn.Module):
         plt.close()
 
         # 2.step show population architecture info distribution (on visdom)
-        if self.plotter is not None:
-            title = ""
-            if arc_loss == 'comp':
-                title = 'MULADD/FLOPS DISTRIBUTION'
-            elif arc_loss == 'latency':
-                title = "LATENCY(ms) DISTRIBUTION"
-            else:
-                title = "PARAMETER NUMBER DISTRIBUTION"
+        title = ""
+        if arc_loss == 'comp':
+            title = 'MULADD/FLOPS DISTRIBUTION'
+        elif arc_loss == 'latency':
+            title = "LATENCY(ms) DISTRIBUTION"
+        else:
+            title = "PARAMETER NUMBER DISTRIBUTION"
 
-            arch_error_list = [individual.objectives[0] for individual in population]
-            arch_loss_list = [individual.objectives[1] for individual in population]
+        arch_error_list = [individual.objectives[0] for individual in population]
+        arch_loss_list = [individual.objectives[1] for individual in population]
 
-            # 2.1.step architecture loss distribution (直方图)
-            search_arc_loss_distribution_win = \
-                self.plotter.viz.histogram(np.array(arch_loss_list),
-                                           opts=dict(
-                                               title=title,
-                                               numbins=1000,
-                                           ),
-                                           win=None if "search_arc_loss_distribution" not in self.visdom_window else self.visdom_window['search_arc_loss_distribution'])
-            if 'search_arc_loss_distribution' not in self.visdom_window:
-                self.visdom_window['search_arc_loss_distribution'] = \
-                    search_arc_loss_distribution_win
-            
-            # 2.2.step pareto front (标签的散点图)
-            search_arc_pareto_front_win = \
-                self.plotter.viz.scatter(
-                    X=np.concatenate([np.array(arch_loss_list).reshape((-1, 1)), np.array(arch_error_list).reshape((-1, 1))], axis=1),
-                    Y=np.arange(1, len(population)+1),
-                    opts=dict(
-                        legend=['ARCH_%d'%i for i in range(1, len(population)+1)],
-                        title="PARETO FRONT",
-                    ),
-                    win=None if "search_arc_pareto_front" not in self.visdom_window else self.visdom_window['search_arc_pareto_front']
-                )
-            if 'search_arc_pareto_front' not in self.visdom_window:
-                self.visdom_window['search_arc_pareto_front'] = search_arc_pareto_front_win
+        # 2.1.step architecture loss distribution (直方图)
+        # search_arc_loss_distribution_win = \
+        #     self.plotter.viz.histogram(np.array(arch_loss_list),
+        #                                opts=dict(
+        #                                    title=title,
+        #                                    numbins=1000,
+        #                                ),
+        #                                win=None if "search_arc_loss_distribution" not in self.visdom_window else self.visdom_window['search_arc_loss_distribution'])
+        #
+        #
+        # if 'search_arc_loss_distribution' not in self.visdom_window:
+        #     self.visdom_window['search_arc_loss_distribution'] = \
+        #         search_arc_loss_distribution_win
+        #
+        self.search_log.arch_loss.update(arch_loss_list)
 
-            # 2.3.step architecture information （热点图）
-            GENE = []
-            for i in range(len(population)):
-                feature = [population.population[i].features[self.net.node[node_name]['sampling_param']] for node_name in self.traversal_order]
-                GENE.append(feature)
+        # # 2.2.step pareto front (标签的散点图)
+        # search_arc_pareto_front_win = \
+        #     self.plotter.viz.scatter(
+        #         X=np.concatenate([np.array(arch_loss_list).reshape((-1, 1)), np.array(arch_error_list).reshape((-1, 1))], axis=1),
+        #         Y=np.arange(1, len(population)+1),
+        #         opts=dict(
+        #             legend=['ARCH_%d'%i for i in range(1, len(population)+1)],
+        #             title="PARETO FRONT",
+        #         ),
+        #         win=None if "search_arc_pareto_front" not in self.visdom_window else self.visdom_window['search_arc_pareto_front']
+        #     )
+        # if 'search_arc_pareto_front' not in self.visdom_window:
+        #     self.visdom_window['search_arc_pareto_front'] = search_arc_pareto_front_win
+        #
+        # 2.3.step architecture information （热点图）
+        GENE = []
+        for i in range(len(population)):
+            feature = [population.population[i].features[self.net.node[node_name]['sampling_param']] for node_name in self.traversal_order]
+            GENE.append(feature)
 
-            search_arc_gene_chrome_win = \
-                self.plotter.viz.heatmap(
-                    np.array(GENE),
-                    opts=dict(
-                        title="POLUTATION GENE CHROME",
-                        columnnames=[node_name for node_name in self.traversal_order],
-                        rownames=['ARCH_%d'%index for index in range(1, len(population)+1)],
-                        colormap='Electric',
-                    ),
-                    win=None if "search_arc_gene_chrome" not in self.visdom_window else self.visdom_window['search_arc_gene_chrome']
-                )
-            if 'search_arc_gene_chrome' not in self.visdom_window:
-                self.visdom_window['search_arc_gene_chrome'] = search_arc_gene_chrome_win
-            
-            # 2.4.step structure sampling visualization
-            data = np.array(GENE)
-            data = data.astype(np.int32)
-            for node_index, node_name in enumerate(self.traversal_order):
-                counts = np.bincount(data[:, node_index])
-                sampling_val = np.argmax(counts)
-                self.net.node[node_name]['sampling_val'] = sampling_val
+        # search_arc_gene_chrome_win = \
+        #     self.plotter.viz.heatmap(
+        #         np.array(GENE),
+        #         opts=dict(
+        #             title="POLUTATION GENE CHROME",
+        #             columnnames=[node_name for node_name in self.traversal_order],
+        #             rownames=['ARCH_%d'%index for index in range(1, len(population)+1)],
+        #             colormap='Electric',
+        #         ),
+        #         win=None if "search_arc_gene_chrome" not in self.visdom_window else self.visdom_window['search_arc_gene_chrome']
+        #     )
+        #
+        # if 'search_arc_gene_chrome' not in self.visdom_window:
+        #     self.visdom_window['search_arc_gene_chrome'] = search_arc_gene_chrome_win
+        self.search_log.gene.update(GENE)
 
-            self.draw()
+        # # 2.4.step structure sampling visualization
+        # data = np.array(GENE)
+        # data = data.astype(np.int32)
+        # for node_index, node_name in enumerate(self.traversal_order):
+        #     counts = np.bincount(data[:, node_index])
+        #     sampling_val = np.argmax(counts)
+        #     self.net.node[node_name]['sampling_val'] = sampling_val
+        #
+        # self.draw()
     
     def draw(self, net=None):
         net = net if net is not None else self.net
-        self.drawer.draw(net)
+        # self.drawer.draw(net)
         
     def hierarchical(self):
         # get network hierarchical

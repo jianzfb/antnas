@@ -5,7 +5,6 @@ import logging
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
-from plotly.graph_objs import *
 import antvis.client.mlogger as mlogger
 
 logger = logging.getLogger(__name__)
@@ -16,7 +15,7 @@ class Drawer(object):
 
     def __init__(self):
         self.win = None
-        self.vis = mlogger.vis
+        # self.vis = mlogger.vis
 
     def draw_weights(self, graph, weights=None, vis_opts=None, vis_win=None, vis_env=None):
         node_filter = lambda n: True
@@ -50,7 +49,7 @@ class Drawer(object):
         if 'height' not in vis_opts:
             vis_opts['height'] = 450
         
-        self.win = self.vis.svg(svgstr=img, win=win, opts=vis_opts, env=env)
+        # self.win = self.vis.svg(svgstr=img, win=win, opts=vis_opts, env=env)
 
     def _draw_net(self, graph,
                   filename=None,

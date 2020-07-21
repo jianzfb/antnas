@@ -152,7 +152,7 @@ class Identity(NetworkBlock):
     n_layers = 0
     n_comp_steps = 0
 
-    def __init__(self):
+    def __init__(self, in_chan=0, out_chan=0):
         super(Identity, self).__init__()
         self.structure_fixed = False
 
@@ -160,8 +160,8 @@ class Identity(NetworkBlock):
             'module_list': ['Identity'],
             'name_list': ['Identity'],
             'Identity': {},
-            'in_chan': 0,
-            'out_chan': 0
+            'in_chan': in_chan,
+            'out_chan': out_chan
         }
 
     def forward(self, x, sampling=None):
@@ -642,6 +642,32 @@ class MaxPoolingBlock(NetworkBlock):
 
     def forward(self, x, sampling=None):
         x = torch.nn.MaxPool2d(kernel_size=self.k_size,stride=self.stride,padding=(self.k_size-1)//2)(x)
+        return x
+
+
+class AvgPoolingBlock(NetworkBlock):
+    n_layers = 0
+    n_comp_steps = 1
+
+    def __init__(self, k_size, stride):
+        super(AvgPoolingBlock, self).__init__()
+        self.params = {
+            'module_list': ['AvgPoolingBlock'],
+            'name_list': ['AvgPoolingBlock'],
+            'AvgPoolingBlock': {
+                'k_size': k_size,
+                'stride': stride
+            },
+            'in_chan': 0,
+            'out_chan': 0
+        }
+
+        self.k_size = k_size
+        self.stride = stride
+        self.structure_fixed = True
+
+    def forward(self, x, sampling=None):
+        x = torch.nn.AvgPool2d(kernel_size=self.k_size,stride=self.stride,padding=(self.k_size-1)//2)(x)
         return x
 
 

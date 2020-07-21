@@ -1,10 +1,7 @@
 torch
-torchvision==0.2
+torchvision
 networkx==2
 matplotlib==2
-tqdm==4.23
-pymongo==3
-sacred==0.7
-plotly==2
+tqdm==4.47.0
 numpy
 easydict

@@ -14,12 +14,14 @@ import torch.nn as nn
 
 
 class Arc:
-    def __init__(self, graph=None):
+    def __init__(self, graph=None, blocks=None):
         self.graph = graph
         if self.graph is None:
             self.graph = nx.DiGraph()
 
-        self.blocks = nn.ModuleList([])
+        self.blocks = blocks
+        if self.blocks is None:
+            self.blocks = nn.ModuleList([])
         self.sampling_parameters = None
 
         self._in_node = ""

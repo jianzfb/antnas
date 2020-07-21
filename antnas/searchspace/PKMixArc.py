@@ -18,8 +18,13 @@ class PKMixArc(PKAutoArc):
                  aggregation_cls,
                  transformer_cls,
                  graph,
-                 sampling_param_generator=None):
-        super(PKMixArc, self).__init__(graph)
+                 blocks,
+                 sampling_param_generator=None,
+                 backbone='',
+                 decoder_input_endpoints=[0,2,5,16],
+                 decoder_input_strides=[4,8,16,32],
+                 decoder_depth=32):
+        super(PKMixArc, self).__init__(graph, blocks)
         self.sampling_param_generator = sampling_param_generator
         self.sampling_parameters = nn.ParameterList()
 
@@ -28,6 +33,10 @@ class PKMixArc(PKAutoArc):
         self.transformer_cls = transformer_cls
         self.aggregation_cls = aggregation_cls
         self.hierarchical = [[[]]]
+        self.backbone = backbone
+        self.decoder_input_endpoints = decoder_input_endpoints
+        self.decoder_input_strides = decoder_input_strides
+        self.decoder_depth = decoder_depth
     
     def add_fixed(self, pos, module):
         node_name = SuperNetwork._FIXED_NODE_FORMAT.format(*pos)
@@ -119,30 +128,17 @@ class PKMixArc(PKAutoArc):
     
         self.blocks.append(module)
         return trans_name
-    
-    def generate(self, head, tail):
-        # this is Example Code (for seg architecture)
-        # mobilenet-v2 1.0
-        # setting of inverted residual blocks
-        # cfgs = [
-        #     # t, c, n, s, r
-        #     [1, 16, 1, 1, 1],
-        #     [6, 24, 2, 2, 1],
-        #     [6, 32, 3, 2, 1],
-        #     [6, 64, 4, 2, 1],
-        #     [6, 96, 3, 1, 1],
-        #     [6, 160, 3, 2, 1],
-        #     [6, 320, 1, 1, 1],
-        # ]
+
+    def mobilenetv2(self, head, scale=1.0):
         cfgs = [
             # t, c, n, s, r
-            [1, 16, 1, 1, 1],
-            [6, 24, 2, 2, 1],
-            [6, 32, 3, 2, 1],
-            [6, 64, 4, 2, 1],
-            [6, 96, 3, 1, 1],
-            [6, 160, 3, 1, 2],
-            [6, 320, 1, 1, 1],
+            [1, int(16*scale), 1, 1, 1],
+            [6, int(24*scale), 2, 2, 1],
+            [6, int(32*scale), 3, 2, 1],
+            [6, int(64*scale), 4, 2, 1],
+            [6, int(96*scale), 3, 1, 1],
+            [6, int(160*scale), 3, 1, 2],
+            [6, int(320*scale), 1, 1, 1],
         ]
         input_channel = head.params['out_chan']
         width_mult = 1.0
@@ -160,64 +156,71 @@ class PKMixArc(PKAutoArc):
                                                              dilation=r))
                 input_channel = output_channel
 
-        # 1.step encoder (backbone)
         self.in_node, _ = super(PKMixArc, self).generate(head, None, modules)
-        
+        return modules
+
+    def build_backbone(self, head):
+        if self.backbone.lower().startswith('mobilenetv2'):
+            if '0.5' in self.backbone:
+                return self.mobilenetv2(head, 0.5)
+            elif '1.0' in self.backbone:
+                return self.mobilenetv2(head, 1.0)
+
+        return None
+
+    def generate(self, head, tail, callback=None):
+        # 1.step encoder (backbone)
+        modules = self.build_backbone(head)
+
         # 2.step decoder (需要根据需要指定索引)
-        layer_1_extract = 0
-        layer_2_extract = 2
-        layer_3_extract = 5
-        layer_4_extract = 16
-        
-        layer_1_endpoint = self.names[layer_1_extract]
-        layer_2_endpoint = self.names[layer_2_extract]
-        layer_3_endpoint = self.names[layer_3_extract]
-        layer_4_endpoint = self.names[layer_4_extract]
-        
+        backbone_export_endpoints = []
+        for endpoint_index in self.decoder_input_endpoints:
+            backbone_export_endpoints.append(self.names[endpoint_index])
+
+        backbone_export_channels = []
+        for endpoint_index in self.decoder_input_endpoints:
+            backbone_export_channels.append(modules[endpoint_index].params['out_chan'])
+
+        backbone_export_strides = self.decoder_input_strides
         pos_offset = self.offset
         
         # dense decoder
-        decoder_channels = 64
-        endpoints = [layer_1_endpoint,
-                     layer_2_endpoint,
-                     layer_3_endpoint,
-                     layer_4_endpoint]
-        
-        channels = [modules[layer_1_extract].params['out_chan'],
-                    modules[layer_2_extract].params['out_chan'],
-                    modules[layer_3_extract].params['out_chan'],
-                    modules[layer_4_extract].params['out_chan']]
+        decoder_channels = self.decoder_depth
 
-        # aspp cell
-        self.add_cell((0, pos_offset),
-                      self.aspp_cell_cls(channels[-1], decoder_channels),
-                      SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset))
-        self.graph.add_edge(layer_4_endpoint,
-                            SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset),
-                            width_node=SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset))
-        endpoints[-1] = SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset)
-        channels[-1] = decoder_channels
-        
-        pos_offset += 1
+        # aspp
+        if self.aspp_cell_cls is not None:
+            # aspp cell (接在backbone最后节点输出)
+            self.add_fixed((0, pos_offset),
+                           self.aspp_cell_cls(backbone_export_channels[-1], decoder_channels))
+            self.graph.add_edge(backbone_export_endpoints[-1],
+                                SuperNetwork._FIXED_NODE_FORMAT.format(0, pos_offset),
+                                width_node=SuperNetwork._FIXED_NODE_FORMAT.format(0, pos_offset))
+            backbone_export_endpoints[-1] = SuperNetwork._FIXED_NODE_FORMAT.format(0, pos_offset)
+            backbone_export_channels[-1] = decoder_channels
 
-        last_endpoints = endpoints
-        last_channels = channels
+            pos_offset += 1
+
+        last_endpoints = backbone_export_endpoints
+        last_channels = backbone_export_channels
+
+        # dense decoder
+        decoder_levels = len(backbone_export_endpoints)
         cells_pos = None
-        for n in range(4, 0, -1):
+        for n in range(decoder_levels, 0, -1):
             cells_pos = [-1 for _ in range(n)]
             aggregation_pos = [-1 for _ in range(n)]
             
             for m in range(n-1, -1, -1):
-                if n == 4:
-                    self.add_cell((0, pos_offset),
-                                  Skip(last_channels[m], last_channels[m]),
-                                  SuperNetwork._CELL_NODE_FORMAT)
-    
-                    self.graph.add_edge(last_endpoints[m],
-                                        SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset),
-                                        width_node=SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset))
-                    last_endpoints[m] = SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset)
-                    pos_offset += 1
+                # if n == decoder_levels:
+                #     self.add_cell((0, pos_offset),
+                #                   Skip(last_channels[m], last_channels[m]),
+                #                   SuperNetwork._CELL_NODE_FORMAT)
+                #
+                #     self.graph.add_edge(last_endpoints[m],
+                #                         SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset),
+                #                         width_node=SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset))
+                #     last_endpoints[m] = SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset)
+                #     pos_offset += 1
                 
                 self.add_cell((0, pos_offset),
                               self.cell_cls(last_channels[m],
@@ -246,7 +249,8 @@ class PKMixArc(PKAutoArc):
                 
             for m_1 in range(n-1, 0, -1):
                 for m_2 in range(m_1 - 1, -1, -1):
-                    scale_factor = pow(2, m_1 - m_2)
+                    scale_factor = backbone_export_strides[m_1]/backbone_export_strides[m_2]
+
                     self.add_cell((0, pos_offset),
                                   ResizedBlock(decoder_channels, -1, scale_factor=scale_factor),
                                   SuperNetwork._CELL_NODE_FORMAT)
@@ -262,7 +266,11 @@ class PKMixArc(PKAutoArc):
                     
             last_channels = [decoder_channels for _ in range(n-1)]
             last_endpoints = [SuperNetwork._AGGREGATION_NODE_FORMAT.format(0, aggregation_pos[p]) for p in range(n-1)]
-           
+
+        output = SuperNetwork._CELL_NODE_FORMAT.format(0, cells_pos[0])
+        if callback is not None:
+            output, pos_offset = callback(output, pos_offset)
+
         # link output
         out_name = SuperNetwork._OUTPUT_NODE_FORMAT.format(0, pos_offset)
         self.graph.add_node(out_name,
@@ -274,7 +282,7 @@ class PKMixArc(PKAutoArc):
                             sampled=1)
         self.blocks.append(tail)
 
-        self.graph.add_edge(SuperNetwork._CELL_NODE_FORMAT.format(0,cells_pos[0]),
+        self.graph.add_edge(output,
                             SuperNetwork._OUTPUT_NODE_FORMAT.format(0, pos_offset),
                             width_node=SuperNetwork._OUTPUT_NODE_FORMAT.format(0, pos_offset))
 

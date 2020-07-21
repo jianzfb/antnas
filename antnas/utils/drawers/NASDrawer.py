@@ -94,7 +94,7 @@ class NASDrawer(Drawer):
                              colormap=colormap)
         
         #
-        self.win = self.vis.svg(svgstr=img, win=self.win)
+        # self.win = self.vis.svg(svgstr=img, win=self.win)
 
 
 if __name__ == '__main__':

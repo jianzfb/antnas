@@ -5,8 +5,10 @@ from __future__ import unicode_literals
 from __future__ import print_function
 
 import logging
+import sys
+sys.path.append("/Users/zhangjian52/Downloads/workspace/code/antvis/")
 
-import mlogger
+import antvis.client.mlogger as mlogger
 from antnas.dataset.datasets import get_data
 from antnas.manager import *
 from antnas.utils.misc import *
@@ -23,19 +25,19 @@ def argument_parser():
     # Experience
     parser.add_argument('-exp-name', action='store', default='', type=str, help='Experience Name')
     # Model
-    parser.add_argument('-arch', action='store', default='PKSegSN', type=str)
+    parser.add_argument('-arch', action='store', default='PKBiSegSN', type=str)
     parser.add_argument('-deter_eval', action='store', default=False, type=bool,
                         help='Take blocks with probas >0.5 instead of sampling during evaluation')
 
     # Training
-    parser.add_argument('-path', default='/Users/jian/Downloads/dataset', type=str,
+    parser.add_argument('-path', default='/Users/zhangjian52/Downloads/workspace/factory/dataset/BaiduPortrait', type=str,
                         help='path for the execution')
 
-    parser.add_argument('-dset', default='PASCAL2012SEG', type=str, help='Dataset')
+    parser.add_argument('-dset', default='SEG', type=str, help='Dataset')
     parser.add_argument('-bs', action='store', default=2, type=int, help='Size of each batch')
     parser.add_argument('-epochs', action='store', default=0, type=int,
                         help='Number of training epochs')
-    parser.add_argument('-evo_epochs', action='store', default=80, type=int,
+    parser.add_argument('-evo_epochs', action='store', default=1, type=int,
                         help='Number of architecture searching epochs')
     parser.add_argument('-warmup', action='store', default=0, type=int,
                         help='warmup epochs before searching architecture')
@@ -124,9 +126,10 @@ class OutLayer(NetworkBlock):
     n_layers = 1
     n_comp_steps = 1
 
-    def __init__(self, in_chan=64, out_chan=2, bias=True):
+    def __init__(self, in_chan=32, out_chan=2, bias=True):
         super(OutLayer, self).__init__()
-        self.conv = nn.Conv2d(in_chan, out_chan, kernel_size=3, stride=1, padding=1, bias=bias)
+        self.conv_1 = nn.Conv2d(in_chan, out_chan, kernel_size=1, stride=1, padding=0, bias=bias)
+        self.conv_2 = nn.Conv2d(out_chan, out_chan, kernel_size=3, stride=1, padding=1, bias=bias)
 
         self.params = {
             'module_list': ['OutLayer'],
@@ -139,14 +142,17 @@ class OutLayer(NetworkBlock):
 
     def forward(self, x, sampling=None):
         # B x C x H x W
-        x = self.conv(x)
+        x = self.conv_1(x)
+        x = F.upsample(x, size=[384, 384])
+        x = self.conv_2(x)
+
         return x
 
     def get_flop_cost(self, x):
         return [0] + [0] * (self.state_num - 1)
 
 
-def main(args, plotter):
+def main(args):
     if torch.cuda.is_available():
         print('CUDA is OK')
 
@@ -158,11 +164,8 @@ def main(args, plotter):
     train_loader, val_loader, test_loader, data_properties = \
         get_data(args['dset'], args['bs'], args['path'], args)
 
-    # 设置visdom plotter
-    args.update({'plotter': plotter})
-
     # 创建NAS模型
-    nas_manager = Manager(args, data_properties, out_layer=OutLayer(64, 21, True))
+    nas_manager = Manager(args, data_properties, out_layer=OutLayer(192, 2, True))
 
     # pk ENAS
     nas_manager.build()
@@ -179,30 +182,23 @@ def main(args, plotter):
 
     # logger initialize
     xp = mlogger.Container()
-    xp.config = mlogger.Config(plotter=plotter)
-    xp.epoch = mlogger.metric.Simple()
+    xp.epoch = mlogger.metric.Simple(plot_title='epoch')
 
     xp.train = mlogger.Container()
-    xp.train.classif_loss = mlogger.metric.Average(plotter=plotter, plot_title="classif_loss", plot_legend="train")
-    xp.train.accuracy = mlogger.metric.Average(plotter=plotter, plot_title="accuracy", plot_legend="train")
-    xp.train.rewards = mlogger.metric.Average(plotter=plotter, plot_title="rewards", plot_legend="train")
-    xp.train.timer = mlogger.metric.Timer(plotter=plotter, plot_title="Time", plot_legend="train")
-    xp.train.objective_cost = mlogger.metric.Average(plotter=plotter, plot_title="objective_cost",
-                                                     plot_legend="architecture")
+    xp.train.classif_loss = mlogger.metric.Average(plot_title="classif_loss")
+    xp.train.accuracy = mlogger.metric.Simple(plot_title="accuracy")
+    xp.train.rewards = mlogger.metric.Average(plot_title="rewards")
+    xp.train.objective_cost = mlogger.metric.Average(plot_title="objective_cost")
+    xp.train.learning_rate = mlogger.metric.Simple(plot_title="LR")
 
     xp.test = mlogger.Container()
-    xp.test.accuracy = mlogger.metric.Simple(plotter=plotter, plot_title="val_test_accuracy", plot_legend="test")
-    xp.test.timer = mlogger.metric.Timer(plotter=plotter, plot_title="Time", plot_legend="test")
+    xp.test.accuracy = mlogger.metric.Simple(plot_title="val_test_accuracy")
 
     for cost in args['cost_evaluation']:
         xp.train.__setattr__('train_sampled_%s' % cost,
-                             mlogger.metric.Average(plotter=plotter,
-                                                    plot_title='train_%s' % cost,
-                                                    plot_legend="sampled_cost"))
+                             mlogger.metric.Average(plot_title='train_%s' % cost))
         xp.train.__setattr__('train_pruned_%s' % cost,
-                             mlogger.metric.Average(plotter=plotter,
-                                                    plot_title='train_%s' % cost,
-                                                    plot_legend="pruned_cost"))
+                             mlogger.metric.Average(plot_title='train_%s' % cost))
 
     # initialize supernetwork
     logging.info('initialize supernetwork basic info')
@@ -276,6 +272,7 @@ def main(args, plotter):
             # write logger
             logger.info(epoch)
 
+            # train process
             for i, (inputs, labels) in enumerate(tqdm(train_loader, desc='Train', ascii=True)):
                 # adjust learning rate
                 lr = nas_manager.adjust_lr(args, epoch, i, len(train_loader), logger)
@@ -296,14 +293,6 @@ def main(args, plotter):
                     anchor_x = x
                     anchor_y = y
                     nas_manager.supernetwork.anchors.run(anchor_x, anchor_y)
-
-                # if model_sampled_cost is not None and model_pruned_cost is not None:
-                #     model_sampled_cost = model_sampled_cost.mean()
-                #     model_pruned_cost = model_pruned_cost.mean()
-                #
-                #     # record architecture cost both sampled and pruned (training)
-                #     xp.train.__getattribute__('train_sampled_%s' % args['cost_optimization']).update(model_sampled_cost.item())
-                #     xp.train.__getattribute__('train_pruned_%s' % args['cost_optimization']).update(model_pruned_cost.item())
 
                 # anchor loss
                 anchor_consistent_loss_total = 0.0
@@ -332,8 +321,10 @@ def main(args, plotter):
 
                 # record model loss
                 xp.train.classif_loss.update(loss.item())
+
                 # record model accuracy
-                xp.train.accuracy.update(model_accuracy * 100 / float(inputs.size(0)))
+                if model_accuracy is not None:
+                    xp.train.accuracy.update(model_accuracy * 100 / float(inputs.size(0)))
 
                 # update model parameter
                 loss.backward()
@@ -341,11 +332,11 @@ def main(args, plotter):
                 # update parameter
                 nas_manager.optimizer.step()
 
-                xp.train.timer.update()
-                for metric in xp.train.metrics():
-                    metric.log()
-
-                plotter.update_plots()
+            # # eval process
+            # if epoch % 1 == 0:
+            #     # check model accuracy
+            #     accuracy_val = nas_manager.eval(x, y, test_loader, 'test')
+            #     xp.train.accuracy.update(float(accuracy_val))
 
             # save model state
             nas_manager.supernetwork.search_and_plot('./supernetwork/')
@@ -363,8 +354,5 @@ if __name__ == '__main__':
     logger.info('Executing main from {}'.format(os.getcwd()))
     args = vars(argument_parser())
 
-    plotter = mlogger.VisdomPlotter({'env': args['draw_env'],
-                                     'server': 'http://localhost',
-                                     'port': 8097},
-                                    manual_update=True)
-    main(args, plotter)
+    mlogger.config('127.0.0.1', 8999, 'nas', 'seg-experiment')
+    main(args)

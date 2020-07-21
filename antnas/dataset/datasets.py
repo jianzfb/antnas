@@ -10,6 +10,7 @@ import numpy as np
 from antnas.dataset.ext_transforms import *
 from antnas.dataset.voc import VOCSegmentation
 from antnas.dataset.portrait import PortraitSegmentation
+from antnas.dataset.segmentation_dataset import *
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +62,10 @@ def get_PASCAL2012_SEG(path, *args):
                      std=[0.229, 0.224, 0.225]),
     ])
 
-    train_dst = VOCSegmentation(root=path, is_aug=True, image_set='train',
+    train_dst = VOCSegmentation(root=path, is_aug=False, image_set='train',
                                 transform=train_transform)
 
-    val_dst = VOCSegmentation(root=path, is_aug=True, image_set='val',
+    val_dst = VOCSegmentation(root=path, is_aug=False, image_set='val',
                               transform=val_transform)
     test_dst = val_dst
 
@@ -98,6 +99,43 @@ def get_Portrait_SEG(path, *args):
 
     val_dst = PortraitSegmentation(root=path,
                                    image_set='val',
+                                   transform=val_transform)
+    test_dst = val_dst
+
+    return train_dst, None, test_dst, img_dim, in_channels, out_size
+
+
+def get_SEG(path, *args):
+    if os.path.exists(os.path.join(path, 'vision')):
+        path = os.path.join(path, 'vision')
+
+    img_dim = 384
+    in_channels = 3
+    out_size = (2, 384, 384)
+
+    train_transform = ExtCompose([
+        ExtRandomHorizontalFlip(),
+        ExtResize((384, 384)),
+        ExtToTensor(),
+        ExtNormalize(mean=[0.485, 0.456, 0.406],
+                     std=[0.229, 0.224, 0.225]),
+    ])
+
+    val_transform = ExtCompose([
+        ExtResize((384, 384)),
+        ExtToTensor(),
+        ExtNormalize(mean=[0.485, 0.456, 0.406],
+                     std=[0.229, 0.224, 0.225]),
+    ])
+
+    train_dst = SegmentationData(root=path,
+                                     image_set='train',
+                                     prefix='shuffle_seg',
+                                     transform=train_transform)
+
+    val_dst = SegmentationData(root=path,
+                                   image_set='val',
+                                   prefix='',
                                    transform=val_transform)
     test_dst = val_dst
 
@@ -258,7 +296,8 @@ sets = {
     'ImageNet': get_ImageNet,
     'PASCAL2012SEG': get_PASCAL2012_SEG,
     'PORTRAIT_SEG': get_Portrait_SEG,
-    'TEST_DATA': get_Test
+    'TEST_DATA': get_Test,
+    'SEG': get_SEG,
 }
 
 

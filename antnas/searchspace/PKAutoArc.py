@@ -13,8 +13,8 @@ from antnas.searchspace.Arc import *
 
 
 class PKAutoArc(Arc):
-    def __init__(self, graph):
-        super(PKAutoArc, self).__init__(graph)
+    def __init__(self, graph, blocks):
+        super(PKAutoArc, self).__init__(graph, blocks)
         self._names = []
 
     def generate(self, head, tail, modules):

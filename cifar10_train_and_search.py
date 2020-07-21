@@ -6,13 +6,15 @@ from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
 import logging
+import sys
+sys.path.append("/Users/zhangjian52/Downloads/workspace/code/antvis/")
 
+import antvis.client.mlogger as mlogger
 from antnas.dataset.datasets import get_data
 from antnas.manager import *
 from antnas.utils.misc import *
 from antnas.networks.Anchors import *
 from antnas.utils.drawers.NASDrawer import *
-import antvis.client.mlogger as mlogger
 
 
 logging.basicConfig(level=logging.INFO)
@@ -20,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 def argument_parser():
-    parser = argparse.ArgumentParser(description='Budgeted Super Networks')
+    parser = argparse.ArgumentParser(description='AntNAS')
 
     # Experience
     parser.add_argument('-exp-name', action='store', default='', type=str, help='Experience Name')
@@ -30,7 +32,7 @@ def argument_parser():
                         help='Take blocks with probas >0.5 instead of sampling during evaluation')
 
     # Training
-    parser.add_argument('-path', default='/Users/jian/Downloads/dataset', type=str,
+    parser.add_argument('-path', default='/Users/zhangjian52/Downloads/dataset/cifar', type=str,
                         help='path for the execution')
 
     parser.add_argument('-dset', default='CIFAR10', type=str, help='Dataset')
@@ -360,8 +362,8 @@ def main(args):
                 # update parameter
                 nas_manager.optimizer.step()
 
-                for metric in xp.train.metrics():
-                    metric.log()
+                # for metric in xp.train.metrics:
+                #     metric.log()
 
             # save model state
             nas_manager.supernetwork.search_and_plot('./supernetwork/')
@@ -380,5 +382,5 @@ if __name__ == '__main__':
     args = vars(argument_parser())
     
     # 配置mlogger
-    mlogger.config('127.0.0.1', 8999, 'me', 'QW')
+    mlogger.config('127.0.0.1', 8999, 'nas', 'cifar-experiment')
     main(args)

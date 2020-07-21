@@ -138,10 +138,13 @@ class Manager(object):
             self.parallel(x, y, self.arctecture, epoch=epoch, warmup=warmup)
 
         # 2.step get last sampling
-        return loss.mean(), \
-               accuracy.sum(), \
-               a, \
-               b
+        if loss is not None:
+            loss = loss.mean()
+
+        if accuracy is not None:
+            accuracy = accuracy.sum()
+
+        return loss, accuracy, a, b
 
     def eval(self, x, y, loader, name=''):
         if self.parallel.training:
