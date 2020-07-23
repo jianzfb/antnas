@@ -1,6 +1,9 @@
 import numpy as np
 from antnas.utils.drawers.Drawer import Drawer
 import networkx as nx
+
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 

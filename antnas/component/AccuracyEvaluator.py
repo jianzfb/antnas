@@ -19,5 +19,12 @@ class AccuracyEvaluator(object):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def accuracy(self, **kwargs):
+    def caculate(self, pred, label, ignore=None):
         raise NotImplementedError
+
+    @abc.abstractmethod
+    def accuracy(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def reset(self):
+        pass

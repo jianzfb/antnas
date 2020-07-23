@@ -2,7 +2,8 @@ from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
 
-
+import matplotlib
+matplotlib.use('Agg')
 from torch.autograd import Variable
 import networkx as nx
 from antnas.component.ParameterCostEvaluator import ParameterCostEvaluator
@@ -74,6 +75,7 @@ class ArchitectureModelProblem(Problem):
         y = torch.LongTensor()
         a = torch.Tensor()
 
+      # 使用单卡计算
       self.supernetwork_manager.parallel.eval()
       for images, labels in tqdm(self.data_loader, desc='Test', ascii=True):
           x.resize_(images.size()).copy_(images)
@@ -82,12 +84,13 @@ class ArchitectureModelProblem(Problem):
           a.resize_([batch_size, len(arc.features)]).copy_(torch.as_tensor(np.tile([arc.features], (batch_size, 1))))
 
           with torch.no_grad():
-              _, accuracy, _, _ = self.supernetwork_manager.parallel(x, y, a)
+             _, model_out, _, _ = self.supernetwork_manager.parallel(x, y, a)
 
-          total_correct += accuracy.sum()
-          total += labels.size(0)
+          # 计算精度
+          self.supernetwork_manager.supernetwork.caculate(model_out, y)
 
-      accuracy = total_correct.float().item() / total
+      # 计算测试集精度
+      accuracy = self.supernetwork_manager.supernetwork.accuracy()
       return 1.0 - accuracy
 
   def __f2(self, arc):
@@ -186,9 +189,6 @@ class SuperNetwork(nn.Module):
         self._anchors = val
 
     def init(self, *args, **kwargs):
-        # input shape
-        shape = kwargs.get('shape')
-
         # define problem
         arc_loss = kwargs.get('arc_loss', 'latency')
         data_loader = kwargs.get('data_loader', None)
@@ -197,32 +197,9 @@ class SuperNetwork(nn.Module):
                                                 data_loader,
                                                 arc_loss=[arc_loss])
 
-        # copy net structure
-        graph = copy.deepcopy(self.net)
-        x = torch.ones(shape)
-
-        for node in self.traversal_order:
-            graph.node[self.in_node]['input'] = [x]
-            cur_node = graph.node[node]
-            input = self.format_input(cur_node['input'])
-
-            if len(input) == 0:
-                raise RuntimeError('Node {} has no inputs'.format(node))
-
-            print(node)
-            out = self.blocks[cur_node['module']](input)
-            if node == self.out_node:
-                break
-
-            # 3.3.step set successor input
-            for succ in graph.successors(node):
-                if 'input' not in graph.node[succ]:
-                    graph.node[succ]['input'] = []
-                graph.node[succ]['input'].append(out)
-
         # 初始化结构信息
         for cost, cost_eval in self.arch_cost_evaluators.items():
-            cost_eval.init_costs(self, graph)
+            cost_eval.init_costs(self, self.net, input_node=self.in_node, input_shape=kwargs.get('shape'))
 
         # 获得约束搜索空间的范围 (find max/min arch)
         auto_analyze_comp = False
@@ -319,10 +296,21 @@ class SuperNetwork(nn.Module):
     def arch_optimize(self, *args, **kwargs):
         raise NotImplementedError
 
+    '''
+        网络损失函数
+    '''
     def loss(self, predictions, labels):
         raise NotImplementedError
+    '''
+        计算模型精度（测试集每次迭代调用）
+    '''
+    def caculate(self, predictions, labels):
+        raise NotImplementedError
 
-    def accuray(self, predictions, labels):
+    '''
+        获得模型精度（测试集跑完后调用）
+    '''
+    def accuracy(self):
         raise NotImplementedError
 
     @property
@@ -631,10 +619,10 @@ class SuperNetwork(nn.Module):
         pass
     
     def search(self, *args, **kwargs):
-        max_generation = kwargs.get('max_generation', 100)
-        population_size = kwargs.get('population_size', 50)
-        crossover_multi_points = kwargs.get('corssover_multi_points', 5)
-        mutation_multi_points = kwargs.get('mutation_multi_points', -1)
+        max_generation = kwargs.get('max_generation', 100)                  # 最大种群代
+        population_size = kwargs.get('population_size', 50)                 # 种群大小
+        crossover_multi_points = kwargs.get('crossover_multi_points', 5)    # 交叉操作基因位数
+        mutation_multi_points = kwargs.get('mutation_multi_points', -1)     # 变异操作基因位数
         folder = kwargs.get('folder', './supernetwork/')
 
         if not os.path.exists(folder):

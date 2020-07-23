@@ -203,7 +203,7 @@ class PKBiSegSN(UniformSamplingSuperNetwork):
         self.blocks = nn.ModuleList([])
 
         self._loss = cross_entropy
-        self._accuracy_evaluator = SegmentationAccuracyEvaluator(class_num=self.out_dim)
+        self._accuracy_evaluator = SegmentationAccuracyEvaluator(self.out_dim, True)
 
         # 输入节点
         identity = Identity(self.in_chan, self.in_chan)
@@ -217,7 +217,7 @@ class PKBiSegSN(UniformSamplingSuperNetwork):
                             sampled=1)
         self.blocks.append(identity)
 
-        # 固定节点
+        # 头结点，高分辨率进入detail分支（待搜索），低分辨率进入semantic分支（固定）
         pool = AvgPoolingBlock(k_size=2, stride=2)
         pool_name = SuperNetwork._FIXED_NODE_FORMAT.format(0, -1)
         self.graph.add_node(pool_name,
@@ -233,13 +233,13 @@ class PKBiSegSN(UniformSamplingSuperNetwork):
                             pool_name,
                             width_node=pool_name)
 
-        # backbone head
+        # head (固定节点，结构不可学习) in semantic 分支
         head = ConvBn(self.in_chan, 32, k_size=3, stride=2, relu=True)
-        # tail (固定计算节点，结构不可学习)
+        # tail (固定计算节点，结构不可学习) in semantic 分支
         tail = kwargs['out_layer']
 
         # 双分支
-        # 分支1：主干结构设置为mobilenet-v2-0.5 + aspp
+        # 分支1：semantic（mobilenet-v2-0.5 + aspp）
         # 分支2：detail
         self.seg_arc = PKMixArc(BiSegDecoderCellBlock,
                                 BiSegASPPCell,
@@ -359,8 +359,26 @@ class PKBiSegSN(UniformSamplingSuperNetwork):
     def loss(self, predictions, labels):
         return self._loss(predictions, labels)
 
-    def accuray(self, predictions, labels):
-        return self._accuracy_evaluator.accuracy(predictions, labels)
+    def caculate(self, predictions, labels):
+        if (labels.shape[1] != predictions.shape[2]) or (labels.shape[2] != predictions.shape[3]):
+            predictions = torch.nn.functional.interpolate(predictions, size=(labels.shape[1], labels.shape[2]), mode='bilinear', align_corners=True)
+
+        preditions = torch.nn.Softmax2d()(predictions)
+        preditions_argmax = preditions.argmax(1, keepdim=True)
+        preditions_argmax = preditions_argmax.permute(0,2,3,1)
+        preditions_argmax = preditions_argmax.cpu().numpy()
+
+        labels = labels.reshape((-1, labels.shape[1], labels.shape[2], 1))
+        mask = labels != 255
+        labels = labels.cpu().numpy()
+        mask = mask.cpu().numpy()
+
+        return self._accuracy_evaluator.caculate(preditions_argmax, labels, mask)
+
+    def accuracy(self):
+        accuracy_value = self._accuracy_evaluator.accuracy()
+        self._accuracy_evaluator.reset()
+        return accuracy_value
 
     def hierarchical(self):
         return self.seg_arc.hierarchical

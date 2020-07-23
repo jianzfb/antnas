@@ -1,7 +1,10 @@
 torch
-torchvision
+torchvision>=0.5.0
 networkx==2
 matplotlib==2
-tqdm==4.47.0
+tqdm
 numpy
 easydict
+scipy
+sklearn
+Pillow==6.2.2

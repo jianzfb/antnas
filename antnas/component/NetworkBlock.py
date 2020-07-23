@@ -475,7 +475,8 @@ class ResizedBlock(NetworkBlock):
         self.structure_fixed = False
 
     def forward(self, x, sampling=None):
-        x = F.upsample(x, scale_factor=self.scale_factor, mode='bilinear')
+        # x = F.upsample(x, scale_factor=self.scale_factor, mode='bilinear')
+        x = torch.nn.functional.interpolate(x,scale_factor=self.scale_factor,mode='bilinear',align_corners=True)
         if self.conv_layer is not None:
             x = self.conv_layer(x)
 
@@ -497,7 +498,9 @@ class ResizedBlock(NetworkBlock):
     def get_flop_cost(self, x):
         flops = 9 * (x.shape[2]*self.scale_factor)*(x.shape[3]*self.scale_factor) * x.shape[1]
         if self.conv_layer is not None:
-            x = F.upsample(x, scale_factor=self.scale_factor, mode='bilinear')
+            # x = F.upsample(x, scale_factor=self.scale_factor, mode='bilinear')
+            x = torch.nn.functional.interpolate(x, scale_factor=self.scale_factor, mode='bilinear', align_corners=True)
+
             flops += self.conv_layer.get_flop_cost(x)[1]
         return [0] + [flops] + [0] * (NetworkBlock.state_num - 2)
 
@@ -930,15 +933,13 @@ class ASPPBlock(NetworkBlock):
         self.conv_1_step = nn.Conv2d(in_chan, depth, kernel_size=1, bias=False)
         self.bn1 = nn.BatchNorm2d(depth,
                                   momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
-                                  track_running_stats=NetworkBlock.bn_track_running_stats
-                                  )
+                                  track_running_stats=True)
         
         # 2.step
         self.conv_2_step = nn.Conv2d(in_chan, depth, kernel_size=1, bias=False)
         self.bn2 = nn.BatchNorm2d(depth,
                                   momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
-                                  track_running_stats=NetworkBlock.bn_track_running_stats
-                                  )
+                                  track_running_stats=NetworkBlock.bn_track_running_stats)
         
         # 3.step
         self.atrous_conv_list = nn.ModuleList([])
@@ -949,8 +950,7 @@ class ASPPBlock(NetworkBlock):
         self.conv_5_step = nn.Conv2d((len(self.atrous_rates) + 2) * depth, depth, kernel_size=1, bias=False)
         self.bn5 = nn.BatchNorm2d(depth,
                                   momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
-                                  track_running_stats=NetworkBlock.bn_track_running_stats
-                                  )
+                                  track_running_stats=NetworkBlock.bn_track_running_stats)
         
         self.params = {
             'module_list': ['ASPPBlock'],
@@ -975,7 +975,9 @@ class ASPPBlock(NetworkBlock):
         feature_1 = self.conv_1_step(feature_1)
         feature_1 = self.bn1(feature_1)
         feature_1 = F.relu(feature_1)
-        feature_1 = F.upsample(feature_1, size=[h, w])
+        # feature_1 = F.upsample(feature_1, size=[h, w])
+        feature_1 = torch.nn.functional.interpolate(feature_1,size=[h,w],mode='bilinear',align_corners=True)
+
         branch_logits.append(feature_1)
         
         # 2.step 1x1 convolution

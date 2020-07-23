@@ -66,12 +66,10 @@ class UniformSamplingSuperNetwork(SuperNetwork):
         # 4.step compute model loss
         indiv_loss = self.loss(model_out, y)
 
-        # 5.step compute model accuracy
-        model_accuracy = self.accuray(model_out, y)
-
         # 6.step total loss
         loss = indiv_loss.mean()
-        return loss, model_accuracy, None, None
+        # 损失值，模型输出，未裁切结构损失，裁切结构损失
+        return loss, model_out, None, None
 
     def search_and_save(self, folder=None, name=None):
         if not os.path.exists(folder):

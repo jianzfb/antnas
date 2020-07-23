@@ -43,7 +43,7 @@ class SegmentationData(data.Dataset):
                     if content == '' or content == '\n':
                         break
         else:
-            with open(os.path.join(root, 'val_self.txt'), 'r') as fp:
+            with open(os.path.join(root, 'val.txt'), 'r') as fp:
                 content = fp.readline()
                 while content:
                     content = content.replace('/n', '')

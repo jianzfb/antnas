@@ -23,7 +23,8 @@ class PKMixArc(PKAutoArc):
                  backbone='',
                  decoder_input_endpoints=[0,2,5,16],
                  decoder_input_strides=[4,8,16,32],
-                 decoder_depth=32):
+                 decoder_depth=32,
+                 decoder_allow_skip=False):
         super(PKMixArc, self).__init__(graph, blocks)
         self.sampling_param_generator = sampling_param_generator
         self.sampling_parameters = nn.ParameterList()
@@ -37,6 +38,7 @@ class PKMixArc(PKAutoArc):
         self.decoder_input_endpoints = decoder_input_endpoints
         self.decoder_input_strides = decoder_input_strides
         self.decoder_depth = decoder_depth
+        self.decoder_allow_skip = decoder_allow_skip
     
     def add_fixed(self, pos, module):
         node_name = SuperNetwork._FIXED_NODE_FORMAT.format(*pos)
@@ -211,17 +213,18 @@ class PKMixArc(PKAutoArc):
             aggregation_pos = [-1 for _ in range(n)]
             
             for m in range(n-1, -1, -1):
-                # if n == decoder_levels:
-                #     self.add_cell((0, pos_offset),
-                #                   Skip(last_channels[m], last_channels[m]),
-                #                   SuperNetwork._CELL_NODE_FORMAT)
-                #
-                #     self.graph.add_edge(last_endpoints[m],
-                #                         SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset),
-                #                         width_node=SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset))
-                #     last_endpoints[m] = SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset)
-                #     pos_offset += 1
-                
+                if self.decoder_allow_skip:
+                    if n == decoder_levels:
+                        self.add_cell((0, pos_offset),
+                                      Skip(last_channels[m], last_channels[m]),
+                                      SuperNetwork._CELL_NODE_FORMAT)
+
+                        self.graph.add_edge(last_endpoints[m],
+                                            SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset),
+                                            width_node=SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset))
+                        last_endpoints[m] = SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset)
+                        pos_offset += 1
+
                 self.add_cell((0, pos_offset),
                               self.cell_cls(last_channels[m],
                                             decoder_channels,

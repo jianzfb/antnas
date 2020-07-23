@@ -12,6 +12,8 @@ class CostEvaluator(object):
         super(CostEvaluator, self).__init__()
         self.model = kwargs.get('model')
         self.main_cost = kwargs.get('main_cost')
+        self.input_node = kwargs.get('input_node', None)
+        self.input_shape = kwargs.get('input_shape', None)
         self.kwargs = kwargs
         self.costs = None
 

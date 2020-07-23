@@ -134,22 +134,27 @@ class Manager(object):
             self.arctecture.resize_(1, len(sampling_arc[0])).copy_(torch.as_tensor(sampling_arc))
         
         # 1.step forward model
-        loss, accuracy, a, b = \
+        loss, _, a, b = \
             self.parallel(x, y, self.arctecture, epoch=epoch, warmup=warmup)
 
         # 2.step get last sampling
         if loss is not None:
             loss = loss.mean()
 
-        if accuracy is not None:
-            accuracy = accuracy.sum()
-
-        return loss, accuracy, a, b
+        return loss, None, a, b
 
     def eval(self, x, y, loader, name=''):
+        # 使用单卡计算
         if self.parallel.training:
-           self.parallel.eval()
-        
+            self.parallel.eval()
+
+        # sampling architecture
+        if self.arctecture is None:
+            if torch.cuda.is_available():
+                self.arctecture = torch.Tensor().cuda(torch.device("cuda:%d"%self.cuda_list[0]))
+            else:
+                self.arctecture = torch.Tensor()
+
         # random sampling architecture
         if torch.cuda.is_available():
             sampling_arc = [self.arctecture_queue.get() for _ in range(len(self.cuda_list))]
@@ -158,19 +163,20 @@ class Manager(object):
             sampling_arc = [self.arctecture_queue.get()]
             self.arctecture.resize_(1, len(sampling_arc[0])).copy_(torch.as_tensor(sampling_arc))
 
-        total_correct = 0
-        total = 0
+        # 跑测试集，获得评估精度
         for images, labels in tqdm(loader, desc=name, ascii=True):
             x.resize_(images.size()).copy_(images)
             y.resize_(labels.size()).copy_(labels)
 
             with torch.no_grad():
-                _, accuracy, _, _ = self.parallel(x, y, self.arctecture)
+                _, model_out, _, _ = self.parallel(x, y, self.arctecture)
 
-            total_correct += accuracy.sum()
-            total += labels.size(0)
+            # 统计模型精度
+            self.supernetwork.caculate(model_out, y)
 
-        return 100 * total_correct.float().item() / total
+        # 获得模型精度
+        accuracy = self.supernetwork.accuracy()
+        return accuracy
 
     @property
     def parallel(self):
