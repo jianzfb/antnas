@@ -314,9 +314,9 @@ def get_data(ds_name, batch_size, path, args=None):
     logger.debug("N test : %d" % len(test_set))
 
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,
-                              num_workers=32, drop_last=True,pin_memory=False) if train_set is not None else None
+                              num_workers=16, drop_last=True) if train_set is not None else None
     test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False,
-                             num_workers=32, pin_memory=False) if test_set is not None else None
+                             num_workers=16) if test_set is not None else None
     # val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False,
     #                         num_workers=4) if val_set is not None else None
 

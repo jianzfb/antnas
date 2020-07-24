@@ -256,6 +256,7 @@ class Nsga2(object):
             y.append(1.0-c.objectives[0])
           
           # 2.3.step fit
+          print('fit gaussian process')
           bo.fit(x, y)
 
           # partial(network.sample_arch, comp_min=, comp_max=)
@@ -295,12 +296,18 @@ class Nsga2(object):
                 functools.partial(network.sample_arch,
                                   param_min=acq_min_constraint,
                                   param_max=acq_max_constraint)
-            
-            suggestion_val, _ = bo.optimize_acq(network_arc_sampling_func, x, y)
 
+            print('get suggestion structure %d'%acq_i)
+            suggestion_val, _ = bo.optimize_acq(network_arc_sampling_func, x, y)
+            if suggestion_val is None:
+              print('fail to find suggestion structure %d'%acq_i)
+              continue
+
+            print('success to find suggestion structure %d' % acq_i)
             new_individual = self.problem.generateIndividual()
             new_individual.features = suggestion_val
-            
+
+            print('compute suggestion structure objectives')
             self.problem.calculateObjectives(new_individual)
             bayesian_population.population.append(new_individual)
           

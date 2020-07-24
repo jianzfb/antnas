@@ -77,6 +77,7 @@ class ArchitectureModelProblem(Problem):
 
       # 使用单卡计算
       self.supernetwork_manager.parallel.eval()
+      count = 0
       for images, labels in tqdm(self.data_loader, desc='Test', ascii=True):
           x.resize_(images.size()).copy_(images)
           y.resize_(labels.size()).copy_(labels)
@@ -88,6 +89,12 @@ class ArchitectureModelProblem(Problem):
 
           # 计算精度
           self.supernetwork_manager.supernetwork.caculate(model_out, y)
+
+          # # 临时 快速退出
+          # if count == 2:
+          #     break
+
+          count += 1
 
       # 计算测试集精度
       accuracy = self.supernetwork_manager.supernetwork.accuracy()
@@ -158,8 +165,14 @@ class SuperNetwork(nn.Module):
         self.drawer = NASDrawer()
         # mlogger
         self.search_log = mlogger.Container()
-        self.search_log.arch_loss = mlogger.complex.Bar('arc loss')
+        # 记录结构损失
+        self.search_log.arch_loss = mlogger.complex.Bar('arc loss', BINS=1000)
+        self.search_log.arch_loss.config(BINS=1000)
+        # 记录每代基因图谱
         self.search_log.gene = mlogger.complex.Heatmap('gene')
+
+        # 记录PARETO FRONT
+        self.search_log.pareto_front = mlogger.complex.Scatter('pareto front')
 
     def set_graph(self, network, in_node, out_node):
         self.net = network
@@ -546,55 +559,19 @@ class SuperNetwork(nn.Module):
         arch_loss_list = [individual.objectives[1] for individual in population]
 
         # 2.1.step architecture loss distribution (直方图)
-        # search_arc_loss_distribution_win = \
-        #     self.plotter.viz.histogram(np.array(arch_loss_list),
-        #                                opts=dict(
-        #                                    title=title,
-        #                                    numbins=1000,
-        #                                ),
-        #                                win=None if "search_arc_loss_distribution" not in self.visdom_window else self.visdom_window['search_arc_loss_distribution'])
-        #
-        #
-        # if 'search_arc_loss_distribution' not in self.visdom_window:
-        #     self.visdom_window['search_arc_loss_distribution'] = \
-        #         search_arc_loss_distribution_win
-        #
         self.search_log.arch_loss.update(arch_loss_list)
 
-        # # 2.2.step pareto front (标签的散点图)
-        # search_arc_pareto_front_win = \
-        #     self.plotter.viz.scatter(
-        #         X=np.concatenate([np.array(arch_loss_list).reshape((-1, 1)), np.array(arch_error_list).reshape((-1, 1))], axis=1),
-        #         Y=np.arange(1, len(population)+1),
-        #         opts=dict(
-        #             legend=['ARCH_%d'%i for i in range(1, len(population)+1)],
-        #             title="PARETO FRONT",
-        #         ),
-        #         win=None if "search_arc_pareto_front" not in self.visdom_window else self.visdom_window['search_arc_pareto_front']
-        #     )
-        # if 'search_arc_pareto_front' not in self.visdom_window:
-        #     self.visdom_window['search_arc_pareto_front'] = search_arc_pareto_front_win
-        #
+        # 2.2.step pareto front (标签的散点图)
+        self.search_log.pareto_front.update([arch_loss_list, arch_error_list])
+
         # 2.3.step architecture information （热点图）
         GENE = []
         for i in range(len(population)):
             feature = [population.population[i].features[self.net.node[node_name]['sampling_param']] for node_name in self.traversal_order]
             GENE.append(feature)
 
-        # search_arc_gene_chrome_win = \
-        #     self.plotter.viz.heatmap(
-        #         np.array(GENE),
-        #         opts=dict(
-        #             title="POLUTATION GENE CHROME",
-        #             columnnames=[node_name for node_name in self.traversal_order],
-        #             rownames=['ARCH_%d'%index for index in range(1, len(population)+1)],
-        #             colormap='Electric',
-        #         ),
-        #         win=None if "search_arc_gene_chrome" not in self.visdom_window else self.visdom_window['search_arc_gene_chrome']
-        #     )
-        #
-        # if 'search_arc_gene_chrome' not in self.visdom_window:
-        #     self.visdom_window['search_arc_gene_chrome'] = search_arc_gene_chrome_win
+        self.search_log.gene.config(x_axis=','.join([node_name for node_name in self.traversal_order]),
+                                    y_axis=','.join(['ARCH_%d'%index for index in range(1, len(population)+1)]))
         self.search_log.gene.update(GENE)
 
         # # 2.4.step structure sampling visualization

@@ -100,8 +100,10 @@ class UniformSamplingSuperNetwork(SuperNetwork):
         
         # sampling satisfied feature
         sampling_feature = None
+        max_try_count = 50
+        try_count = 0
         with torch.no_grad():
-            while True:
+            while try_count < max_try_count:
                 feature = [None for _ in range(len(self.traversal_order))]
 
                 sampling = torch.Tensor()
@@ -148,7 +150,9 @@ class UniformSamplingSuperNetwork(SuperNetwork):
                 if satisfied_constraint:
                     sampling_feature = feature
                     break
-                    
+
+                try_count += 1
+
             return sampling_feature
     
     def is_satisfied_constraint(self, feature):

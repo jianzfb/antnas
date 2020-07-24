@@ -86,6 +86,9 @@ class Manager(object):
     def __samplingArcFunc(self):
         while True:
             arc = self._supernetwork.sample_arch()
+            if arc is None:
+                continue
+
             self.arctecture_queue.put(arc)
     
     def launchSamplingArcProcess(self):

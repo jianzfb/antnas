@@ -67,6 +67,9 @@ class BayesianOptimizer(object):
             if ap >= random.uniform(0, 1):
                 # random sampling
                 model_x = sampilng_func()
+                if model_x is None:
+                    # 无法获得合理采样结构，直接返回当前已经发现的最佳结构
+                    return opt_model, opt_acq
                 
                 # UCB acquisition function
                 temp_acq_value = self.acq(np.expand_dims(model_x, 0))[0]
