@@ -9,17 +9,15 @@ import abc
 import threading
 import queue
 
+
 class AccuracyEvaluator(object):
     __metaclass__ = abc.ABCMeta
+    thread_pool = None
+    process_queue = queue.Queue()
 
     def __init__(self, *args, **kwargs):
         super(AccuracyEvaluator, self).__init__()
-        self.wating_queue = queue.Queue()
-        thread_num = kwargs.get('thread_num', 4)
-        lock = threading.Lock()
-        self.process_thread_pool = [threading.Thread(target=self.process_func, args=(lock,)) for _ in range(thread_num)]
-        for thread_index in range(thread_num):
-            self.process_thread_pool[thread_index].start()
+        self.lock = threading.Lock()
 
     @abc.abstractmethod
     def task_type(self):
@@ -39,14 +37,27 @@ class AccuracyEvaluator(object):
     def _caculate_in_thread(self, *args, **kwargs):
         pass
 
-    def process_func(self, lock):
+    @staticmethod
+    def launch_thread_pool(thread_num):
+        AccuracyEvaluator.thread_pool = \
+            [threading.Thread(target=AccuracyEvaluator.process_func) for _ in range(thread_num)]
+        for thread_index in range(thread_num):
+            AccuracyEvaluator.thread_pool[thread_index].start()
+
+    @staticmethod
+    def process_func():
         while True:
-            data = self.wating_queue.get()
+            data = AccuracyEvaluator.process_queue.get()
             if data is None:
                 break
 
-            self._caculate_in_thread(*data, lock=lock)
+            handler, handler_data = data
+            handler._caculate_in_thread(*handler_data, lock=handler.lock)
 
-    def stop(self):
-        for _ in range(len(self.process_thread_pool)):
-            self.wating_queue.put(None)
+    @staticmethod
+    def stop():
+        for _ in range(len(AccuracyEvaluator.thread_pool)):
+            AccuracyEvaluator.process_queue.put(None)
+
+        for ti in range(len(AccuracyEvaluator.thread_pool)):
+            AccuracyEvaluator.thread_pool[ti].join()

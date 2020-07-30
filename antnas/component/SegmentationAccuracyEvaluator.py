@@ -83,9 +83,9 @@ class SegmentationAccuracyEvaluator(AccuracyEvaluator):
     def _caculate_in_thread(self, *args, **kwargs):
         pred, label, ignore = args
 
-        # If not in streaming mode, clear matrix everytime when call `calculate`
-        if not self.streaming:
-            self.zero_matrix()
+        # # If not in streaming mode, clear matrix everytime when call `calculate`
+        # if not self.streaming:
+        #     self.zero_matrix()
 
         # label = np.transpose(label, (0, 2, 3, 1))
         # ignore = np.transpose(ignore, (0, 2, 3, 1))
@@ -105,7 +105,7 @@ class SegmentationAccuracyEvaluator(AccuracyEvaluator):
         lock.release()
 
     def caculate(self, pred, label, ignore=None):
-        self.wating_queue.put((pred, label, ignore))
+        AccuracyEvaluator.process_queue.put((self, (pred, label, ignore)))
 
     def zero_matrix(self):
         """ Clear confusion matrix """
@@ -113,13 +113,6 @@ class SegmentationAccuracyEvaluator(AccuracyEvaluator):
                                          dtype='int64')
 
     def accuracy(self, *args, **kwargs):
-        # 添加结束标记
-        self.stop()
-
-        # 等待处理完成
-        for tt in self.process_thread_pool:
-            tt.join()
-
         # 完成指标统计
         iou_list = []
         avg_iou = 0

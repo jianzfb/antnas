@@ -17,6 +17,7 @@ from antnas.component.NetworkBlock import *
 from antnas.networks.nsga2 import *
 from antnas.networks.bayesian import *
 from antnas.utils.drawers.NASDrawer import *
+from antnas.component.AccuracyEvaluator import *
 import copy
 from tqdm import tqdm
 import antvis.client.mlogger as mlogger
@@ -99,6 +100,7 @@ class ArchitectureModelProblem(Problem):
       self.supernetwork_manager.parallel.eval()
 
       # 批量统计推荐网络结构精度
+      AccuracyEvaluator.launch_thread_pool(5)
       accuracy_evaluators = [self.supernetwork_manager.supernetwork.accuracy_evaluator() for _ in range(len(arc_list))]
       for images, labels in tqdm(self.data_loader, desc='Test', ascii=True):
           x.resize_(images.size()).copy_(images)
@@ -115,9 +117,12 @@ class ArchitectureModelProblem(Problem):
                   self.supernetwork_manager.supernetwork.caculate(model_out, y, accuracy_evaluators[arc_index])
 
       # 计算测试集精度
+      AccuracyEvaluator.stop()
       batch_accuracy = []
       for arc_index in range(len(arc_list)):
-          batch_accuracy.append(1.0-self.supernetwork_manager.supernetwork.accuracy(accuracy_evaluators[arc_index]))
+          batch_accuracy.append(1.0 - self.supernetwork_manager.supernetwork.accuracy(accuracy_evaluators[arc_index]))
+
+      del accuracy_evaluators
       return batch_accuracy
 
   def __f1(self, arc):

@@ -376,7 +376,6 @@ class PKBiSegSN(UniformSamplingSuperNetwork):
 
     def accuracy(self, evaluator):
         accuracy_value = evaluator.accuracy()
-        evaluator.reset()
         return accuracy_value
 
     def accuracy_evaluator(self):
