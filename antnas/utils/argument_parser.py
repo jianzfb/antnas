@@ -109,7 +109,7 @@ def antnas_argment(func):
                         type=restricted_str('max', 'abs'), help='Method used to compute the cost of an architecture')
     parser.add_argument('-pen', dest='arch_penalty', action='store', default=0, type=float,
                         help='Penalty for inconsistent architecture')
-    parser.add_argument('-model_path', dest="model_path", action='store', default="/Users/zhangjian52/Downloads/supernetwork_state_0.supernet.model", type=str)
+    parser.add_argument('-model_path', dest="model_path", action='store', default="/Users/zhangjian52/Downloads/cc/supernetwork_state_0.supernet.model", type=str)
 
     parser.add_argument('-anchor_archs', dest="anchor_archs", action='store', default=[], type=list)
     parser.add_argument('-anchor_states', dest="anchor_states", action='store', default=[], type=list)

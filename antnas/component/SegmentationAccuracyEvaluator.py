@@ -7,8 +7,6 @@ from __future__ import unicode_literals
 from __future__ import print_function
 import os
 import sys
-import torch
-import torch.nn.functional as F
 import numpy as np
 from antnas.component.AccuracyEvaluator import *
 from antnas.utils.function import *
@@ -82,7 +80,9 @@ class SegmentationAccuracyEvaluator(AccuracyEvaluator):
     def reset(self):
         self.zero_matrix()
 
-    def caculate(self, pred, label, ignore=None):
+    def _caculate_in_thread(self, *args, **kwargs):
+        pred, label, ignore = args
+
         # If not in streaming mode, clear matrix everytime when call `calculate`
         if not self.streaming:
             self.zero_matrix()
@@ -98,7 +98,14 @@ class SegmentationAccuracyEvaluator(AccuracyEvaluator):
         spm = csr_matrix((one, (label, pred)),
                          shape=(self.num_classes, self.num_classes))
         spm = spm.todense()
+
+        lock = kwargs['lock']
+        lock.acquire()
         self.confusion_matrix += spm
+        lock.release()
+
+    def caculate(self, pred, label, ignore=None):
+        self.wating_queue.put((pred, label, ignore))
 
     def zero_matrix(self):
         """ Clear confusion matrix """
@@ -106,6 +113,14 @@ class SegmentationAccuracyEvaluator(AccuracyEvaluator):
                                          dtype='int64')
 
     def accuracy(self, *args, **kwargs):
+        # 添加结束标记
+        self.stop()
+
+        # 等待处理完成
+        for tt in self.process_thread_pool:
+            tt.join()
+
+        # 完成指标统计
         iou_list = []
         avg_iou = 0
         # TODO: use numpy sum axis api to simpliy

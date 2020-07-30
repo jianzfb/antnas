@@ -64,7 +64,7 @@ class PKMixArc(PKAutoArc):
         sampling_param = None
         if self.sampling_param_generator is not None:
             sampling_param = self.sampling_param_generator(cell_node_name)
-    
+
         self.graph.add_node(cell_node_name,
                             module=len(self.blocks),
                             module_params=module.params,
@@ -86,7 +86,7 @@ class PKMixArc(PKAutoArc):
         sampling_param = None
         if self.sampling_param_generator is not None:
             sampling_param = self.sampling_param_generator(agg_node_name)
-    
+
         self.graph.add_node(agg_node_name,
                             module=len(self.blocks),
                             module_params=module.params,
@@ -254,15 +254,15 @@ class PKMixArc(PKAutoArc):
                 for m_2 in range(m_1 - 1, -1, -1):
                     scale_factor = backbone_export_strides[m_1]/backbone_export_strides[m_2]
 
-                    self.add_cell((0, pos_offset),
-                                  ResizedBlock(decoder_channels, -1, scale_factor=scale_factor),
-                                  SuperNetwork._CELL_NODE_FORMAT)
+                    # resize 模块为不可学习模块
+                    self.add_fixed((0, pos_offset),
+                                   ResizedBlock(decoder_channels, -1, scale_factor=scale_factor))
                     
                     self.graph.add_edge(SuperNetwork._CELL_NODE_FORMAT.format(0, cells_pos[m_1]),
-                                        SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset),
-                                        width_node=SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset))
+                                        SuperNetwork._FIXED_NODE_FORMAT.format(0, pos_offset),
+                                        width_node=SuperNetwork._FIXED_NODE_FORMAT.format(0, pos_offset))
                     
-                    self.graph.add_edge(SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset),
+                    self.graph.add_edge(SuperNetwork._FIXED_NODE_FORMAT.format(0, pos_offset),
                                         SuperNetwork._AGGREGATION_NODE_FORMAT.format(0, aggregation_pos[m_2]),
                                         width_node=SuperNetwork._AGGREGATION_NODE_FORMAT.format(0, aggregation_pos[m_2]))
                     pos_offset += 1

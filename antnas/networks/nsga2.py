@@ -181,8 +181,9 @@ class Nsga2(object):
     
     # recalculate objectives
     print('caculate population objectives')
-    for individual in children_population.population:
-      self.problem.calculateObjectives(individual)
+    # for individual in children_population.population:
+    #   self.problem.calculateObjectives(individual)
+    self.problem.calculateBatchObjectives(children_population.population)
 
     # return children population
     return children_population
@@ -308,9 +309,10 @@ class Nsga2(object):
             new_individual.features = suggestion_val
 
             print('compute suggestion structure objectives')
-            self.problem.calculateObjectives(new_individual)
+            # self.problem.calculateObjectives(new_individual)
             bayesian_population.population.append(new_individual)
-          
+
+          self.problem.calculateBatchObjectives(bayesian_population.population)
           children.extend(bayesian_population)
       
       if self.callback is not None:

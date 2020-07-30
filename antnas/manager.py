@@ -167,6 +167,7 @@ class Manager(object):
             self.arctecture.resize_(1, len(sampling_arc[0])).copy_(torch.as_tensor(sampling_arc))
 
         # 跑测试集，获得评估精度
+        accuracy_evaluator = self.supernetwork.accuracy_evaluator()
         for images, labels in tqdm(loader, desc=name, ascii=True):
             x.resize_(images.size()).copy_(images)
             y.resize_(labels.size()).copy_(labels)
@@ -175,10 +176,10 @@ class Manager(object):
                 _, model_out, _, _ = self.parallel(x, y, self.arctecture)
 
             # 统计模型精度
-            self.supernetwork.caculate(model_out, y)
+            self.supernetwork.caculate(model_out, y, accuracy_evaluator)
 
         # 获得模型精度
-        accuracy = self.supernetwork.accuracy()
+        accuracy = self.supernetwork.accuracy(accuracy_evaluator)
         return accuracy
 
     @property

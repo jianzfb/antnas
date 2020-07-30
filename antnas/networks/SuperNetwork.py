@@ -50,6 +50,28 @@ class ArchitectureModelProblem(Problem):
           if self.max_objectives[i] is None or individual.objectives[i] > self.max_objectives[i]:
               self.max_objectives[i] = individual.objectives[i]
 
+  def calculateBatchObjectives(self, batch_individuals):
+      # caculate batch f1 values
+      f1_value_list = self.__batch_f1(batch_individuals)
+      for index, individual in enumerate(batch_individuals):
+          individual.objectives[0] = f1_value_list[index]
+
+          if self.min_objectives[0] is None or individual.objectives[0] < self.min_objectives[0]:
+              self.min_objectives[0] = individual.objectives[0]
+
+          if self.max_objectives[0] is None or individual.objectives[0] > self.max_objectives[0]:
+              self.max_objectives[0] = individual.objectives[0]
+
+      # caculate batch f2 values
+      for index, individual in enumerate(batch_individuals):
+          individual.objectives[1] = self.__f2(individual)
+
+          if self.min_objectives[1] is None or individual.objectives[1] < self.min_objectives[1]:
+              self.min_objectives[1] = individual.objectives[1]
+
+          if self.max_objectives[1] is None or individual.objectives[1] > self.max_objectives[1]:
+              self.max_objectives[1] = individual.objectives[1]
+
   def __dominates(self, individual2, individual1):
       if self.goal == 'MAXIMIZE':
           worse_than_other = individual1.objectives[0] >= individual2.objectives[0] and individual1.objectives[1] >= individual2.objectives[1]
@@ -60,10 +82,46 @@ class ArchitectureModelProblem(Problem):
           better_than_other = individual1.objectives[0] < individual2.objectives[0] or individual1.objectives[1] < individual2.objectives[1]
           return worse_than_other and better_than_other
 
+  def __batch_f1(self, arc_list):
+      # logits, loss, accuracy
+      # data, label, architecture
+      x, y, a = None, None, None
+      if torch.cuda.is_available():
+        x = torch.Tensor().cuda(torch.device("cuda:%d"%self.supernetwork_manager.cuda_list[0]))
+        y = torch.LongTensor().cuda(torch.device("cuda:%d"%self.supernetwork_manager.cuda_list[0]))
+        a = torch.Tensor().cuda(torch.device("cuda:%d"%self.supernetwork_manager.cuda_list[0]))
+      else:
+        x = torch.Tensor()
+        y = torch.LongTensor()
+        a = torch.Tensor()
+
+      # 设置评估模式
+      self.supernetwork_manager.parallel.eval()
+
+      # 批量统计推荐网络结构精度
+      accuracy_evaluators = [self.supernetwork_manager.supernetwork.accuracy_evaluator() for _ in range(len(arc_list))]
+      for images, labels in tqdm(self.data_loader, desc='Test', ascii=True):
+          x.resize_(images.size()).copy_(images)
+          y.resize_(labels.size()).copy_(labels)
+          batch_size = labels.shape[0]
+
+          for arc_index, arc in enumerate(arc_list):
+              a.resize_([batch_size, len(arc.features)]).copy_(torch.as_tensor(np.tile([arc.features], (batch_size, 1))))
+
+              with torch.no_grad():
+                  _, model_out, _, _ = self.supernetwork_manager.parallel(x, y, a)
+
+                  # 计算精度
+                  self.supernetwork_manager.supernetwork.caculate(model_out, y, accuracy_evaluators[arc_index])
+
+      # 计算测试集精度
+      batch_accuracy = []
+      for arc_index in range(len(arc_list)):
+          batch_accuracy.append(1.0-self.supernetwork_manager.supernetwork.accuracy(accuracy_evaluators[arc_index]))
+      return batch_accuracy
+
   def __f1(self, arc):
       # logits, loss, accuracy
-      total_correct = 0
-      total = 0
       # data, label, architecture
       x, y, a = None, None, None
       if torch.cuda.is_available():
@@ -77,7 +135,6 @@ class ArchitectureModelProblem(Problem):
 
       # 使用单卡计算
       self.supernetwork_manager.parallel.eval()
-      count = 0
       for images, labels in tqdm(self.data_loader, desc='Test', ascii=True):
           x.resize_(images.size()).copy_(images)
           y.resize_(labels.size()).copy_(labels)
@@ -85,16 +142,17 @@ class ArchitectureModelProblem(Problem):
           a.resize_([batch_size, len(arc.features)]).copy_(torch.as_tensor(np.tile([arc.features], (batch_size, 1))))
 
           with torch.no_grad():
-             _, model_out, _, _ = self.supernetwork_manager.parallel(x, y, a)
+              _, model_out, _, _ = self.supernetwork_manager.parallel(x, y, a)
 
-          # 计算精度
-          self.supernetwork_manager.supernetwork.caculate(model_out, y)
+              # detach model_out from graph
+              model_out = model_out.detach()
+
+              # 计算精度
+              self.supernetwork_manager.supernetwork.caculate(model_out, y)
 
           # # 临时 快速退出
           # if count == 2:
           #     break
-
-          count += 1
 
       # 计算测试集精度
       accuracy = self.supernetwork_manager.supernetwork.accuracy()
@@ -244,14 +302,17 @@ class SuperNetwork(nn.Module):
                             feature[cur_node['sampling_param']] = int(np.random.randint(0, 2))
                         else:
                             feature[cur_node['sampling_param']] = int(np.random.randint(0, NetworkBlock.state_num))
-                    
+
                     sampling, active = \
                         self.path_recorder.add_sampling(node_name,
                                                         torch.as_tensor([feature[cur_node['sampling_param']]]).reshape([1,1,1,1]),
                                                         sampling,
                                                         active,
                                                         self.blocks[cur_node['module']].structure_fixed)
-    
+
+                # 注意sampled arc and pruned arc 的节点排序与feature不同
+                # sampled arc and pruned arc的节点排序按照拓扑顺序，而
+                # featrue里的顺序是按照节点的构建顺序
                 sampled_arc, pruned_arc = \
                     self.path_recorder.get_arch(self.out_node, sampling, active)
     
@@ -277,7 +338,7 @@ class SuperNetwork(nn.Module):
                             self.arch_objective_param_min = pruned_cost
                         if self.arch_objective_param_max < pruned_cost or self.arch_objective_param_max < 0:
                             self.arch_objective_param_max = pruned_cost
-        
+
                 try_times -= 1
         
         if self.cost_evaluation == "comp":
@@ -317,13 +378,16 @@ class SuperNetwork(nn.Module):
     '''
         计算模型精度（测试集每次迭代调用）
     '''
-    def caculate(self, predictions, labels):
+    def caculate(self, predictions, labels, evaluator):
         raise NotImplementedError
 
     '''
         获得模型精度（测试集跑完后调用）
     '''
-    def accuracy(self):
+    def accuracy(self, evaluator):
+        raise NotImplementedError
+
+    def accuracy_evaluator(self):
         raise NotImplementedError
 
     @property
@@ -574,6 +638,8 @@ class SuperNetwork(nn.Module):
                                     y_axis=','.join(['ARCH_%d'%index for index in range(1, len(population)+1)]))
         self.search_log.gene.update(GENE)
 
+        # refresh
+        mlogger.update()
         # # 2.4.step structure sampling visualization
         # data = np.array(GENE)
         # data = data.astype(np.int32)
@@ -653,8 +719,8 @@ class SuperNetwork(nn.Module):
         for individual_index in range(population_size):
             individual = evolution.problem.generateIndividual()
             individual.features = self.sample_arch()
-            evolution.problem.calculateObjectives(individual)
             population.population.append(individual)
+        evolution.problem.calculateBatchObjectives(population.population)
 
         # 2.step evolution to find parate front
         explore_position = []

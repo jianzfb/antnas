@@ -203,7 +203,6 @@ class PKBiSegSN(UniformSamplingSuperNetwork):
         self.blocks = nn.ModuleList([])
 
         self._loss = cross_entropy
-        self._accuracy_evaluator = SegmentationAccuracyEvaluator(self.out_dim, True)
 
         # 输入节点
         identity = Identity(self.in_chan, self.in_chan)
@@ -359,7 +358,7 @@ class PKBiSegSN(UniformSamplingSuperNetwork):
     def loss(self, predictions, labels):
         return self._loss(predictions, labels)
 
-    def caculate(self, predictions, labels):
+    def caculate(self, predictions, labels, evaluator):
         if (labels.shape[1] != predictions.shape[2]) or (labels.shape[2] != predictions.shape[3]):
             predictions = torch.nn.functional.interpolate(predictions, size=(labels.shape[1], labels.shape[2]), mode='bilinear', align_corners=True)
 
@@ -373,12 +372,15 @@ class PKBiSegSN(UniformSamplingSuperNetwork):
         labels = labels.cpu().numpy()
         mask = mask.cpu().numpy()
 
-        return self._accuracy_evaluator.caculate(preditions_argmax, labels, mask)
+        evaluator.caculate(preditions_argmax, labels, mask)
 
-    def accuracy(self):
-        accuracy_value = self._accuracy_evaluator.accuracy()
-        self._accuracy_evaluator.reset()
+    def accuracy(self, evaluator):
+        accuracy_value = evaluator.accuracy()
+        evaluator.reset()
         return accuracy_value
+
+    def accuracy_evaluator(self):
+         return SegmentationAccuracyEvaluator(self.out_dim, True)
 
     def hierarchical(self):
         return self.seg_arc.hierarchical
