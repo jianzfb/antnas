@@ -35,27 +35,25 @@ def antnas_argment(func):
                         help='Number of training epochs')
     parser.add_argument('-evo_epochs', action='store', default=1, type=int,
                         help='Number of architecture searching epochs')
-    parser.add_argument('-warmup', action='store', default=0, type=int,
-                        help='warmup epochs before searching architecture')
+    parser.add_argument('-warmup', action='store', default=0, type=int,help='warmup epochs before searching architecture')
     parser.add_argument('-iterator_search', action='store', default=False, type=bool,
                         help='is iterator search')
     parser.add_argument('-population_size', action='store', default=2, type=int,
                         help='population size for NSGAII')
 
-    parser.add_argument('-optim', action='store', default='SGD', type=str,
+    parser.add_argument('-optim', action='store', default='RMS', type=str,
                         help='Optimization method')
     parser.add_argument('-nesterov', action='store', default=False, type=bool,
                         help='Use Nesterov for SGD momentum')
     parser.add_argument('-lr', action='store', default=0.0001, type=float, help='Learning rate')
+    parser.add_argument('-end_lr', action='store', default=0.000001, type=float, help='End Learning rate')
     parser.add_argument('-path_lr', action='store', default=1e-3, type=float, help='path learning rate')
-    parser.add_argument('--lr_decay', type=str, default='cos',
-                        help='mode for learning rate decay')
+    parser.add_argument('--lr_decay', type=str, default='step', help='mode for learning rate decay')
     parser.add_argument('--schedule', type=int, nargs='+', default=[150, 225],
                         help='decrease learning rate at these epochs.')
 
-    parser.add_argument('--gamma', type=float, default=0.1,
-                        help='LR is multiplied by gamma on schedule.')
-    parser.add_argument('--epochs_drop', type=int, default=10, help='for step mode')
+    parser.add_argument('--gamma', type=float, default=0.9,help='LR is multiplied by gamma on schedule.')
+    parser.add_argument('--epochs_drop', type=int, default=16, help='for step mode')
 
     parser.add_argument('-momentum', action='store', default=0.9, type=float,
                         help='momentum used by the optimizer')
@@ -68,7 +66,7 @@ def antnas_argment(func):
     # parser.add_argument('-lr_pol_val', action='store', nargs='*', default=[0.1, 0.01, 0.001], type=str,
     #                     help='learning rate decay period')
     #
-    parser.add_argument('-cuda', action='store', default='0', type=str,
+    parser.add_argument('-cuda', action='store', default='', type=str,
                         help='Enables cuda and select device')
     parser.add_argument('-latency', action='store',
                         default='./latency.gpu.855.224_16.32.64.96.112.160_lookuptable.json', type=str,
@@ -113,6 +111,8 @@ def antnas_argment(func):
 
     parser.add_argument('-anchor_archs', dest="anchor_archs", action='store', default=[], type=list)
     parser.add_argument('-anchor_states', dest="anchor_states", action='store', default=[], type=list)
+
+    parser.add_argument('-architecture', action='store', default="./supernetwork/pk_pk_mobilenetv2.architecture", type=str, help="architecture path")
 
     kargs = vars(parser.parse_known_args()[0])
 

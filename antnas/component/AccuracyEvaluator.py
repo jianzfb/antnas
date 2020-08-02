@@ -23,6 +23,9 @@ class AccuracyEvaluator(object):
     def task_type(self):
         raise NotImplementedError
 
+    def preprocess(self, *args, **kwargs):
+        return args
+
     @abc.abstractmethod
     def caculate(self, pred, label, ignore=None):
         raise NotImplementedError

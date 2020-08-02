@@ -140,7 +140,7 @@ def main(*args, **kwargs):
         for warmup_epoch in range(kwargs['warmup']):
             for i, (inputs, labels) in enumerate(tqdm(train_loader, desc='Train', ascii=True)):
                 # adjust learning rate
-                warmup_lr = nas_manager.adjust_lr(kwargs, warmup_epoch, i, len(train_loader), logger)
+                warmup_lr = nas_manager.adjust_lr(kwargs, warmup_epoch, i, len(train_loader), ['path'])
                 xp.train.learning_rate.update(warmup_lr)
 
                 # set model status (train)
@@ -173,7 +173,7 @@ def main(*args, **kwargs):
             # train process
             for i, (inputs, labels) in enumerate(tqdm(train_loader, desc='Train', ascii=True)):
                 # adjust learning rate
-                lr = nas_manager.adjust_lr(kwargs, epoch, i, len(train_loader), logger)
+                lr = nas_manager.adjust_lr(kwargs, epoch, i, len(train_loader), ['path'])
                 xp.train.learning_rate.update(lr)
 
                 # set model status (train)

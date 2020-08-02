@@ -10,7 +10,6 @@ from antnas.component.NetworkCell import *
 from antnas.networks.UniformSamplingSuperNetwork import UniformSamplingSuperNetwork
 from antnas.utils.drawers.NASDrawer import NASDrawer
 from antnas.component.Loss import *
-from antnas.component.ClassificationAccuracyEvaluator import *
 from antnas.component.SegmentationAccuracyEvaluator import *
 from antnas.searchspace.PKMixArc import *
 __all__ = ['PKBiSegSN']
@@ -357,26 +356,6 @@ class PKBiSegSN(UniformSamplingSuperNetwork):
 
     def loss(self, predictions, labels):
         return self._loss(predictions, labels)
-
-    def caculate(self, predictions, labels, evaluator):
-        if (labels.shape[1] != predictions.shape[2]) or (labels.shape[2] != predictions.shape[3]):
-            predictions = torch.nn.functional.interpolate(predictions, size=(labels.shape[1], labels.shape[2]), mode='bilinear', align_corners=True)
-
-        preditions = torch.nn.Softmax2d()(predictions)
-        preditions_argmax = preditions.argmax(1, keepdim=True)
-        preditions_argmax = preditions_argmax.permute(0,2,3,1)
-        preditions_argmax = preditions_argmax.cpu().numpy()
-
-        labels = labels.reshape((-1, labels.shape[1], labels.shape[2], 1))
-        mask = labels != 255
-        labels = labels.cpu().numpy()
-        mask = mask.cpu().numpy()
-
-        evaluator.caculate(preditions_argmax, labels, mask)
-
-    def accuracy(self, evaluator):
-        accuracy_value = evaluator.accuracy()
-        return accuracy_value
 
     def accuracy_evaluator(self):
          return SegmentationAccuracyEvaluator(self.out_dim, True)

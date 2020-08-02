@@ -114,13 +114,14 @@ class ArchitectureModelProblem(Problem):
                   _, model_out, _, _ = self.supernetwork_manager.parallel(x, y, a)
 
                   # 计算精度
-                  self.supernetwork_manager.supernetwork.caculate(model_out, y, accuracy_evaluators[arc_index])
+                  processed_data = accuracy_evaluators[arc_index].preprocess(model_out, y)
+                  accuracy_evaluators[arc_index].caculate(*processed_data)
 
       # 计算测试集精度
       AccuracyEvaluator.stop()
       batch_accuracy = []
       for arc_index in range(len(arc_list)):
-          batch_accuracy.append(1.0 - self.supernetwork_manager.supernetwork.accuracy(accuracy_evaluators[arc_index]))
+          batch_accuracy.append(1.0 - accuracy_evaluators[arc_index].accuracy())
 
       del accuracy_evaluators
       return batch_accuracy
@@ -289,7 +290,8 @@ class SuperNetwork(nn.Module):
         auto_analyze_param = False
         if self.cost_evaluation == "param" and (self.arch_objective_param_min < 0 or self.arch_objective_param_max < 0):
             auto_analyze_param = True
-        
+
+        mmm = []
         if auto_analyze_comp or auto_analyze_latency or auto_analyze_param:
             try_times = 1000
             while try_times > 0:
@@ -320,12 +322,25 @@ class SuperNetwork(nn.Module):
                 # featrue里的顺序是按照节点的构建顺序
                 sampled_arc, pruned_arc = \
                     self.path_recorder.get_arch(self.out_node, sampling, active)
-    
+
+                # ###############
+                # # 测试结构采样保存
+                # # 3.2.step write to graph
+                # for node in self.traversal_order:
+                #     node_sampling_val = torch.squeeze(pruned_arc[self.path_recorder.node_index[node]]).item()
+                #     self.net.node[node]['sampled'] = int(node_sampling_val)
+                #
+                # nx.write_gpickle(self.net, './xxx.architecture')
+                # ###############
+
+
                 for cost, cost_eval in self.arch_cost_evaluators.items():
                     _, pruned_cost = \
                         cost_eval.get_costs([sampled_arc, pruned_arc])
-    
+
                     pruned_cost = pruned_cost.item()
+                    mmm.append(pruned_cost)
+
                     if cost == "comp" and auto_analyze_comp:
                         if self.arch_objective_comp_min > pruned_cost or self.arch_objective_comp_min < 0:
                             self.arch_objective_comp_min = pruned_cost
@@ -345,7 +360,9 @@ class SuperNetwork(nn.Module):
                             self.arch_objective_param_max = pruned_cost
 
                 try_times -= 1
-        
+
+        self.search_log.arch_loss.update(mmm)
+        mlogger.update()
         if self.cost_evaluation == "comp":
             print("ARCH COMP MIN-%f,MAX-%f"%(self.arch_objective_comp_min,self.arch_objective_comp_max))
         elif self.cost_evaluation == "latency":
@@ -380,18 +397,10 @@ class SuperNetwork(nn.Module):
     '''
     def loss(self, predictions, labels):
         raise NotImplementedError
-    '''
-        计算模型精度（测试集每次迭代调用）
-    '''
-    def caculate(self, predictions, labels, evaluator):
-        raise NotImplementedError
 
     '''
-        获得模型精度（测试集跑完后调用）
+        精度计算评估对象
     '''
-    def accuracy(self, evaluator):
-        raise NotImplementedError
-
     def accuracy_evaluator(self):
         raise NotImplementedError
 

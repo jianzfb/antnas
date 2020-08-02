@@ -13,6 +13,7 @@ from math import cos, pi
 import math
 import queue
 import threading
+from antnas.utils.adjust import *
 
 
 class Manager(object):
@@ -37,28 +38,8 @@ class Manager(object):
         if self._optimizer is not None:
             return self._optimizer
 
-        if self.args['optim'] == 'SGD':
-            optimizer = optim.SGD([
-                {'params': self.parallel.blocks.parameters(), 'name': 'blocks'},
-                {'params': filter(lambda x: x.requires_grad, self.parallel.sampling_parameters.parameters()),
-                 'name': 'path',
-                 'lr': self.args['path_lr'],
-                 'momentum': False,
-                 'weight_decay': 0.01}
-            ], lr=self.args['lr'], weight_decay=self.args['weight_decay'], momentum=self.args['momentum'], nesterov=self.args['nesterov'])
-        elif self.args['optim'] == 'ADAM':
-            optimizer = optim.Adam(self.parallel.parameters(),
-                                   lr=self.args['lr'],
-                                   weight_decay=self.args['weight_decay'])
-        elif self.args['optim'] == 'RMS':
-            optimizer = optim.RMSprop(self.parallel.parameters(),
-                                      lr=self.args['lr'],
-                                      weight_decay=self.args['weight_decay'],
-                                      momentum=self.args['momentum'])
-        else:
-            raise RuntimeError
-
-        self._optimizer = optimizer
+        # 初始化优化器
+        self._optimizer = initialize_optimizer('search', self.parallel, self.args)
         return self._optimizer
 
     def initialize(self):
@@ -66,18 +47,7 @@ class Manager(object):
         self.initialize_optimizer()
         
         # 2.step 初始化模型参数
-        for sub_m in self._model.modules():
-            if isinstance(sub_m, nn.Conv2d):
-                n = sub_m.kernel_size[0] * sub_m.kernel_size[1] * sub_m.out_channels
-                sub_m.weight.data.normal_(0, math.sqrt(2. / n))
-                if sub_m.bias is not None:
-                    sub_m.bias.data.zero_()
-            elif isinstance(sub_m, nn.BatchNorm2d):
-                sub_m.weight.data.fill_(1)
-                sub_m.bias.data.zero_()
-            elif isinstance(sub_m, nn.Linear):
-                sub_m.weight.data.normal_(0, 0.01)
-                sub_m.bias.data.zero_()
+        initialize_weights(self._model)
 
         # 3.step 初始化结构采样线程
         self.arctecture_sampling_thread_list = \
@@ -194,35 +164,8 @@ class Manager(object):
     def supernetwork(self):
         return self._supernetwork
 
-    def adjust_lr(self, args, epoch, iteration, num_iter, logger=None, except_groups=None):
-        if except_groups is None:
-            except_groups = ['path']
-
-        warmup_epoch = args['warmup']
-        warmup_iter = warmup_epoch * num_iter
-        current_iter = iteration + epoch * num_iter
-        max_iter = args['epochs'] * num_iter
-
-        if args['lr_decay'] == 'step':
-            lr = args['lr'] * (
-                    args['gamma'] ** ((current_iter - warmup_iter) // (args['epochs_drop'] * num_iter - warmup_iter)))
-        elif args['lr_decay'] == 'cos':
-            lr = args['lr'] * (1 + cos(pi * (current_iter - warmup_iter) / (max_iter - warmup_iter))) / 2
-        elif args['lr_decay'] == 'linear':
-            lr = args['lr'] * (1 - (current_iter - warmup_iter) / (max_iter - warmup_iter))
-        elif args['lr_decay'] == 'schedule':
-            count = sum([1 for s in args['schedule'] if s <= epoch])
-            lr = args['lr'] * pow(args['gamma'], count)
-        else:
-            raise ValueError('Unknown lr mode {}'.format(args['lr_decay']))
-
-        if epoch < warmup_epoch:
-            lr = args['lr'] * current_iter / warmup_iter
-
-        for param_group in self.optimizer.param_groups:
-            if param_group['name'] not in except_groups:
-                param_group['lr'] = lr
-                
+    def adjust_lr(self, args, epoch, iteration, num_iter, except_groups=None):
+        lr = adjust_lr(args, self.optimizer, epoch, iteration, num_iter, except_groups)
         return lr
 
     def cuda(self, cuda_list):

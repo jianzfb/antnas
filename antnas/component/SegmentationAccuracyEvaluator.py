@@ -104,6 +104,22 @@ class SegmentationAccuracyEvaluator(AccuracyEvaluator):
         self.confusion_matrix += spm
         lock.release()
 
+    def preprocess(self, *args, **kwargs):
+        predictions, labels = args
+        if (labels.shape[1] != predictions.shape[2]) or (labels.shape[2] != predictions.shape[3]):
+            predictions = torch.nn.functional.interpolate(predictions, size=(labels.shape[1], labels.shape[2]), mode='bilinear', align_corners=True)
+
+        preditions = torch.nn.Softmax2d()(predictions)
+        preditions_argmax = preditions.argmax(1, keepdim=True)
+        preditions_argmax = preditions_argmax.permute(0,2,3,1)
+        preditions_argmax = preditions_argmax.cpu().numpy()
+
+        labels = labels.reshape((-1, labels.shape[1], labels.shape[2], 1))
+        mask = labels != 255
+        labels = labels.cpu().numpy()
+        mask = mask.cpu().numpy()
+        return preditions_argmax, labels, mask
+
     def caculate(self, pred, label, ignore=None):
         AccuracyEvaluator.process_queue.put((self, (pred, label, ignore)))
 

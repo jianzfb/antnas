@@ -25,11 +25,9 @@ class FixedNetwork(nn.Module):
         
         architecture_path = kwargs.get('architecture', None)
         self.output_layer_cls = kwargs.get('output_layer_cls', None)
+        self._loss = kwargs.get('loss_func', None)
+        self._accuracy_evaluator_cls = kwargs.get('accuracy_evaluator_cls', None)
         self.graph = nx.read_gpickle(architecture_path)
-
-        # self._loss = cross_entropy
-        self._loss = nn.CrossEntropyLoss()
-        self._accuracy_evaluator = ClassificationAccuracyEvaluator()
 
         self.in_node = None
         self.out_node = None
@@ -69,12 +67,7 @@ class FixedNetwork(nn.Module):
                     sampled_module(**cur_node['module_params'][sampled_module_name])
 
             print('build node %s with sampling %s op' % (node_name, sampled_module_name))
-            
-        self.plotter = kwargs.get('plotter', None)
-        if self.plotter is not None:
-            self.drawer = NASDrawer(self.plotter)
-            self.drawer.draw(self.graph)
-        
+
     def forward(self, x, y):
         # 1.step parse x,y - (data,label)
         input = [x]
@@ -105,11 +98,8 @@ class FixedNetwork(nn.Module):
         # 4.step compute model loss
         indiv_loss = self.loss(model_out, y)
 
-        # 5.step compute model accuracy
-        model_accuracy = self.accuray(model_out, y)
-
-        # 6.step total loss
-        return indiv_loss, model_accuracy
+        # 5.step total loss
+        return indiv_loss, model_out
 
     def __str__(self):
         return ''
@@ -123,6 +113,5 @@ class FixedNetwork(nn.Module):
     def loss(self, predictions, labels):
         return self._loss(predictions, labels)
 
-    def accuray(self, predictions, labels):
-        return self._accuracy_evaluator.accuracy(predictions, labels)
-
+    def accuracy_evaluator(self):
+        return self._accuracy_evaluator_cls()
