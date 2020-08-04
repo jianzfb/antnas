@@ -43,7 +43,7 @@ def mobilenetv2(head, tail, prefix, width_mult=1.0):
             input_channel = output_channel
 
     graph = nx.DiGraph()
-    pk = PKAutoArc(graph)
+    pk = PKAutoArc(graph, None)
     pk.generate(head, tail, modules)
     pk.save('./', '%s_mobilenetv2'%prefix)
 

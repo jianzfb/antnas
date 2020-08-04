@@ -291,7 +291,6 @@ class SuperNetwork(nn.Module):
         if self.cost_evaluation == "param" and (self.arch_objective_param_min < 0 or self.arch_objective_param_max < 0):
             auto_analyze_param = True
 
-        mmm = []
         if auto_analyze_comp or auto_analyze_latency or auto_analyze_param:
             try_times = 1000
             while try_times > 0:
@@ -339,8 +338,6 @@ class SuperNetwork(nn.Module):
                         cost_eval.get_costs([sampled_arc, pruned_arc])
 
                     pruned_cost = pruned_cost.item()
-                    mmm.append(pruned_cost)
-
                     if cost == "comp" and auto_analyze_comp:
                         if self.arch_objective_comp_min > pruned_cost or self.arch_objective_comp_min < 0:
                             self.arch_objective_comp_min = pruned_cost
@@ -361,8 +358,6 @@ class SuperNetwork(nn.Module):
 
                 try_times -= 1
 
-        self.search_log.arch_loss.update(mmm)
-        mlogger.update()
         if self.cost_evaluation == "comp":
             print("ARCH COMP MIN-%f,MAX-%f"%(self.arch_objective_comp_min,self.arch_objective_comp_max))
         elif self.cost_evaluation == "latency":

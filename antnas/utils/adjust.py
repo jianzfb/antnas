@@ -45,7 +45,7 @@ def adjust_lr(args, optimizer, epoch, iteration, num_iter, except_groups=None):
 
     for param_group in optimizer.param_groups:
         if 'name' in param_group and param_group['name'] not in except_groups:
-                param_group['lr'] = lr
+            param_group['lr'] = lr
         else:
             param_group['lr'] = lr
 

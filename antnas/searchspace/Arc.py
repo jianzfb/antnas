@@ -76,7 +76,6 @@ class Arc:
         self._offset = val
     
     def arc_loss(self, shape, loss='latency', feature=None):
-        x = torch.ones(shape)
         self.traversal_order = list(nx.topological_sort(self.graph))
         self.path_recorder = PathRecorder(self.graph, self.out_node)
 
@@ -98,39 +97,15 @@ class Arc:
                                                 active,
                                                 self.blocks[cur_node['module']].structure_fixed)
 
-        # 初始化每一节点数据形状
-        for node in self.traversal_order:
-            self.graph.node[self.in_node]['input'] = [x]
-            cur_node = self.graph.node[node]
-            input = self.format_input(cur_node['input'])
-
-            if len(input) == 0:
-                raise RuntimeError('Node {} has no inputs'.format(node))
-
-            out = self.blocks[cur_node['module']](input)
-            if node == self.out_node:
-                break
-
-            # 3.3.step set successor input
-            for succ in self.graph.successors(node):
-                if 'input' not in self.graph.node[succ]:
-                    self.graph.node[succ]['input'] = []
-                self.graph.node[succ]['input'].append(out)
-
         # 初始化结构损失估计函数
-        self.cost_evaluators[loss].init_costs(self, self.graph)
+        self.cost_evaluators[loss].init_costs(self, self.graph, input_node=self.in_node, input_shape=shape)
 
         # 获得结构损失
         sampled_arc, pruned_arc = \
             self.path_recorder.get_arch(self.out_node, sampling, active)
         sampled_cost, pruned_cost = \
             self.cost_evaluators[loss].get_costs([sampled_arc, pruned_arc])
-        
-        # clear
-        for node in self.traversal_order:
-            if 'input' in self.graph.node[node]:
-                self.graph.node[node].pop('input')
-                
+
         return sampled_cost, pruned_cost
     
     def arc_min_max(self, shape, loss='latency'):

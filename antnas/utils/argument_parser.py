@@ -21,7 +21,7 @@ def antnas_argment(func):
     parser.add_argument('-dashboard_port', action='store', default=8999, type=int)
 
     # Model
-    parser.add_argument('-arch', action='store', default='PKBiSegSN', type=str)
+    parser.add_argument('-arch', action='store', default='PKBiSegSN2', type=str)
     parser.add_argument('-deter_eval', action='store', default=False, type=bool,
                         help='Take blocks with probas >0.5 instead of sampling during evaluation')
 
@@ -48,12 +48,12 @@ def antnas_argment(func):
     parser.add_argument('-lr', action='store', default=0.0001, type=float, help='Learning rate')
     parser.add_argument('-end_lr', action='store', default=0.000001, type=float, help='End Learning rate')
     parser.add_argument('-path_lr', action='store', default=1e-3, type=float, help='path learning rate')
-    parser.add_argument('--lr_decay', type=str, default='step', help='mode for learning rate decay')
-    parser.add_argument('--schedule', type=int, nargs='+', default=[150, 225],
+    parser.add_argument('-lr_decay', type=str, default='step', help='mode for learning rate decay')
+    parser.add_argument('-schedule', type=int, nargs='+', default=[150, 225],
                         help='decrease learning rate at these epochs.')
 
-    parser.add_argument('--gamma', type=float, default=0.9,help='LR is multiplied by gamma on schedule.')
-    parser.add_argument('--epochs_drop', type=int, default=16, help='for step mode')
+    parser.add_argument('-gamma', type=float, default=0.9,help='LR is multiplied by gamma on schedule.')
+    parser.add_argument('-epochs_drop', type=int, default=16, help='for step mode')
 
     parser.add_argument('-momentum', action='store', default=0.9, type=float,
                         help='momentum used by the optimizer')
@@ -107,7 +107,7 @@ def antnas_argment(func):
                         type=restricted_str('max', 'abs'), help='Method used to compute the cost of an architecture')
     parser.add_argument('-pen', dest='arch_penalty', action='store', default=0, type=float,
                         help='Penalty for inconsistent architecture')
-    parser.add_argument('-model_path', dest="model_path", action='store', default="/Users/zhangjian52/Downloads/cc/supernetwork_state_0.supernet.model", type=str)
+    parser.add_argument('-model_path', dest="model_path", action='store', default="", type=str)
 
     parser.add_argument('-anchor_archs', dest="anchor_archs", action='store', default=[], type=list)
     parser.add_argument('-anchor_states', dest="anchor_states", action='store', default=[], type=list)

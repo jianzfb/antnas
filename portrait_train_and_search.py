@@ -63,7 +63,7 @@ def main(*args, **kwargs):
         get_data(kwargs['dset'], kwargs['bs'], kwargs['path'], kwargs)
 
     # 创建NAS模型
-    nas_manager = Manager(kwargs, data_properties, out_layer=OutLayer(192, 2, True))
+    nas_manager = Manager(kwargs, data_properties, out_layer=OutLayer(32, 2, True))
 
     # 构建NAS网络
     nas_manager.build()
@@ -87,7 +87,7 @@ def main(*args, **kwargs):
     xp.train.accuracy = mlogger.metric.Simple(plot_title="accuracy")
     xp.train.rewards = mlogger.metric.Average(plot_title="rewards")
     xp.train.objective_cost = mlogger.metric.Average(plot_title="objective_cost")
-    xp.train.learning_rate = mlogger.metric.Simple(plot_title="LR")
+    xp.train.learning_rate = mlogger.metric.Simple(plot_title="LR mode(%s)"%kwargs['lr_decay'])
 
     xp.test = mlogger.Container()
     xp.test.accuracy = mlogger.metric.Simple(plot_title="val_test_accuracy")

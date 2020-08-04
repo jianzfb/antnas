@@ -24,6 +24,7 @@ class PKMixArc(PKAutoArc):
                  decoder_input_endpoints=[0,2,5,16],
                  decoder_input_strides=[4,8,16,32],
                  decoder_depth=32,
+                 decoder_replica=1,
                  decoder_allow_skip=False):
         super(PKMixArc, self).__init__(graph, blocks)
         self.sampling_param_generator = sampling_param_generator
@@ -39,6 +40,7 @@ class PKMixArc(PKAutoArc):
         self.decoder_input_strides = decoder_input_strides
         self.decoder_depth = decoder_depth
         self.decoder_allow_skip = decoder_allow_skip
+        self.decoder_replica = decoder_replica
     
     def add_fixed(self, pos, module):
         node_name = SuperNetwork._FIXED_NODE_FORMAT.format(*pos)
@@ -225,18 +227,21 @@ class PKMixArc(PKAutoArc):
                         last_endpoints[m] = SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset)
                         pos_offset += 1
 
-                self.add_cell((0, pos_offset),
-                              self.cell_cls(last_channels[m],
-                                            decoder_channels,
-                                            reduction=False),
-                              SuperNetwork._CELL_NODE_FORMAT)
+                for replica_i in range(self.decoder_replica):
+                    upper_channels = last_channels[m] if replica_i == 0 else decoder_channels
+                    upper_node = last_endpoints[m] if replica_i == 0 else SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset-1)
+                    self.add_cell((0, pos_offset),
+                                  self.cell_cls(upper_channels,
+                                                decoder_channels,
+                                                reduction=False),
+                                  SuperNetwork._CELL_NODE_FORMAT)
 
-                self.graph.add_edge(last_endpoints[m],
-                                    SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset),
-                                    width_node=SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset))
-                
-                cells_pos[m] = pos_offset
-                pos_offset += 1
+                    self.graph.add_edge(upper_node,
+                                        SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset),
+                                        width_node=SuperNetwork._CELL_NODE_FORMAT.format(0, pos_offset))
+
+                    cells_pos[m] = pos_offset
+                    pos_offset += 1
                 
                 if m < n-1:
                     self.add_aggregation((0, pos_offset),
