@@ -749,6 +749,7 @@ class SuperNetwork(nn.Module):
                              network=self)
 
         # 3.step save architecture
+        print('final elited population %d'%len(elited_population))
         for individual in elited_population:
             batched_sampling = torch.Tensor(individual.features).view(1, len(individual.features))
 

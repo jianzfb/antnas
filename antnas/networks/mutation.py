@@ -124,7 +124,7 @@ class Mutation(object):
 
                         if node_name.startswith("CELL") or node_name.startswith('T'):
                             if not self.network.blocks[node['module']].structure_fixed:
-                                if s != 0 and s != 1:
+                                if s not in [0, 1]:
                                     s = 1
                         else:
                             print("shouldnt mutation at this pos %d(%s)"%(mutation_p, node_name))

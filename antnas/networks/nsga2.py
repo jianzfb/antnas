@@ -176,8 +176,9 @@ class Nsga2(object):
       # mutation（变异）
       print('mutation population')
       mutation_population = \
-        self.mutation_controler.mutate(population=population, **kwargs)
-      children_population.population.extend(mutation_population.population)
+        self.mutation_controler.mutate(population=crossover_population, **kwargs)
+      children_population = mutation_population
+      # children_population.population.extend(mutation_population.population)
     
     # recalculate objectives
     print('caculate population objectives')

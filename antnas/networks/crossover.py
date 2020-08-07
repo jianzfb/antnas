@@ -76,7 +76,7 @@ class CrossOver(object):
         # 计算chromosome之间的距离
         H = np.zeros((N, N))
         for ii in range(N):
-              for jj in range(N):
+            for jj in range(N):
                 if ii == jj:
                     H[ii, jj] = 0.0
                 else:
@@ -113,7 +113,7 @@ class CrossOver(object):
                     block_num = len(self.hierarchical[stage_i])
     
                 if stage_i >= 0 and block_num > 0:
-                    if np.random.random() < 0.3:
+                    if np.random.random() < 0.3 and block_num != 1:
                         # TODO 自适应阈值修改
                         # whole block changing
                         block_i = np.random.randint(0, block_num)
