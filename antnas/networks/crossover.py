@@ -246,6 +246,10 @@ class EvolutionCrossover(CrossOver):
             crossover_1_individual.features = copy.deepcopy(population.population[first_individual_index].features)
             crossover_1_individual.objectives = copy.deepcopy(population.population[first_individual_index].objectives)
 
+            cross_over_fraction = float(len(crossover_region)) / float(len(explore_position))
+            crossover_1_individual.objectives[0] = \
+                (1.0 - cross_over_fraction) * population.population[first_individual_index].objectives[0] + \
+                cross_over_fraction * population.population[second_individual_index].objectives[0]
             for loc in crossover_region:
                 crossover_1_individual.features[loc] = population.population[second_individual_index].features[loc]
 
@@ -256,6 +260,10 @@ class EvolutionCrossover(CrossOver):
             crossover_2_individual.features = copy.deepcopy(population.population[second_individual_index].features)
             crossover_2_individual.objectives = copy.deepcopy(population.population[second_individual_index].objectives)
 
+            cross_over_fraction = float(len(crossover_region)) / float(len(explore_position))
+            crossover_2_individual.objectives[0] = \
+                (1.0 - cross_over_fraction) * population.population[second_individual_index].objectives[0] + \
+                cross_over_fraction * population.population[first_individual_index].objectives[0]
             for loc in crossover_region:
                 crossover_2_individual.features[loc] = population.population[first_individual_index].features[loc]
 
