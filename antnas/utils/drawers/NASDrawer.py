@@ -41,7 +41,8 @@ class NASDrawer(Drawer):
              graph,
              param_list=None,
              weights=None,
-             colormap=None):
+             colormap=None,
+             filename=None):
         node_filter = lambda n: True  # todo Should be removed
         edge_filter = lambda e: True  # todo Should be removed
 
@@ -94,7 +95,8 @@ class NASDrawer(Drawer):
                              edgefilter=edge_filter,
                              positioner=positioner,
                              weighter=weighter,
-                             colormap=colormap)
+                             colormap=colormap,
+                             filename=filename)
         
         #
         # self.win = self.vis.svg(svgstr=img, win=self.win)

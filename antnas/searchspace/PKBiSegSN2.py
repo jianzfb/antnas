@@ -80,11 +80,17 @@ class BiSegDecoderCellBlock(NetworkBlock):
         return cost_list
 
     def get_latency(self, x):
-        cost_list = [0]
-        for i in range(len(self.op_list) - 1):
-            cost_list.append(self.op_list[i + 1].get_latency(x)[1])
-
+        cost_list = []
+        if NetworkBlock.device_num == 1:
+            for i in range(len(self.op_list)):
+                cost_list.append(self.op_list[i].get_latency(x)[1])
+        else:
+            cost_list = [[], []]
+            for i in range(len(self.op_list)):
+                cost_list[0].append(self.op_list[i].get_latency(x)[0][1])
+                cost_list[1].append(self.op_list[i].get_latency(x)[1][1])
         return cost_list
+
 
     def get_param_num(self, x):
         cost_list = [0]
@@ -174,10 +180,15 @@ class BiSegDetailCellBlock(NetworkBlock):
         return cost_list
 
     def get_latency(self, x):
-        cost_list = [0]
-        for i in range(len(self.op_list) - 1):
-            cost_list.append(self.op_list[i + 1].get_latency(x)[1])
-
+        cost_list = []
+        if NetworkBlock.device_num == 1:
+            for i in range(len(self.op_list)):
+                cost_list.append(self.op_list[i].get_latency(x)[1])
+        else:
+            cost_list = [[], []]
+            for i in range(len(self.op_list)):
+                cost_list[0].append(self.op_list[i].get_latency(x)[0][1])
+                cost_list[1].append(self.op_list[i].get_latency(x)[1][1])
         return cost_list
 
     def get_param_num(self, x):

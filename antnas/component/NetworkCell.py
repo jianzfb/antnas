@@ -105,8 +105,8 @@ class CellBlock(NetworkBlock):
         return cost_list
 
     def get_latency(self, x):
-        cost_list = [0]
-        for i in range(len(self.op_list) - 1):
+        cost_list = []
+        for i in range(len(self.op_list)):
             cost_list.append(self.op_list[i + 1].get_latency(x)[1])
 
         return cost_list
@@ -220,8 +220,8 @@ class DilationCellBlock(NetworkBlock):
         return cost_list
 
     def get_latency(self, x):
-        cost_list = [0]
-        for i in range(len(self.op_list) - 1):
+        cost_list = []
+        for i in range(len(self.op_list)):
             cost_list.append(self.op_list[i + 1].get_latency(x)[1])
 
         return cost_list

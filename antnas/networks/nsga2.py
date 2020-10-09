@@ -52,6 +52,7 @@ class Individual(object):
     self.crowding_distance = None
     self.dominated_solutions = set()
     self.features = None
+    self.devices = None
     self.objectives = None
     self.dominates = None
     self.accuracy = 0.0

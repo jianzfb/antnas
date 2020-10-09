@@ -27,7 +27,6 @@ class CrossOver(object):
         self.size = kwargs.get('size', 0)
         self.hierarchical = kwargs.get('hierarchical', [])
         self.network = kwargs.get('network', None)
-        
 
     @property
     def generation(self):
@@ -38,11 +37,18 @@ class CrossOver(object):
         self._generation = val
 
     def _crossover_based_matrices(self, *args, **kwargs):
-        # fitness_values: [(index, fitness, gene, rate), (index, fitness, gene, rate), ...]
+        # fitness_values: [(index, fitness, gene, device), (index, fitness, gene, device), ...]
         fitness_values = kwargs['fitness_values']
+        is_support_device = False
+        if fitness_values[0][3] is not None:
+            is_support_device = True
 
-        N = len(fitness_values)           # 个数
-        M = len(fitness_values[0][2])     # 基因长度
+        N = len(fitness_values)                 # 个数
+        M = len(fitness_values[0][2])           # 基因长度
+
+        device_M = None
+        if is_support_device:
+            device_M = len(fitness_values[0][3])    # 设备
 
         C = np.zeros((N, 1))  # fitness cumulative probability of chromosome i,
         # # can be considered as an information measure of chromosome i
@@ -73,6 +79,13 @@ class CrossOver(object):
             A[n, :] = np.array(fitness_values[n][2])
         AA = A.astype(np.int32)
 
+        device_AA = None
+        if is_support_device:
+            device_A = np.zeros((N, device_M))
+            for n in range(N):
+                device_A[n, :] = np.array(fitness_values[n][3])
+            device_AA = device_A.astype(np.int32)
+
         # 计算chromosome之间的距离
         H = np.zeros((N, N))
         for ii in range(N):
@@ -80,8 +93,15 @@ class CrossOver(object):
                 if ii == jj:
                     H[ii, jj] = 0.0
                 else:
-                    H[ii, jj] = (np.array(fitness_values[ii][2], dtype=np.int) != np.array(fitness_values[jj][2], dtype=np.int)).sum()
-    
+                    ii_feature = fitness_values[ii][2]
+                    jj_feature = fitness_values[jj][2]
+                    if is_support_device:
+                        ii_feature = ii_feature + fitness_values[ii][3]
+                        jj_feature = jj_feature + fitness_values[jj][3]
+
+                    H[ii, jj] = \
+                        (np.array(ii_feature, dtype=np.int) != np.array(jj_feature, dtype=np.int)).sum()
+
         crossover_result = []
         crossover_num = self.size if self.size > 0 else N//2
         for crossover_count in range(crossover_num):
@@ -101,7 +121,22 @@ class CrossOver(object):
                 
                 # crossover pos number
                 multi_points = self.multi_points
-                
+
+                # 设备交叉选择
+                crossover_device_pos = None
+                if is_support_device:
+                    first_device = device_AA[first_chromosome_index, :]
+                    second_device = device_AA[second_chromosome_index, :]
+
+                    diff_device = first_device - second_device
+                    diff_pos = np.where(diff_device != 0)[0]
+                    diff_pos = diff_pos.tolist()
+
+                    multi_points = min(multi_points, len(diff_pos))
+                    crossover_device_pos = np.random.choice(diff_pos, size=multi_points, replace=False)
+                    crossover_device_pos = crossover_device_pos.tolist()
+
+                # 基因交叉选择
                 # hierarchical selection
                 explore_position = kwargs['explore_position']
                 # stage/block/cell
@@ -170,45 +205,22 @@ class CrossOver(object):
                                          second_chromosome_index,
                                          is_1_satisfied,
                                          is_2_satisfied,
-                                         crossover_pos.tolist()))
+                                         crossover_pos.tolist(),
+                                         crossover_device_pos))
     
         return crossover_result
 
-    def _crossover(self, *args, **kwargs):
-        # fitness_values: [(index, fitness, gene, rate), (index, fitness, gene, rate), ...]
-        fitness_values = kwargs['fitness_values']
-        N = len(fitness_values)
-        individual_indexes = [m[0] for m in fitness_values]
-
-        crossover_result = []
-        feature_length = len(fitness_values[0][2])
-        for _ in range(N):
-            # 1.step select two randomly
-            first, second = np.random.choice(individual_indexes, size=2, replace=False)
-
-        # 2.step select crossover region
-        crossover_pos = np.random.choice(list(range(feature_length)), size=self.multi_points, replace=False)
-        crossover_result.append((first, second, crossover_pos.tolist()))
-
-        return crossover_result
-
-    def adaptive_crossover(self, *args, **kwargs):
-        if self.crossover_type.lower() == 'simple':
-            return self._crossover(*args, **kwargs)
-        elif self.crossover_type.lower() == 'based_matrices':
-            return self._crossover_based_matrices(*args, **kwargs)
-
 
 class EvolutionCrossover(CrossOver):
-  def __init__(self,
-               multi_points,
-               max_generation,
-               k0,
-               k1,
-               method='simple',
-               size=0,
-               network=None):
-    super(EvolutionCrossover, self).__init__(method,
+    def __init__(self,
+                 multi_points,
+                 max_generation,
+                 k0,
+                 k1,
+                 method='simple',
+                 size=0,
+                 network=None):
+        super(EvolutionCrossover, self).__init__(method,
                                              multi_points,
                                              adaptive=True,
                                              max_generation=max_generation,
@@ -217,56 +229,74 @@ class EvolutionCrossover(CrossOver):
                                              size=size,
                                              network=network)
 
-  def crossover(self, *args, **kwargs):
-    population = kwargs['population']
-    problem = kwargs['problem']
-    explore_position = kwargs['explore_position']
-    self.hierarchical = kwargs['hierarchical']
+    def crossover(self, *args, **kwargs):
+        population = kwargs['population']
+        problem = kwargs['problem']
+        explore_position = kwargs['explore_position']
+        self.hierarchical = kwargs['hierarchical']
 
-    fitness_values = []
-    for individual_index, individual in enumerate(population.population):
-      fitness_values.append((individual_index,                  # index
-                             1.0-individual.objectives[0],      # accuracy
-                             individual.features,               # feature
-                             None))
+        # 1.step 网络结构及算子 交叉
+        fitness_values = []
+        for individual_index, individual in enumerate(population.population):
+            fitness_values.append((individual_index,                    # index
+                                 1.0-individual.objectives[0],          # accuracy
+                                 individual.features,                   # feature
+                                 individual.devices))                   # devices
 
-    # finding crossover region
-    crossover_individuals = \
-        self.adaptive_crossover(fitness_values=fitness_values,
-                                explore_position=explore_position)
+        # finding crossover region
+        crossover_individuals = \
+            self._crossover_based_matrices(fitness_values=fitness_values,
+                                           explore_position=explore_position)
 
-    # cross gene infomation
-    print('reorganize crossover population')
-    crossover_population = Population()
-    for crossover_suggestion in crossover_individuals:
-        first_individual_index, second_individual_index, is_1_ok, is_2_ok, crossover_region = crossover_suggestion
-        
-        if is_1_ok:
-            crossover_1_individual = problem.generateIndividual()
-            crossover_1_individual.features = copy.deepcopy(population.population[first_individual_index].features)
-            crossover_1_individual.objectives = copy.deepcopy(population.population[first_individual_index].objectives)
+        # cross gene infomation
+        print('reorganize crossover population')
+        crossover_population = Population()
+        for crossover_suggestion in crossover_individuals:
+            first_individual_index, \
+            second_individual_index, \
+            is_1_ok,\
+            is_2_ok,\
+            crossover_region, \
+            crossover_device_region = crossover_suggestion
 
-            cross_over_fraction = float(len(crossover_region)) / float(len(explore_position))
-            crossover_1_individual.objectives[0] = \
-                (1.0 - cross_over_fraction) * population.population[first_individual_index].objectives[0] + \
-                cross_over_fraction * population.population[second_individual_index].objectives[0]
-            for loc in crossover_region:
-                crossover_1_individual.features[loc] = population.population[second_individual_index].features[loc]
+            if is_1_ok:
+                crossover_1_individual = problem.generateIndividual()
+                crossover_1_individual.features = copy.deepcopy(population.population[first_individual_index].features)
+                crossover_1_individual.objectives = copy.deepcopy(population.population[first_individual_index].objectives)
 
-            crossover_population.population.append(crossover_1_individual)
-        
-        if is_2_ok:
-            crossover_2_individual = problem.generateIndividual()
-            crossover_2_individual.features = copy.deepcopy(population.population[second_individual_index].features)
-            crossover_2_individual.objectives = copy.deepcopy(population.population[second_individual_index].objectives)
+                cross_over_fraction = float(len(crossover_region)) / float(len(explore_position))
+                crossover_1_individual.objectives[0] = \
+                    (1.0 - cross_over_fraction) * population.population[first_individual_index].objectives[0] + \
+                    cross_over_fraction * population.population[second_individual_index].objectives[0]
+                for loc in crossover_region:
+                    crossover_1_individual.features[loc] = population.population[second_individual_index].features[loc]
 
-            cross_over_fraction = float(len(crossover_region)) / float(len(explore_position))
-            crossover_2_individual.objectives[0] = \
-                (1.0 - cross_over_fraction) * population.population[second_individual_index].objectives[0] + \
-                cross_over_fraction * population.population[first_individual_index].objectives[0]
-            for loc in crossover_region:
-                crossover_2_individual.features[loc] = population.population[first_individual_index].features[loc]
+                if crossover_device_region is not None:
+                    crossover_1_individual.devices = copy.deepcopy(population.population[first_individual_index].devices)
+                    for loc in crossover_device_region:
+                        crossover_1_individual.devices[loc] = \
+                            population.population[second_individual_index].devices[loc]
 
-            crossover_population.population.append(crossover_2_individual)
+                crossover_population.population.append(crossover_1_individual)
 
-    return crossover_population
+            if is_2_ok:
+                crossover_2_individual = problem.generateIndividual()
+                crossover_2_individual.features = copy.deepcopy(population.population[second_individual_index].features)
+                crossover_2_individual.objectives = copy.deepcopy(population.population[second_individual_index].objectives)
+
+                cross_over_fraction = float(len(crossover_region)) / float(len(explore_position))
+                crossover_2_individual.objectives[0] = \
+                    (1.0 - cross_over_fraction) * population.population[second_individual_index].objectives[0] + \
+                    cross_over_fraction * population.population[first_individual_index].objectives[0]
+                for loc in crossover_region:
+                    crossover_2_individual.features[loc] = population.population[first_individual_index].features[loc]
+
+                if crossover_device_region is not None:
+                    crossover_2_individual.devices = copy.deepcopy(population.population[second_individual_index].devices)
+                    for loc in crossover_device_region:
+                        crossover_2_individual.devices[loc] = \
+                            population.population[first_individual_index].devices[loc]
+
+                crossover_population.population.append(crossover_2_individual)
+
+        return crossover_population

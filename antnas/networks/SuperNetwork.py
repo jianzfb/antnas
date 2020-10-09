@@ -52,6 +52,10 @@ class ArchitectureModelProblem(Problem):
               self.max_objectives[i] = individual.objectives[i]
 
   def calculateBatchObjectives(self, batch_individuals):
+      for index, individual in enumerate(batch_individuals):
+          individual.objectives[1] = self.__f2(individual)
+
+
       # caculate batch f1 values
       f1_value_list = self.__batch_f1(batch_individuals)
       for index, individual in enumerate(batch_individuals):
@@ -117,6 +121,8 @@ class ArchitectureModelProblem(Problem):
                   processed_data = accuracy_evaluators[arc_index].preprocess(model_out, y)
                   accuracy_evaluators[arc_index].caculate(*processed_data)
 
+          break
+
       # 计算测试集精度
       AccuracyEvaluator.stop()
       batch_accuracy = []
@@ -156,16 +162,12 @@ class ArchitectureModelProblem(Problem):
               # 计算精度
               self.supernetwork_manager.supernetwork.caculate(model_out, y)
 
-          # # 临时 快速退出
-          # if count == 2:
-          #     break
-
       # 计算测试集精度
       accuracy = self.supernetwork_manager.supernetwork.accuracy()
       return 1.0 - accuracy
 
   def __f2(self, arc):
-      loss = self.supernetwork_manager.supernetwork.arc_loss(arc.features, self.arc_loss[0])
+      loss = self.supernetwork_manager.supernetwork.arc_loss(arc.features, self.arc_loss[0], arc.devices)
       loss = loss.numpy()[0]
       return loss
 
@@ -203,6 +205,7 @@ class SuperNetwork(nn.Module):
         
         self._objective_param_max = kwargs.get('max_param', None)
         self._objective_param_min = kwargs.get('min_param', None)
+        self._devices = kwargs.get('devices', [])
 
         self.population_size = kwargs.get('population', 100)
         self.cost_evaluation = kwargs["cost_evaluation"][0]
@@ -212,6 +215,11 @@ class SuperNetwork(nn.Module):
             'latency': LatencyCostEvaluator,
             'param': ParameterCostEvaluator
         }
+
+        # if len(self._devices) > 0:
+        #     # for cost evaluator (latency)
+        #     kwargs.update({'mode': 'heterogeneous'})
+        NetworkBlock.device_num = len(self._devices)
 
         used_ce = {}
         for k in kwargs["cost_evaluation"]:
@@ -331,7 +339,6 @@ class SuperNetwork(nn.Module):
                 #
                 # nx.write_gpickle(self.net, './xxx.architecture')
                 # ###############
-
 
                 for cost, cost_eval in self.arch_cost_evaluators.items():
                     _, pruned_cost = \
@@ -516,7 +523,14 @@ class SuperNetwork(nn.Module):
     def sample_arch(self, *args, **kwargs):
         # support Thread reentry
         raise NotImplementedError
-    
+
+    def sample_device(self, *args, **kwargs):
+        if self._devices is not None and (len(self._devices) > 1):
+            devices = np.random.choice(self._devices, size=len(self.net.nodes))
+            devices = devices.tolist()
+            return devices
+        return None
+
     def is_satisfied_constraint(self, feature):
         return True
     
@@ -555,7 +569,7 @@ class SuperNetwork(nn.Module):
         architecture_path = os.path.join(folder, "anchor_arch_%s.architecture"%arch_suffix)
         nx.write_gpickle(graph, architecture_path)
 
-    def arc_loss(self, arc, name):
+    def arc_loss(self, arc, name, device=None):
         sampling = torch.Tensor()
         active = torch.Tensor()
         for node_name in self.traversal_order:
@@ -571,8 +585,13 @@ class SuperNetwork(nn.Module):
         sampled_arc, pruned_arc = \
             self.path_recorder.get_arch(self.out_node, sampling, active)
 
-        sampled_cost, pruned_cost = \
-            self.arch_cost_evaluators[name].get_costs([sampled_arc, pruned_arc])
+        pruned_cost = 0.0
+        if name == 'latency' and device is not None:
+            _, pruned_cost = \
+                self.arch_cost_evaluators[name].get_costs([sampled_arc, pruned_arc], device)
+        else:
+            _, pruned_cost = \
+                self.arch_cost_evaluators[name].get_costs([sampled_arc, pruned_arc])
 
         return pruned_cost
 
@@ -702,7 +721,7 @@ class SuperNetwork(nn.Module):
                           callback=functools.partial(self._evolution_callback_func,
                                                      arc_loss=self.problem.arc_loss,
                                                      folder=folder),
-                          using_bayesian=True)
+                          using_bayesian=False)
 
         # ###############################
         # # 临时代码，测试结构参数量统计
@@ -728,6 +747,7 @@ class SuperNetwork(nn.Module):
         for individual_index in range(population_size):
             individual = evolution.problem.generateIndividual()
             individual.features = self.sample_arch()
+            individual.devices = self.sample_device()
             population.population.append(individual)
         evolution.problem.calculateBatchObjectives(population.population)
 
@@ -774,6 +794,9 @@ class SuperNetwork(nn.Module):
             for node in self.traversal_order:
                 node_sampling_val = torch.squeeze(pruned_arch[self.path_recorder.node_index[node]]).item()
                 self.net.node[node]['sampled'] = int(node_sampling_val)
+
+                if individual.devices is not None:
+                    self.net.node[node]['device'] = int(individual.devices[self.path_recorder.node_index[node]])
 
             # 3.3.step get architecture parameter number
             parameter_num = 0

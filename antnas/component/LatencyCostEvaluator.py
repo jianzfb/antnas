@@ -21,9 +21,14 @@ class LatencyCostEvaluator(EdgeCostEvaluator):
 
     def init_costs(self, model, graph, is_main_cost=False, input_node=None, input_shape=None):
         print('initialize latency cost')
+        # 对于多设备来说，需要获得每个设备下的每个节点不同算子下的时间代价
         with torch.no_grad():
             # set costs
-            costs = torch.Tensor(graph.number_of_nodes(), NetworkBlock.state_num)
+            costs = None
+            if NetworkBlock.device_num == 1:
+                costs = torch.Tensor(graph.number_of_nodes(), NetworkBlock.state_num)
+            else:
+                costs = torch.Tensor(graph.number_of_nodes(), NetworkBlock.device_num, NetworkBlock.state_num)
 
             if input_node is not None and input_shape is not None:
                 self.input_node = input_node

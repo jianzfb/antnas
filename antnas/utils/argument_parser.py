@@ -21,7 +21,7 @@ def antnas_argment(func):
     parser.add_argument('-dashboard_port', action='store', default=8999, type=int)
 
     # Model
-    parser.add_argument('-arch', action='store', default='PKBiSegSN2', type=str)
+    parser.add_argument('-arch', action='store', default='PKAsynImageNetSN', type=str)
     parser.add_argument('-deter_eval', action='store', default=False, type=bool,
                         help='Take blocks with probas >0.5 instead of sampling during evaluation')
 
@@ -29,7 +29,7 @@ def antnas_argment(func):
     parser.add_argument('-path', default='/Users/zhangjian52/Downloads/workspace/factory/dataset/refine', type=str,
                         help='path for the execution')
 
-    parser.add_argument('-dset', default='SEG', type=str, help='Dataset')
+    parser.add_argument('-dset', default='PLACEHOLDER', type=str, help='Dataset')
     parser.add_argument('-bs', action='store', default=2, type=int, help='Size of each batch')
     parser.add_argument('-epochs', action='store', default=0, type=int,
                         help='Number of training epochs')
@@ -69,7 +69,7 @@ def antnas_argment(func):
     parser.add_argument('-cuda', action='store', default='', type=str,
                         help='Enables cuda and select device')
     parser.add_argument('-latency', action='store',
-                        default='./latency.gpu.855.224_16.32.64.96.112.160_lookuptable.json', type=str,
+                        default='./supernetwork/latency.gpu.855.224_16.32.64.96.112.160_lookuptable.json', type=str,
                         help='latency lookup table')
 
     parser.add_argument('-static_proba', action='store', default=-1, type=restricted_float(0, 1),
@@ -79,10 +79,11 @@ def antnas_argment(func):
     parser.add_argument('-np', '--n_parallel', dest='n_parallel', action='store', default=3, type=int,
                         help='Maximum number of module evaluation in parallel')
     parser.add_argument('-ce', '-cost_evaluation', dest='cost_evaluation', action='store',
-                        default=['param'],
+                        default=['latency'],
                         type=restricted_list('comp', 'latency', 'param'))
     parser.add_argument('-co', dest='cost_optimization', action='store', default='latency',
                         type=restricted_str('comp', 'latency', 'param'))
+    parser.add_argument('-devices', dest='devices', help='support computing device select', type=list, default=[0,1])
 
     parser.add_argument('-lambda', dest='lambda', action='store', default=1e-7, type=float,
                         help='Constant balancing the ratio classifier loss/architectural loss')

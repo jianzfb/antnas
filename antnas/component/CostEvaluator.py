@@ -3,6 +3,7 @@
 # @File    : CostEvaluator.py
 # @Author  : jian<jian@mltalker.com>
 import abc
+import numpy as np
 
 
 class CostEvaluator(object):
@@ -14,15 +15,17 @@ class CostEvaluator(object):
         self.main_cost = kwargs.get('main_cost')
         self.input_node = kwargs.get('input_node', None)
         self.input_shape = kwargs.get('input_shape', None)
+        self.mode = kwargs.get('mode', 'default')   # default/heterogeneous(算子+设备)
+        self.transfer_cost = kwargs.get('transfer_cost', None)
         self.kwargs = kwargs
         self.costs = None
 
     @abc.abstractmethod
-    def get_cost(self, **kwargs):
+    def get_cost(self, *args, **kwargs):
         raise NotImplementedError
 
-    def get_costs(self, architectures):
-        return [self.get_cost(arch) for arch in architectures]
+    def get_costs(self, architectures, device=None):
+        return [self.get_cost(arch, device) for arch in architectures]
 
     def init_costs(self, *args, **kwargs):
         pass

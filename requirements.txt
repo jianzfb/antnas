@@ -1,10 +1,13 @@
 torch
 torchvision>=0.5.0
 networkx==2
-matplotlib==2
+matplotlib==2.2.4
 tqdm
 numpy
 easydict
 scipy
 sklearn
 Pillow==6.2.2
+psutil
+requests
+webdavclient3

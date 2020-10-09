@@ -37,7 +37,67 @@ class Mutation(object):
     @generation.setter
     def generation(self, val):
         self._generation = val
-    
+
+    def _mutate_device_based_matrices(self, *args, **kwargs):
+        fitness_values = kwargs['fitness_values']       # 设备
+
+        # fitness_values: [(index, fitness, gene), (), ]
+        N = len(fitness_values)         # 个数
+        M = len(fitness_values[0][2])   # 基因长度
+
+        C = np.zeros((N, 1))  # fitness cumulative probability of chromosome i,
+        # can be considered as an information measure of chromosome i
+        ordered_fitness = [(f[0], f[1]) for f in fitness_values]
+        ordered_fitness = sorted(ordered_fitness, key=lambda x: x[1])
+        probability_fitness = np.array([m[1] for m in ordered_fitness])
+        PF_SUM = np.sum(probability_fitness)
+        if PF_SUM < 0.0000001:
+            probability_fitness = probability_fitness + 0.0000001
+            PF_SUM = np.sum(probability_fitness)
+        probability_fitness = probability_fitness / PF_SUM
+
+        c_sum = 0.0
+        for a, b in zip(ordered_fitness, probability_fitness):
+            c_sum += b
+            C[a[0], 0] = c_sum
+
+        # which individual should mutation
+        alpha = 1.0 - C  # the probability to choose which individual for mutation
+
+        mutation_result = []
+        for f_index, f in enumerate(fitness_values):
+            # 变异比例
+            mutation_ratio = alpha[f[0]]
+
+            # 1.step hierarchical selection
+            explore_position = list(range(M))
+
+            # 2.step mutation pos selection
+            # mutation points number
+            multi_points = self.multi_points if self.multi_points > 0 else int(mutation_ratio * len(explore_position))
+            multi_points = min(multi_points, len(explore_position))
+            if multi_points == 0:
+                print('(device select) no mutation pos')
+                mutation_result.append((f + ([], [])))
+            else:
+                mutation_position = np.random.choice(explore_position, multi_points, replace=False)
+                mutation_position = mutation_position.flatten().tolist()
+                mutation_state = []
+                for mutation_p in mutation_position:
+                    candidate_state = set(list(range(NetworkBlock.device_num)))
+                    candidate_state.discard(f[2][mutation_p])
+                    candidate_state = list(candidate_state)
+
+                    s = np.random.choice(candidate_state,
+                                         1,
+                                         replace=False)
+                    mutation_state.append(int(s))
+
+                print("(device select) individual %d mutation at %s to state %s" % (f_index, str(mutation_position), str(mutation_state)))
+                mutation_result.append((f + (mutation_position, mutation_state)))
+
+        return mutation_result
+
     def _mutate_based_matrices(self, *args, **kwargs):
         # fitness_values: [(index, fitness, gene, rate), (index, fitness, gene, rate), ...]
         fitness_values = kwargs['fitness_values']
@@ -101,7 +161,10 @@ class Mutation(object):
             # mutation points number
             multi_points = self.multi_points if self.multi_points > 0 else int(mutation_ratio * len(explore_position))
             multi_points = min(multi_points, len(explore_position))
-            if multi_points > 0:
+            if multi_points == 0:
+                print('no mutation pos')
+                mutation_result.append((f + ([], [])))
+            else:
                 is_ok = False
                 
                 while not is_ok:
@@ -143,44 +206,6 @@ class Mutation(object):
 
         return mutation_result
 
-    def _mutate(self, *args, **kwargs):
-        # fitness_values: [(index, fitness, gene, rate), (index, fitness, gene, rate), ...]
-        fitness_values = kwargs['fitness_values']
-        gene_length = len(fitness_values[0][2])
-        gene_num = len(fitness_values)
-
-        decreasing_fitness = [(f[0], f[1]) for f in fitness_values]
-        decreasing_fitness = sorted(decreasing_fitness, key=lambda x: x[1], reverse=True)
-
-        # continue N1 mutation
-        N1 = int(self.k0 * gene_num)
-        # worse N3 random sampling
-        N2 = gene_num - N1
-
-        mutate_result = []
-        # 1.step best N1 mutation
-        for chromo_index in range(0, N1):
-            mutation_locs = []
-            for loc in range(gene_length):
-                if random.random() < self.k1:
-                    mutation_locs.append(loc)
-
-            mutate_result.append((fitness_values[decreasing_fitness[chromo_index][0]] + (mutation_locs,)))
-
-        # 2.step worse N3 random sampling completely
-        for chromo_index in range(N1, gene_num):
-            mutate_result.append((fitness_values[decreasing_fitness[chromo_index][0]] + (list(range(gene_num)),)))
-
-        return mutate_result
-
-    def adaptive_mutate(self, *args, **kwargs):
-        if self.mutation_type.lower() == 'simple':
-            return self._mutate(*args, **kwargs)
-        elif self.mutation_type.lower() == 'based_matrices':
-            return self._mutate_based_matrices(*args, **kwargs)
-
-        return None
-
 
 class EvolutionMutation(Mutation):
     def __init__(self,
@@ -211,6 +236,7 @@ class EvolutionMutation(Mutation):
         #     cur_node = graph.node[node_name]
         #     pos_map[cur_node['sampling_param']] = node_name
 
+        # 1.step 网络结构及算子 变异
         fitness_values = []
         for individual_index, individual in enumerate(population.population):
             fitness_values.append((individual_index,                        # index
@@ -219,24 +245,49 @@ class EvolutionMutation(Mutation):
                                    None))
 
         mutation_individuals = \
-            self.adaptive_mutate(fitness_values=fitness_values,
-                                 explore_position=explore_position)
-        
+            self._mutate_based_matrices(fitness_values=fitness_values,
+                                        explore_position=explore_position)
+
         mutation_population = Population()
+        index_map = {}
         for _, individual in enumerate(mutation_individuals):
-            if individual[-1] is not None:
+            individual_index = individual[0]
+            mutation_position = individual[-2]
+            mutation_state = individual[-1]
+
+            new_individual = problem.generateIndividual()
+            mutated_feature = copy.deepcopy(population.population[individual_index].features)
+
+            for mp, ms in zip(mutation_position, mutation_state):
+                mutated_feature[mp] = ms
+
+            new_individual.features = mutated_feature
+            new_individual.objectives = copy.deepcopy(population.population[individual_index].objectives)
+            mutation_population.population.append(new_individual)
+            # 记录变异个体和原个体映射关系
+            index_map[individual_index] = len(mutation_population.population) - 1
+
+        # 2.step 计算设备 变异
+        if population.population[0].devices is not None:
+            fitness_values = []
+            for individual_index, individual in enumerate(population.population):
+                fitness_values.append((individual_index,                                # index
+                                       1.0/(individual.objectives[1]+0.000000001),      # architecture loss
+                                       individual.devices,                              # feature
+                                        ))
+
+            mutation_individuals = \
+                self._mutate_device_based_matrices(fitness_values=fitness_values)
+
+            for _, individual in enumerate(mutation_individuals):
                 individual_index = individual[0]
                 mutation_position = individual[-2]
                 mutation_state = individual[-1]
 
-                new_individual = problem.generateIndividual()
-                mutated_feature = copy.deepcopy(population.population[individual_index].features)
+                mutation_population.population[index_map[individual_index]].devices = \
+                    copy.deepcopy(population.population[individual_index].devices)
 
                 for mp, ms in zip(mutation_position, mutation_state):
-                    mutated_feature[mp] = ms
-
-                new_individual.features = mutated_feature
-                new_individual.objectives = copy.deepcopy(population.population[individual_index].objectives)
-                mutation_population.population.append(new_individual)
+                    mutation_population.population[index_map[individual_index]].devices[mp] = ms
 
         return mutation_population

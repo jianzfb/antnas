@@ -18,7 +18,6 @@ from antnas.utils.argument_parser import *
 from antnas.component.Loss import *
 from antnas.component.SegmentationAccuracyEvaluator import *
 from antnas.utils.adjust import *
-from OutLayerFactory import *
 from math import cos, pi
 import math
 
