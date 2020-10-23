@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from antnas.component.NetworkBlock import *
 from antnas.component.NetworkCell import *
 from antnas.component.Loss import *
-from antnas.component.ClassificationAccuracyEvaluator import *
+from antnas.utils.adjust import *
 import networkx as nx
 import copy
 from antnas.utils.drawers.NASDrawer import *
@@ -27,6 +27,7 @@ class FixedNetwork(nn.Module):
         self.output_layer_cls = kwargs.get('output_layer_cls', None)
         self._loss = kwargs.get('loss_func', None)
         self._accuracy_evaluator_cls = kwargs.get('accuracy_evaluator_cls', None)
+        self._network_name = kwargs.get('network_name', 'network')
         self.graph = nx.read_gpickle(architecture_path)
 
         self.in_node = None
@@ -34,6 +35,7 @@ class FixedNetwork(nn.Module):
         # traverse all nodes in graph
         self.traversal_order = list(nx.topological_sort(self.graph))
         self.blocks = nn.ModuleList([None for _ in range(len(self.traversal_order))])
+
         for node_index, node_name in enumerate(self.traversal_order):
             if node_index == 0:
                 self.in_node = node_name
@@ -47,6 +49,7 @@ class FixedNetwork(nn.Module):
             sampled_module = None
             sampled_module_name = ''
             if len(module_list) == 1:
+                # 单模块，开关状态
                 if sampled_module_index == 1:
                     if node_index == len(self.traversal_order) - 1:
                         sampled_module = self.output_layer_cls
@@ -61,12 +64,19 @@ class FixedNetwork(nn.Module):
                     self.blocks[cur_node['module']] = Zero(**cur_node['module_params'][sampled_module_name])
                     sampled_module_name = 'ZERO'
             else:
+                # 多模块，多选自选择
                 sampled_module = globals()[module_list[sampled_module_index]]
                 sampled_module_name = cur_node['module_params']['name_list'][sampled_module_index]
                 self.blocks[cur_node['module']] = \
                     sampled_module(**cur_node['module_params'][sampled_module_name])
 
             print('build node %s with sampling %s op' % (node_name, sampled_module_name))
+
+        # 绘制网络结构图
+        NASDrawer().draw(self.graph, filename='./%s.svg' % self._network_name)
+
+        # 初始化网络权重
+        initialize_weights(self)
 
     def forward(self, x, y):
         # 1.step parse x,y - (data,label)
@@ -95,11 +105,7 @@ class FixedNetwork(nn.Module):
 
                 data_dict[succ].append(out)
 
-        # 4.step compute model loss
-        indiv_loss = self.loss(model_out, y)
-
-        # 5.step total loss
-        return indiv_loss, model_out
+        return model_out
 
     def __str__(self):
         return ''

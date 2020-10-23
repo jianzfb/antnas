@@ -12,15 +12,39 @@ from antnas.networks.nsga2 import *
 from antnas.component.NetworkBlock import *
 
 
+def refine_device_select(devices, net):
+    # 设备选择约束条件
+    # CELL 节点：自由选择设备
+    # A,T,L节点：设备选择保持与下继节点设备选择一致
+    # I,O,F节点：设备保持不变（0）
+    traversal_order = list(nx.topological_sort(net))
+    for node_name in traversal_order:
+        cur_node = net.node[node_name]
+        if node_name.startswith('I') or node_name.startswith('O') or node_name.startswith('FIXED'):
+            devices[cur_node['sampling_param']] = 0
+        elif node_name.startswith('A'):
+            # 寻找下继节点
+            # 按照构建搜索空间的约定，A节点的后继节点必然是CELL节点或O节点
+            for nn in net.successors(node_name):
+                nn_node = net.node[nn]
+                assert (nn.startswith('CELL') or nn.startswith('O'))
+                devices[cur_node['sampling_param']] = devices[nn_node['sampling_param']]
+                break
+        elif node_name.startswith('T'):
+            # 寻找上继节点
+            # 按照构建搜索空间的约定，T节点的上继节点必然CELL节点
+            for pre in net.predecessors(node_name):
+                assert (pre.startswith('CELL'))
+                pre_node = net.node[pre]
+                devices[cur_node['sampling_param']] = devices[pre_node['sampling_param']]
+                break
+    return devices
+
+
 class Mutation(object):
-    def __init__(self, mutation_type, multi_points, adaptive=True, **kwargs):
-        self.adaptive = adaptive
-        self.mutation_type = mutation_type
+    def __init__(self, multi_points, **kwargs):
         self.multi_points = multi_points    # -1: auto
-        self.max_generation = kwargs.get('max_generation', 1)
         self._generation = 0
-        self.k0 = kwargs.get('k0', 0.1)
-        self.k1 = kwargs.get('k1', 1.0)
         self.hierarchical = kwargs.get('hierarchical', [])
         self.network = kwargs.get('network', None)
         
@@ -64,13 +88,18 @@ class Mutation(object):
         # which individual should mutation
         alpha = 1.0 - C  # the probability to choose which individual for mutation
 
+        # 选择允许进行设备变异位置（仅考虑CELL节点）
+        explore_position = []
+        for node_name in list(nx.topological_sort(self.network.net)):
+            cur_node = self.network.net.node[node_name]
+            if node_name.startswith('CELL'):
+                explore_position.append(cur_node['sampling_param'])
+
+        # 变异选择
         mutation_result = []
         for f_index, f in enumerate(fitness_values):
             # 变异比例
             mutation_ratio = alpha[f[0]]
-
-            # 1.step hierarchical selection
-            explore_position = list(range(M))
 
             # 2.step mutation pos selection
             # mutation points number
@@ -210,19 +239,8 @@ class Mutation(object):
 class EvolutionMutation(Mutation):
     def __init__(self,
                  multi_points,
-                 max_generation,
-                 k0,
-                 k1,
-                 method='simple',
-                 adaptive=True,
                  network=None):
-        super(EvolutionMutation, self).__init__(method,
-                                                multi_points,
-                                                adaptive=adaptive,
-                                                max_generation=max_generation,
-                                                k0=k0,
-                                                k1=k1,
-                                                network=network)
+        super(EvolutionMutation, self).__init__(multi_points, network=network)
     
     def mutate(self, *args, **kwargs):
         population = kwargs['population']
@@ -287,7 +305,13 @@ class EvolutionMutation(Mutation):
                 mutation_population.population[index_map[individual_index]].devices = \
                     copy.deepcopy(population.population[individual_index].devices)
 
+                # 设置变异后的节点设备
                 for mp, ms in zip(mutation_position, mutation_state):
                     mutation_population.population[index_map[individual_index]].devices[mp] = ms
+
+                # 重新约束个体的设备选择有效性
+                mutation_population.population[index_map[individual_index]].devices = \
+                    refine_device_select(mutation_population.population[index_map[individual_index]].devices,
+                                         self.network.net)
 
         return mutation_population

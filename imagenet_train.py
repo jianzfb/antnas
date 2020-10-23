@@ -14,10 +14,12 @@ from tqdm import tqdm
 import argparse
 from antnas.dataset.datasets import get_data
 from antnas.networks.FixedNetwork import *
+from antnas.networks.MNv2FixedNetwork import *
 from antnas.utils.adjust import *
 from antnas.utils.argument_parser import *
 import math
 from antnas.component.ClassificationAccuracyEvaluator import *
+from OutLayerFactory import *
 
 
 logging.basicConfig(level=logging.INFO)
@@ -28,7 +30,7 @@ class ImageNetOutLayer(NetworkBlock):
     n_layers = 1
     n_comp_steps = 1
 
-    def __init__(self, in_chan):
+    def __init__(self, in_chan, **kwargs):
         super(ImageNetOutLayer, self).__init__()
         self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
 
@@ -63,7 +65,6 @@ class ImageNetOutLayer(NetworkBlock):
         x = self.classifier(x)
         return x
 
-
 @antnas_argment
 def main(*args, **kwargs):
     if torch.cuda.is_available():
@@ -73,6 +74,7 @@ def main(*args, **kwargs):
     os.environ['CUDA_VISIBLE_DEVICES'] = kwargs['cuda']
 
     # 获得数据集
+    kwargs.update({'img_size': 224, 'in_channels': 3, 'out_channels': 1000})
     train_loader, val_loader, test_loader, data_properties = \
         get_data(kwargs['dset'], kwargs['bs'], kwargs['path'], kwargs)
     
@@ -88,22 +90,24 @@ def main(*args, **kwargs):
     xp.test = mlogger.Container()
     xp.test.accuracy = mlogger.metric.Simple(plot_title="test_accuracy")
 
-    NetworkBlock.bn_moving_momentum = True
-    NetworkBlock.bn_track_running_stats = True
-    
     # 配置网络模型
+    criterion = None
+    if torch.cuda.is_available():
+        criterion = nn.CrossEntropyLoss().cuda()
+    else:
+        criterion = nn.CrossEntropyLoss()
+
     # model = FixedNetwork(architecture=kwargs['architecture'],
     #                      output_layer_cls=ImageNetOutLayer,
-    #                      plotter=plotter)
-    #
-    model = FixedNetwork(architecture=kwargs['architecture'],
+    #                      loss_func=cross_entropy,
+    #                      accuracy_evaluator_cls=lambda: ClassificationAccuracyEvaluator(),
+    #                      network_name='heterogeneous-nas')
+    model = MNV2FixedNetwork(architecture=kwargs['architecture'],
                          output_layer_cls=ImageNetOutLayer,
-                         loss_func=cross_entropy,
-                         accuracy_evaluator_cls=lambda: ClassificationAccuracyEvaluator())
+                         loss_func=criterion,
+                         accuracy_evaluator_cls=lambda: ClassificationAccuracyEvaluator(),
+                         network_name='heterogeneous-nas')
     xp.architecture.update(kwargs['architecture'])
-
-    # 初始化模型权重
-    initialize_weights(model)
 
     # 配置优化器
     optimizer = initialize_optimizer('train', model, kwargs)
@@ -127,7 +131,7 @@ def main(*args, **kwargs):
         logger.info(epoch)
 
         # training process
-        model.train()
+        parallel_model.train()
         for i, (inputs, labels) in enumerate(tqdm(train_loader, desc='Train', ascii=True)):
             # adjust learning rate
             adjust_lr(kwargs, optimizer, epoch, i, len(train_loader))
@@ -137,8 +141,8 @@ def main(*args, **kwargs):
             y = labels
 
             optimizer.zero_grad()
-            loss, _ = parallel_model(x, y)
-            loss = loss.mean()
+            output = parallel_model(x, y)
+            loss = criterion(output, y)
 
             # record model loss
             xp.train.classif_loss.update(loss.item())
@@ -169,10 +173,10 @@ def main(*args, **kwargs):
                 y.resize_(labels.size()).copy_(labels)
 
                 with torch.no_grad():
-                    _, feature_out = parallel_model(x, y)
+                    output = parallel_model(x, y)
 
-                    processed_data = accuracy_evaluator.preprocess(feature_out, y)
-                    accuracy_evaluator.caculate(*processed_data)
+                processed_data = accuracy_evaluator.preprocess(output, y)
+                accuracy_evaluator.caculate(*processed_data)
 
             AccuracyEvaluator.stop()
             test_accuracy = accuracy_evaluator.accuracy()

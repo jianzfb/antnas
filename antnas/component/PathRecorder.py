@@ -16,11 +16,12 @@ class PathRecorder(object):
         self.n_nodes = self.graph.number_of_nodes()
 
         # create node-to-index and index-to-node mapping
+        # 路径节点序号全局一致
         self.node_index = {}                                # 节点名字与拓扑排序的对应关系
         self.rev_node_index = [None] * self.n_nodes
-        for i, node in enumerate(nx.topological_sort(self.graph)):  # To have index ordered as traversal_order
-            self.node_index[node] = i
-            self.rev_node_index[i] = node                   # 拓扑排序与节点名字的对应关系
+        for node in nx.topological_sort(self.graph):  # To have index ordered as traversal_order
+            self.node_index[node] = self.graph.node[node]['sampling_param']
+            self.rev_node_index[self.graph.node[node]['sampling_param']] = node                   # 拓扑排序与节点名字的对应关系
 
     def add_sampling(self, node_name, node_sampling, sampling, active, structure_fixed):
         node_sampling = node_sampling.float()

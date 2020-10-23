@@ -52,10 +52,6 @@ class ArchitectureModelProblem(Problem):
               self.max_objectives[i] = individual.objectives[i]
 
   def calculateBatchObjectives(self, batch_individuals):
-      for index, individual in enumerate(batch_individuals):
-          individual.objectives[1] = self.__f2(individual)
-
-
       # caculate batch f1 values
       f1_value_list = self.__batch_f1(batch_individuals)
       for index, individual in enumerate(batch_individuals):
@@ -120,8 +116,6 @@ class ArchitectureModelProblem(Problem):
                   # 计算精度
                   processed_data = accuracy_evaluators[arc_index].preprocess(model_out, y)
                   accuracy_evaluators[arc_index].caculate(*processed_data)
-
-          break
 
       # 计算测试集精度
       AccuracyEvaluator.stop()
@@ -528,6 +522,32 @@ class SuperNetwork(nn.Module):
         if self._devices is not None and (len(self._devices) > 1):
             devices = np.random.choice(self._devices, size=len(self.net.nodes))
             devices = devices.tolist()
+
+            # 设备选择约束条件
+            # CELL 节点：自由选择设备
+            # A节点：设备选择保持与下继节点设备选择一致
+            # T,L节点：设备选择保持与上继节点设备选择一致
+            # I,O,F节点：设备保持不变（0）
+            for node_name in self.traversal_order:
+                cur_node = self.net.node[node_name]
+                if node_name.startswith('I') or node_name.startswith('O') or node_name.startswith('FIXED'):
+                    devices[cur_node['sampling_param']] = 0
+                elif node_name.startswith('A'):
+                    # 寻找下继节点
+                    # 按照构建搜索空间的约定，A节点的后继节点必然是CELL节点或O节点
+                    for nn in self.net.successors(node_name):
+                        nn_node = self.net.node[nn]
+                        assert(nn.startswith('CELL') or nn.startswith('O'))
+                        devices[cur_node['sampling_param']] = devices[nn_node['sampling_param']]
+                        break
+                elif node_name.startswith('T'):
+                    # 寻找上继节点
+                    # 按照构建搜索空间的约定，T节点的上继节点必然CELL节点
+                    for pre in self.net.predecessors(node_name):
+                        assert(pre.startswith('CELL'))
+                        pre_node = self.net.node[pre]
+                        devices[cur_node['sampling_param']] = devices[pre_node['sampling_param']]
+                        break
             return devices
         return None
 
@@ -700,20 +720,11 @@ class SuperNetwork(nn.Module):
             os.makedirs(folder)
 
         # build nsga2 evolution algorithm
-        mutation_control = EvolutionMutation(multi_points=mutation_multi_points,
-                                             max_generation=max_generation,
-                                             k0=1.0,
-                                             k1=1.5,
-                                             method='based_matrices',
-                                             adaptive=True,
-                                             network=self)
-        crossover_control = EvolutionCrossover(multi_points=crossover_multi_points,
-                                               max_generation=max_generation,
-                                               k0=1.0,
-                                               k1=0.8,
-                                               method='based_matrices',
-                                               size=population_size,
-                                               network=self)
+        mutation_control = \
+            EvolutionMutation(multi_points=mutation_multi_points, network=self)
+        crossover_control = \
+            EvolutionCrossover(multi_points=crossover_multi_points,
+                               size=population_size, network=self)
         evolution = Nsga2(self.problem,
                           mutation_control,
                           crossover_control,
@@ -722,25 +733,6 @@ class SuperNetwork(nn.Module):
                                                      arc_loss=self.problem.arc_loss,
                                                      folder=folder),
                           using_bayesian=False)
-
-        # ###############################
-        # # 临时代码，测试结构参数量统计
-        # print('step 1')
-        # features = self.sample_arch()
-        # parameter_num = 0
-        # for node in self.traversal_order:
-        #     cur_node = self.net.node[node]
-        #     sampled_state = features[cur_node['sampling_param']]
-        #     cur_node = self.net.node[node]
-        #     parameter_num += self.blocks[cur_node['module']].get_param_num(None)[sampled_state]
-        #
-        # print('step 1 loss %d', parameter_num)
-        #
-        # print('step 2')
-        # loss = self.arc_loss(features, 'param')
-        # print('step 2 loss %d', loss)
-        #
-        # ###############################
 
         # 1.step init population
         population = Population()

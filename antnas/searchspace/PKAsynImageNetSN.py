@@ -11,7 +11,6 @@ import networkx as nx
 from antnas.component.NetworkCell import *
 from antnas.networks.UniformSamplingSuperNetwork import UniformSamplingSuperNetwork
 from antnas.utils.drawers.NASDrawer import NASDrawer
-from antnas.component.Loss import *
 from antnas.component.ClassificationAccuracyEvaluator import *
 from antnas.searchspace.DualStageBlockCellArc import *
 
@@ -242,10 +241,9 @@ class PKAsynImageNetSN(UniformSamplingSuperNetwork):
         self.out_dim = data_prop['out_size'][0]
 
         self._input_size = (self.in_chan, self.in_size, self.in_size)
-        self.blocks = nn.ModuleList([])
         self.graph = nx.DiGraph()
         self.sampling_parameters = nn.ParameterList()
-        self._loss = cross_entropy
+        self._loss = nn.CrossEntropyLoss()
 
         # head (固定计算节点，对应激活参数不可学习)
         head = ConvBn(self.in_chan, channels_per_block[0][0], k_size=3, stride=2, relu=True)

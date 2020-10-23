@@ -24,8 +24,6 @@ class NetworkBlock(nn.Module):
         super(NetworkBlock, self).__init__()
         self._params = {}
         self._structure_fixed = True
-        self._adapt_mean = None
-        self._adapt_var = None
 
     @property
     def structure_fixed(self):
@@ -80,6 +78,7 @@ class NetworkBlock(nn.Module):
             if profile in NetworkBlock.lookup_table[device]['op'][op_name]['latency']:
                 return NetworkBlock.lookup_table[device]['op'][op_name]['latency'][profile]
 
+        print('(%s - %s) not in latency lookup table'%(op_name, profile))
         return 0.0
 
     @staticmethod
@@ -237,7 +236,9 @@ class Skip(NetworkBlock):
         self.in_channels = in_chan
         self.out_channels = out_chan
         self.reduction = reduction
-        self.pool2d = torch.nn.AvgPool2d(2, 2)
+        self.pool2d = None
+        if reduction:
+            self.pool2d = torch.nn.AvgPool2d(2, 2)
         self.structure_fixed = False
 
         self.params = {
@@ -316,7 +317,6 @@ class ConvBn(NetworkBlock):
         x = self.bn(x)
         if self.relu:
             x = F.relu(x)
-
         if sampling is None:
             return x
 
@@ -960,8 +960,9 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
 
         irb_name += "_e%d"%self.expansion
 
-        if not self.reduction:
-            irb_name += "_skip"
+        # ignore skip flag
+        # if not self.reduction:
+        #     irb_name += "_skip"
 
         input_h, _ = x.shape[2:]
         after_h = input_h if not self.reduction else input_h // 2
@@ -993,7 +994,7 @@ class ASPPBlock(NetworkBlock):
         self.conv_1_step = nn.Conv2d(in_chan, depth, kernel_size=1, bias=False)
         self.bn1 = nn.BatchNorm2d(depth,
                                   momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
-                                  track_running_stats=True)
+                                  track_running_stats=NetworkBlock.bn_track_running_stats)
         
         # 2.step
         self.conv_2_step = nn.Conv2d(in_chan, depth, kernel_size=1, bias=False)

@@ -30,7 +30,7 @@ def antnas_argment(func):
                         help='path for the execution')
 
     parser.add_argument('-dset', default='PLACEHOLDER', type=str, help='Dataset')
-    parser.add_argument('-bs', action='store', default=2, type=int, help='Size of each batch')
+    parser.add_argument('-bs', action='store', default=4, type=int, help='Size of each batch')
     parser.add_argument('-epochs', action='store', default=0, type=int,
                         help='Number of training epochs')
     parser.add_argument('-evo_epochs', action='store', default=1, type=int,
@@ -52,7 +52,7 @@ def antnas_argment(func):
     parser.add_argument('-schedule', type=int, nargs='+', default=[150, 225],
                         help='decrease learning rate at these epochs.')
 
-    parser.add_argument('-gamma', type=float, default=0.9,help='LR is multiplied by gamma on schedule.')
+    parser.add_argument('-gamma', type=float, default=0.9, help='LR is multiplied by gamma on schedule.')
     parser.add_argument('-epochs_drop', type=int, default=16, help='for step mode')
 
     parser.add_argument('-momentum', action='store', default=0.9, type=float,
@@ -69,7 +69,7 @@ def antnas_argment(func):
     parser.add_argument('-cuda', action='store', default='', type=str,
                         help='Enables cuda and select device')
     parser.add_argument('-latency', action='store',
-                        default='./supernetwork/latency.gpu.855.224_16.32.64.96.112.160_lookuptable.json', type=str,
+                        default='/Users/zhangjian52/Downloads/latency.cpu.gpu.855.224.lookuptable.json', type=str,
                         help='latency lookup table')
 
     parser.add_argument('-static_proba', action='store', default=-1, type=restricted_float(0, 1),
@@ -113,7 +113,7 @@ def antnas_argment(func):
     parser.add_argument('-anchor_archs', dest="anchor_archs", action='store', default=[], type=list)
     parser.add_argument('-anchor_states', dest="anchor_states", action='store', default=[], type=list)
 
-    parser.add_argument('-architecture', action='store', default="/Users/zhangjian52/Downloads/suggestion_3/accuray_0.7169_para_583808_params_583808.architecture", type=str, help="architecture path")
+    parser.add_argument('-architecture', action='store', default="/Users/zhangjian52/Downloads/accuray_0.5589_latency_9.93_params_16334448.architecture", type=str, help="architecture path")
 
     kargs = vars(parser.parse_known_args()[0])
 

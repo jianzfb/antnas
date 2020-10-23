@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 
 
-class Arc:
+class Arc(object):
     def __init__(self, graph=None, blocks=None):
         self.graph = graph
         if self.graph is None:
@@ -26,16 +26,6 @@ class Arc:
 
         self._in_node = ""
         self._out_node = ""
-
-        kk = {
-            'comp': ComputationalCostEvaluator,
-            'latency': LatencyCostEvaluator,
-            'param': ParameterCostEvaluator
-        }
-
-        self.cost_evaluators = {}
-        for k, v in kk.items():
-            self.cost_evaluators[k] = v(model=self, main_cost=False)
 
         self.path_recorder = None
         self.traversal_order = None
@@ -76,6 +66,16 @@ class Arc:
         self._offset = val
     
     def arc_loss(self, shape, loss='latency', feature=None):
+        # 创建统计结构损失对象
+        assert(loss in ['comp', 'latency', 'param'])
+        if loss == 'comp':
+            self.cost_evaluator = ComputationalCostEvaluator(model=self, main_cost=False)
+        elif loss == 'latency':
+            self.cost_evaluator = LatencyCostEvaluator(model=self, main_cost=False)
+        else:
+            self.cost_evaluator = ParameterCostEvaluator(model=self, main_cost=False)
+
+        # 统计结构损失
         self.traversal_order = list(nx.topological_sort(self.graph))
         self.path_recorder = PathRecorder(self.graph, self.out_node)
 
@@ -98,13 +98,13 @@ class Arc:
                                                 self.blocks[cur_node['module']].structure_fixed)
 
         # 初始化结构损失估计函数
-        self.cost_evaluators[loss].init_costs(self, self.graph, input_node=self.in_node, input_shape=shape)
+        self.cost_evaluator.init_costs(self, self.graph, input_node=self.in_node, input_shape=shape)
 
         # 获得结构损失
         sampled_arc, pruned_arc = \
             self.path_recorder.get_arch(self.out_node, sampling, active)
         sampled_cost, pruned_cost = \
-            self.cost_evaluators[loss].get_costs([sampled_arc, pruned_arc])
+            self.cost_evaluator.get_costs([sampled_arc, pruned_arc])
 
         return sampled_cost, pruned_cost
     

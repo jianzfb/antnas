@@ -8,6 +8,7 @@ from __future__ import print_function
 
 from antnas.networks.nsga2 import *
 from antnas.component.NetworkBlock import *
+from antnas.networks.mutation import *
 import copy
 import numpy as np
 import random
@@ -15,26 +16,11 @@ import networkx as nx
 
 
 class CrossOver(object):
-    def __init__(self, crossover_type, multi_points, adaptive=True, **kwargs):
-        self.crossover_type = crossover_type
+    def __init__(self, multi_points, **kwargs):
         self.multi_points = multi_points
-        self.adaptive = adaptive
-        
-        self._generation = 0
-        self.max_generation = kwargs.get('max_generation', 1)
-        self.k0 = kwargs.get('k0', 0.2)
-        self.k1 = kwargs.get('k1', 1.0)
         self.size = kwargs.get('size', 0)
         self.hierarchical = kwargs.get('hierarchical', [])
         self.network = kwargs.get('network', None)
-
-    @property
-    def generation(self):
-        return self._generation
-
-    @generation.setter
-    def generation(self, val):
-        self._generation = val
 
     def _crossover_based_matrices(self, *args, **kwargs):
         # fitness_values: [(index, fitness, gene, device), (index, fitness, gene, device), ...]
@@ -214,18 +200,9 @@ class CrossOver(object):
 class EvolutionCrossover(CrossOver):
     def __init__(self,
                  multi_points,
-                 max_generation,
-                 k0,
-                 k1,
-                 method='simple',
                  size=0,
                  network=None):
-        super(EvolutionCrossover, self).__init__(method,
-                                             multi_points,
-                                             adaptive=True,
-                                             max_generation=max_generation,
-                                             k0=k0,
-                                             k1=k1,
+        super(EvolutionCrossover, self).__init__(multi_points,
                                              size=size,
                                              network=network)
 
@@ -277,6 +254,10 @@ class EvolutionCrossover(CrossOver):
                         crossover_1_individual.devices[loc] = \
                             population.population[second_individual_index].devices[loc]
 
+                    # 重新约束个体的设备选择有效性
+                    crossover_1_individual.devices = \
+                        refine_device_select(crossover_1_individual.devices, self.network.net)
+
                 crossover_population.population.append(crossover_1_individual)
 
             if is_2_ok:
@@ -296,6 +277,9 @@ class EvolutionCrossover(CrossOver):
                     for loc in crossover_device_region:
                         crossover_2_individual.devices[loc] = \
                             population.population[first_individual_index].devices[loc]
+
+                    crossover_2_individual.devices = \
+                        refine_device_select(crossover_2_individual.devices, self.network.net)
 
                 crossover_population.population.append(crossover_2_individual)
 

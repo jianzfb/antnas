@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-python portrait_train_and_search.py -exp-project nas2 -exp-name v2 -arch PKBiSegSN2 -bs 128 -epochs 1200 -evo_epochs 80 -dset SEG -path ./portrait_dataset/refine -population_size 50 -cuda 0,1 -lr_decay cos -optim SGD
+python -u $1 -exp-project dual -exp-name v1 -arch PKAsynImageNetSN -bs 384 -epochs 0 -evo_epochs 50 -dset ImageNetV2 -path ./portrait_dataset/ -model_path=./supernetwork/supernetwork_state_0.supernet.model -population_size 50 -cuda 0 -lr_decay cos -optim SGD

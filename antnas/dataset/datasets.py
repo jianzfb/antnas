@@ -21,10 +21,17 @@ class PlaceholderData(data.Dataset):
         self.img_size = img_size
         self.img_channels = img_channels
         self.out_channels = out_channels
+        if type(self.out_channels) == tuple:
+            self.out_channels = self.out_channels[0]
 
     def __getitem__(self, index):
-        return np.random.randint(0,255,(self.img_size,self.img_size, self.img_channels), dtype=np.uint8), \
-               (int)(np.random.random()*self.out_channels)
+        random_img = \
+            np.random.randint(0,
+                              255,
+                              (self.img_channels,self.img_size,self.img_size), dtype=np.uint8)
+        random_norm_img = random_img/255.0
+        random_norm_img = random_norm_img.astype(np.float32)
+        return random_norm_img, (int)(np.random.random()*self.out_channels)
 
     def __len__(self):
         return 100
@@ -39,6 +46,8 @@ class PrefetchedWrapper(object):
             mean = torch.tensor([0.485, 0.456, 0.406]).cuda().view(1,3,1,1)
             std = torch.tensor([0.229, 0.224, 0.225]).cuda().view(1,3,1,1)
 
+            input = None
+            target = None
             for next_input, next_target in loader:
                 with torch.cuda.stream(stream):
                     next_input = next_input.cuda(non_blocking=True)
@@ -54,7 +63,6 @@ class PrefetchedWrapper(object):
                 torch.cuda.current_stream().wait_stream(stream)
                 input = next_input
                 target = next_target
-
             yield input, target
         else:
             mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
@@ -64,7 +72,7 @@ class PrefetchedWrapper(object):
                 next_input = next_input.float()
                 next_input = next_input.sub_(mean).div_(std)
 
-                yield next_input,next_target
+                yield next_input, next_target
 
     def __init__(self, dataloader):
         self.dataloader = dataloader
@@ -78,6 +86,9 @@ class PrefetchedWrapper(object):
             self.dataloader.sampler.set_epoch(self.epoch)
         self.epoch += 1
         return PrefetchedWrapper.prefetched_loader(self.dataloader)
+
+    def __len__(self):
+        return len(self.dataloader)
 
 
 class Test(data.Dataset):
@@ -238,17 +249,20 @@ def get_CIFAR10(path, *args):
     in_channels = 3
     out_size = (10,)
     val_size = 5000
-
     data_augmentation = [transforms.Pad(4),
                          transforms.RandomCrop(32),
                          transforms.RandomHorizontalFlip()]
 
+    normalization = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+
     train_transfrom = transforms.Compose([
         transforms.Compose(data_augmentation),
-        transforms.ToTensor()])
+        transforms.ToTensor(),
+        normalization])
 
     test_transform = transforms.Compose([
-        transforms.ToTensor()])
+        transforms.ToTensor(),
+        normalization])
 
     train_set = CIFAR10(root=path, train=True, download=True, transform=train_transfrom)
     test_set = CIFAR10(root=path, train=False, download=True, transform=test_transform)
@@ -396,19 +410,16 @@ def get_data(ds_name, batch_size, path, kwargs=None):
     else:
         raise ValueError("Dataset must in {}, got {}".format(sets.keys(), ds_name))
 
-    logger.debug("N train : %d" % len(train_set))
-    # logger.debug("N valid : %d" % len(val_set))
-    logger.debug("N test : %d" % len(test_set))
+    logger.info("N train : %d" % len(train_set))
+    logger.info("N test : %d" % len(test_set))
 
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,
-                              num_workers=4, drop_last=True) if train_set is not None else None
+                              num_workers=1, drop_last=True) if train_set is not None else None
     test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False,
-                             num_workers=4) if test_set is not None else None
-    # val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False,
-    #                         num_workers=4) if val_set is not None else None
+                             num_workers=1) if test_set is not None else None
 
-    train_loader = PrefetchedWrapper(train_loader)
-    test_loader = PrefetchedWrapper(test_loader)
+    # train_loader = PrefetchedWrapper(train_loader)
+    # test_loader = PrefetchedWrapper(test_loader)
 
     data_properties = {
         'img_dim': img_dim,

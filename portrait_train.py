@@ -91,7 +91,8 @@ def main(*args, **kwargs):
     model = FixedNetwork(architecture=kwargs['architecture'],
                          output_layer_cls=OutLayer,
                          loss_func=cross_entropy,
-                         accuracy_evaluator_cls=lambda :SegmentationAccuracyEvaluator(2, True))
+                         accuracy_evaluator_cls=lambda :SegmentationAccuracyEvaluator(2, True),
+                         network_name='portrait')
     xp.architecture.update(kwargs['architecture'])
 
     # 初始化模型权重
@@ -146,9 +147,11 @@ def main(*args, **kwargs):
             xp.train.learning_rate.update(lr)
 
             mlogger.update()
+            if i >= 5:
+                break
 
         # test process on test dataset
-        if (epoch + 1) % 5 == 0:
+        if (epoch + 1) % 1 == 0:
             logger.info('\nEvaluation')
 
             # test process

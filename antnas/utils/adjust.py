@@ -84,17 +84,17 @@ def initialize_optimizer(mode, model, kwargs):
                 momentum=kwargs['momentum'],
                 nesterov=kwargs['nesterov'])
         else:
-            optimizer = optim.SGD(model.parameters(),
+            optimizer = optim.SGD(model.blocks.parameters(),
                                   lr=kwargs['lr'],
                                   weight_decay=kwargs['weight_decay'],
                                   momentum=kwargs['momentum'],
                                   nesterov=kwargs['nesterov'])
     elif kwargs['optim'] == 'ADAM':
-        optimizer = optim.Adam(model.parameters(),
+        optimizer = optim.Adam(model.blocks.parameters(),
                                lr=kwargs['lr'],
                                weight_decay=kwargs['weight_decay'])
     elif kwargs['optim'] == 'RMS':
-        optimizer = optim.RMSprop(model.parameters(),
+        optimizer = optim.RMSprop(model.blocks.parameters(),
                                   lr=kwargs['lr'],
                                   weight_decay=kwargs['weight_decay'],
                                   momentum=kwargs['momentum'])
