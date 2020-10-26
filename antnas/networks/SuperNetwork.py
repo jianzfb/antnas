@@ -532,7 +532,10 @@ class SuperNetwork(nn.Module):
                 cur_node = self.net.node[node_name]
                 if node_name.startswith('I') or node_name.startswith('O') or node_name.startswith('FIXED'):
                     devices[cur_node['sampling_param']] = 0
-                elif node_name.startswith('A'):
+
+            for node_name in self.traversal_order:
+                cur_node = self.net.node[node_name]
+                if node_name.startswith('A'):
                     # 寻找下继节点
                     # 按照构建搜索空间的约定，A节点的后继节点必然是CELL节点或O节点
                     for nn in self.net.successors(node_name):

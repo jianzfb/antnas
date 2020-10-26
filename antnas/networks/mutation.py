@@ -22,7 +22,10 @@ def refine_device_select(devices, net):
         cur_node = net.node[node_name]
         if node_name.startswith('I') or node_name.startswith('O') or node_name.startswith('FIXED'):
             devices[cur_node['sampling_param']] = 0
-        elif node_name.startswith('A'):
+
+    for node_name in traversal_order:
+        cur_node = net.node[node_name]
+        if node_name.startswith('A'):
             # 寻找下继节点
             # 按照构建搜索空间的约定，A节点的后继节点必然是CELL节点或O节点
             for nn in net.successors(node_name):

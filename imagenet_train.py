@@ -102,7 +102,7 @@ def main(*args, **kwargs):
     #                      loss_func=cross_entropy,
     #                      accuracy_evaluator_cls=lambda: ClassificationAccuracyEvaluator(),
     #                      network_name='heterogeneous-nas')
-    model = MNV2FixedNetwork(architecture=kwargs['architecture'],
+    model = FixedNetwork(architecture=kwargs['architecture'],
                          output_layer_cls=ImageNetOutLayer,
                          loss_func=criterion,
                          accuracy_evaluator_cls=lambda: ClassificationAccuracyEvaluator(),

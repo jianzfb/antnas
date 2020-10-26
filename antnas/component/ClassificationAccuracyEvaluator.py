@@ -22,17 +22,20 @@ class ClassificationAccuracyEvaluator(AccuracyEvaluator):
         return args
 
     def caculate(self, pred, label, ignore=None):
-        AccuracyEvaluator.process_queue.put((self, (pred, label, ignore)))
+        pred_cpy = torch.Tensor()
+        label_cpy = torch.Tensor()
+        pred_cpy.resize_(pred.size()).copy_(pred)
+        label_cpy.resize_(label.size()).copy_(label)
+        AccuracyEvaluator.process_queue.put((self, (pred_cpy, label_cpy)))
 
     def _caculate_in_thread(self, *args, **kwargs):
-        pred, label, _ = args
-
+        pred, label = args
         _, predicted = torch.max(pred.data, 1)
         correct = torch.sum((predicted == label).float())
-        self.correct += correct
 
         lock = kwargs['lock']
         lock.acquire()
+        self.correct += correct
         self.total += label.shape[0]
         lock.release()
 
