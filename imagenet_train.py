@@ -106,7 +106,7 @@ def main(*args, **kwargs):
                          output_layer_cls=ImageNetOutLayer,
                          loss_func=criterion,
                          accuracy_evaluator_cls=lambda: ClassificationAccuracyEvaluator(),
-                         network_name='heterogeneous-nas')
+                         network_name='heterogeneous-nas-3')
     xp.architecture.update(kwargs['architecture'])
 
     # 配置优化器

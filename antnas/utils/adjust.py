@@ -68,6 +68,11 @@ def initialize_weights(model):
 
 
 def initialize_optimizer(mode, model, kwargs):
+    dd=[]
+    for a in model.blocks.parameters():
+        dd.append(a)
+    print(len(dd))
+
     optimizer = None
     if kwargs['optim'] == 'SGD':
         if mode == 'search':

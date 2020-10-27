@@ -113,7 +113,7 @@ def antnas_argment(func):
     parser.add_argument('-anchor_archs', dest="anchor_archs", action='store', default=[], type=list)
     parser.add_argument('-anchor_states', dest="anchor_states", action='store', default=[], type=list)
 
-    parser.add_argument('-architecture', action='store', default="/Users/zhangjian52/Downloads/accuray_0.5589_latency_9.93_params_16334448.architecture", type=str, help="architecture path")
+    parser.add_argument('-architecture', action='store', default="/Users/zhangjian52/Downloads/check-nas/supernetwork/accuray_0.5488_latency_23.07_params_14636616.architecture", type=str, help="architecture path")
 
     kargs = vars(parser.parse_known_args()[0])
 
