@@ -17,6 +17,46 @@ from antnas.utils.argument_parser import *
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+#
+# class ImageNetOutLayer(NetworkBlock):
+#     n_layers = 1
+#     n_comp_steps = 1
+#
+#     def __init__(self, in_chan):
+#         super(ImageNetOutLayer, self).__init__()
+#         self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
+#
+#         self.conv_1 = nn.Conv2d(in_chan, 960, kernel_size=1, stride=1, padding=0, bias=False)
+#         self.bn_1 = nn.BatchNorm2d(960,
+#                                    momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+#                                    track_running_stats=NetworkBlock.bn_track_running_stats)
+#
+#         self.conv_2 = nn.Conv2d(960, 1280, kernel_size=1, stride=1, padding=0, bias=False)
+#         self.classifier = nn.Linear(1280, 1000)
+#         self.dropout = torch.nn.Dropout(p=0.9)
+#
+#         self.params = {
+#             'module_list': ['ImageNetOutLayer'],
+#             'name_list': ['ImageNetOutLayer'],
+#             'ImageNetOutLayer': {'in_chan': in_chan},
+#             'out': 'outname',
+#             'in_chan': in_chan,
+#         }
+#
+#     def forward(self, x, sampling=None):
+#         x = self.conv_1(x)
+#         x = self.bn_1(x)
+#         x = F.relu(x)
+#
+#         x = self.global_pool(x)
+#         x = self.conv_2(x)
+#         x = F.relu(x)
+#         x = self.dropout(x)
+#
+#         x = x.view(x.size(0), -1)
+#         x = self.classifier(x)
+#         return x
+
 
 class ImageNetOutLayer(NetworkBlock):
     n_layers = 1
@@ -25,15 +65,7 @@ class ImageNetOutLayer(NetworkBlock):
     def __init__(self, in_chan):
         super(ImageNetOutLayer, self).__init__()
         self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
-
-        self.conv_1 = nn.Conv2d(in_chan, 960, kernel_size=1, stride=1, padding=0, bias=False)
-        self.bn_1 = nn.BatchNorm2d(960,
-                                   momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
-                                   track_running_stats=NetworkBlock.bn_track_running_stats)
-
-        self.conv_2 = nn.Conv2d(960, 1280, kernel_size=1, stride=1, padding=0, bias=False)
-        self.classifier = nn.Linear(1280, 1000)
-        self.dropout = torch.nn.Dropout(p=0.9)
+        self.classifier = nn.Linear(3, 1000)
 
         self.params = {
             'module_list': ['ImageNetOutLayer'],
@@ -44,16 +76,8 @@ class ImageNetOutLayer(NetworkBlock):
         }
 
     def forward(self, x, sampling=None):
-        x = self.conv_1(x)
-        x = self.bn_1(x)
-        x = F.relu(x)
-
         x = self.global_pool(x)
-        x = self.conv_2(x)
-        x = F.relu(x)
-        x = self.dropout(x)
-
-        x = x.view(x.size(0), -1)
+        x = x.view(x.shape[0], -1)
         x = self.classifier(x)
         return x
 

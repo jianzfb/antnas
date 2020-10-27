@@ -28,10 +28,9 @@ class ImageNetV2Data(data.Dataset):
             with open(os.path.join(root, 'train_list.txt'), 'r') as fp:
                 content = fp.readline()
                 while content:
-                    content = content.replace('/n', '')
                     kk = content.split(" ")
                     image_file = kk[0].strip()
-                    label = kk[-1].strip()
+                    label = kk[-1].replace('/n', '').strip()
                     if image_file != '' and label != '':
                         self.images.append(os.path.join(root, image_file))
                         self.labels.append(int(label))
@@ -45,10 +44,9 @@ class ImageNetV2Data(data.Dataset):
             with open(os.path.join(root, 'val_list.txt'), 'r') as fp:
                 content = fp.readline()
                 while content:
-                    content = content.replace('/n', '')
                     kk = content.split(" ")
                     image_file = kk[0].strip()
-                    label = kk[-1].strip()
+                    label = kk[-1].replace('/n', '').strip()
                     if image_file != '' and label != '':
                         self.images.append(os.path.join(root, image_file))
                         self.labels.append(int(label))

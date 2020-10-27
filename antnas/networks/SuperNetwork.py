@@ -742,7 +742,9 @@ class SuperNetwork(nn.Module):
         for individual_index in range(population_size):
             individual = evolution.problem.generateIndividual()
             individual.features = self.sample_arch()
+            # individual.features = [1,2,3,4,1,1,1]
             individual.devices = self.sample_device()
+            # individual.devices = [0,1,1,0,0,0,0]
             population.population.append(individual)
         evolution.problem.calculateBatchObjectives(population.population)
 

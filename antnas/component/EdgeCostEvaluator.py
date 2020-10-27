@@ -5,6 +5,7 @@
 from antnas.component.CostEvaluator import CostEvaluator
 from antnas.component.NetworkBlock import *
 import torch
+import networkx as nx
 
 
 class EdgeCostEvaluator(CostEvaluator):
@@ -30,7 +31,12 @@ class EdgeCostEvaluator(CostEvaluator):
             device_num = NetworkBlock.device_num
             node_num = architectures.shape[0]
 
+            # 记录设备占用情况
+            record_path_nodes = {}
+
             # 1. 结构代价
+            # root node
+            root_node = self.model.traversal_order[0]
             # devices: n_nodes
             accumulate_cost = torch.zeros((node_num))
             for node_name in self.model.traversal_order:
@@ -49,11 +55,11 @@ class EdgeCostEvaluator(CostEvaluator):
                 if len(dependent_pre_indexes) == 0:
                     continue
 
-                # 仅对节点A（按照搜索空间设计规范，A节点用于汇聚多分支数据的节点），考虑数据传输代价(估计)
+                # 对节点A和CELL（按照搜索空间设计规范，A节点用于汇聚多分支数据的节点），考虑数据传输代价(估计)
                 # 假设数据传输时间占到计算时间的1.0倍，base-1ms
                 if node_name.startswith('A'):
                     # A节点的设备与其下继节点的设备一致
-                    # 验证
+                    # 验证约定规范
                     for next_node in self.model.net.successors(node_name):
                         next_node_index = self.model.path_recorder.node_index[next_node]
                         assert(devices[node_index] == devices[next_node_index])
@@ -72,6 +78,12 @@ class EdgeCostEvaluator(CostEvaluator):
                             assert(architectures[pre_index] <= 1)
                             if devices[pre_index] != devices[node_index] and architectures[pre_index] == 1:
                                 accumulate_cost[node_index] += EdgeCostEvaluator.base_transfer_time
+                elif node_name.startswith('CELL'):
+                    for prev in self.model.net.predecessors(node_name):
+                        pre_index = self.model.path_recorder.node_index[prev]
+                        if prev.startswith('CELL'):
+                            if devices[pre_index] != devices[node_index]:
+                                accumulate_cost[node_index] += EdgeCostEvaluator.base_transfer_time
 
                 # device_num x node_num
                 incoming = incoming[:, dependent_pre_indexes]
@@ -79,8 +91,21 @@ class EdgeCostEvaluator(CostEvaluator):
                 incoming = incoming - incoming_min
                 incoming = torch.sum(incoming, 1, keepdim=True)
                 incoming = incoming + incoming_min
+
+                # consider device has been occupied
+                # 当在当前深度下，设备已经被占用，则当前节点在此设备下的计算时间将会延长
+                node_deep = nx.shortest_path_length(self.model.net, root_node, node_name)
+                if node_deep not in record_path_nodes:
+                    record_path_nodes[node_deep] = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0}
+
                 # device_num(1) x node_num(1)
-                accumulate_cost[node_index] += (costs[node_index] + incoming.max(0, keepdim=True)[0].squeeze())[0]
+                accumulate_cost[node_index] += \
+                    (costs[node_index] +
+                     record_path_nodes[node_deep][(int)(devices[node_index])] +
+                     incoming.max(0, keepdim=True)[0].squeeze())[0]
+
+                # 记录设备占用
+                record_path_nodes[node_deep][(int)(devices[node_index])] = costs[node_index]
 
             out_index = self.model.path_recorder.node_index[self.model.out_node]
             architecture_cost = accumulate_cost[out_index]

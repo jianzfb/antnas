@@ -72,10 +72,14 @@ class Drawer(object):
         nodes_for_device_0 = []
         nodes_for_device_1 = []
         nodes_for_others = []
-        if nodefilter:
-            nodes_for_device_0 = [node for node in graph.nodes() if nodefilter(node) and graph.nodes[node]['device'] == 0]
-            nodes_for_device_1 = [node for node in graph.nodes() if nodefilter(node) and graph.nodes[node]['device'] == 1]
-            nodes_for_others = [node for node in graph.nodes() if nodefilter(node) and graph.nodes[node]['device'] not in [0,1]]
+        if 'device' in graph.nodes(nodes[0]):
+            if nodefilter:
+                nodes_for_device_0 = [node for node in graph.nodes() if
+                                      nodefilter(node) and graph.nodes[node]['device'] == 0]
+                nodes_for_device_1 = [node for node in graph.nodes() if
+                                      nodefilter(node) and graph.nodes[node]['device'] == 1]
+                nodes_for_others = [node for node in graph.nodes() if
+                                    nodefilter(node) and graph.nodes[node]['device'] not in [0, 1]]
 
         nodes_value = None
         if samplinger:
@@ -83,12 +87,14 @@ class Drawer(object):
         nodes_value_for_device_0 = []
         nodes_value_for_device_1 = []
         nodes_value_for_others = []
-        if samplinger:
-            nodes_value_for_device_0 = [samplinger(node) for node in graph.nodes() if nodefilter(node) and graph.nodes[node]['device'] == 0]
-            nodes_value_for_device_1 = [samplinger(node) for node in graph.nodes() if
-                                        nodefilter(node) and graph.nodes[node]['device'] == 1]
-            nodes_value_for_others = [samplinger(node) for node in graph.nodes() if
-                                        nodefilter(node) and graph.nodes[node]['device'] not in[0,1]]
+        if 'device' in graph.nodes(nodes[0]):
+            if samplinger:
+                nodes_value_for_device_0 = [samplinger(node) for node in graph.nodes() if
+                                            nodefilter(node) and graph.nodes[node]['device'] == 0]
+                nodes_value_for_device_1 = [samplinger(node) for node in graph.nodes() if
+                                            nodefilter(node) and graph.nodes[node]['device'] == 1]
+                nodes_value_for_others = [samplinger(node) for node in graph.nodes() if
+                                            nodefilter(node) and graph.nodes[node]['device'] not in [0, 1]]
 
         edges = None
         if edgefilter:
@@ -137,6 +143,9 @@ class Drawer(object):
         transfer_color = ['#FF0000', '#00FF00']
         
         node_color_for_device_0 = []
+        if len(nodes_for_device_0) == 0:
+            nodes_for_device_0 = nodes
+            nodes_value_for_device_0 = nodes_value
         for node, value in zip(nodes_for_device_0, nodes_value_for_device_0):
             if node.startswith('I'):
                 node_color_for_device_0.append('#FF6347')
@@ -158,27 +167,28 @@ class Drawer(object):
                                node_color=node_color_for_device_0,
                                node_shape='o')
 
-        node_color_for_device_1 = []
-        for node, value in zip(nodes_for_device_1, nodes_value_for_device_1):
-            if node.startswith('I'):
-                node_color_for_device_1.append('#FF6347')
-            elif node.startswith('O'):
-                node_color_for_device_1.append('#FF6347')
-            elif node.startswith('CELL'):
-                node_color_for_device_1.append(cell_color[value])
-            elif node.startswith('T'):
-                node_color_for_device_1.append(transfer_color[value])
-            elif node.startswith('L') or node.startswith('FIXED'):
-                node_color_for_device_1.append('#00FF00')
-            else:
-                node_color_for_device_1.append('#A9A9A9')
+        if len(nodes_for_device_1) > 0:
+            node_color_for_device_1 = []
+            for node, value in zip(nodes_for_device_1, nodes_value_for_device_1):
+                if node.startswith('I'):
+                    node_color_for_device_1.append('#FF6347')
+                elif node.startswith('O'):
+                    node_color_for_device_1.append('#FF6347')
+                elif node.startswith('CELL'):
+                    node_color_for_device_1.append(cell_color[value])
+                elif node.startswith('T'):
+                    node_color_for_device_1.append(transfer_color[value])
+                elif node.startswith('L') or node.startswith('FIXED'):
+                    node_color_for_device_1.append('#00FF00')
+                else:
+                    node_color_for_device_1.append('#A9A9A9')
 
-        nx.draw_networkx_nodes(graph,
-                               nodelist=nodes_for_device_1,
-                               pos=pos,
-                               node_size=self.NODE_SIZE,
-                               node_color=node_color_for_device_1,
-                               node_shape='s')
+            nx.draw_networkx_nodes(graph,
+                                   nodelist=nodes_for_device_1,
+                                   pos=pos,
+                                   node_size=self.NODE_SIZE,
+                                   node_color=node_color_for_device_1,
+                                   node_shape='s')
 
         if len(nodes_for_others) > 0:
             node_color_for_others = []
