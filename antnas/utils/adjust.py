@@ -69,7 +69,7 @@ def initialize_weights(model):
 
 def initialize_optimizer(mode, model, kwargs):
     dd=[]
-    for a in model.blocks.parameters():
+    for a in model.parameters():
         dd.append(a)
     print(len(dd))
 
@@ -78,7 +78,7 @@ def initialize_optimizer(mode, model, kwargs):
         if mode == 'search':
             # 区分路径参数和模型参数
             optimizer = optim.SGD([
-                {'params': model.blocks.parameters(), 'name': 'blocks'},
+                {'params': model.parameters(), 'name': 'blocks'},
                 {'params': filter(lambda x: x.requires_grad, model.sampling_parameters.parameters()),
                  'name': 'path',
                  'lr': kwargs['path_lr'],
@@ -89,17 +89,17 @@ def initialize_optimizer(mode, model, kwargs):
                 momentum=kwargs['momentum'],
                 nesterov=kwargs['nesterov'])
         else:
-            optimizer = optim.SGD(model.blocks.parameters(),
+            optimizer = optim.SGD(model.parameters(),
                                   lr=kwargs['lr'],
                                   weight_decay=kwargs['weight_decay'],
                                   momentum=kwargs['momentum'],
                                   nesterov=kwargs['nesterov'])
     elif kwargs['optim'] == 'ADAM':
-        optimizer = optim.Adam(model.blocks.parameters(),
+        optimizer = optim.Adam(model.parameters(),
                                lr=kwargs['lr'],
                                weight_decay=kwargs['weight_decay'])
     elif kwargs['optim'] == 'RMS':
-        optimizer = optim.RMSprop(model.blocks.parameters(),
+        optimizer = optim.RMSprop(model.parameters(),
                                   lr=kwargs['lr'],
                                   weight_decay=kwargs['weight_decay'],
                                   momentum=kwargs['momentum'])

@@ -90,29 +90,25 @@ def main(*args, **kwargs):
     xp.test = mlogger.Container()
     xp.test.accuracy = mlogger.metric.Simple(plot_title="test_accuracy")
 
-    # 配置网络模型
+    # 配置网络损失函数
     criterion = None
     if torch.cuda.is_available():
         criterion = nn.CrossEntropyLoss().cuda()
     else:
         criterion = nn.CrossEntropyLoss()
 
+    # 配置网络模型
     # model = FixedNetwork(architecture=kwargs['architecture'],
     #                      output_layer_cls=ImageNetOutLayer,
-    #                      loss_func=cross_entropy,
     #                      accuracy_evaluator_cls=lambda: ClassificationAccuracyEvaluator(),
     #                      network_name='heterogeneous-nas')
-    model = FixedNetwork(architecture=kwargs['architecture'],
+    model = MNV2FixedNetwork(architecture=kwargs['architecture'],
                          output_layer_cls=ImageNetOutLayer,
-                         loss_func=criterion,
-                         accuracy_evaluator_cls=lambda: ClassificationAccuracyEvaluator(),
+                         accuracy_evaluator_cls=lambda: ClassificationAccuracyEvaluator(topk=(1,5)),
                          network_name='heterogeneous-nas-3')
     xp.architecture.update(kwargs['architecture'])
 
-    # 配置优化器
-    optimizer = initialize_optimizer('train', model, kwargs)
-
-    # set model input
+    # 配置数据并行环境
     x = torch.Tensor()
     y = torch.LongTensor()
     parallel_model = model
@@ -125,7 +121,11 @@ def main(*args, **kwargs):
     else:
         logger.warning('Running *WITHOUT* cuda')
 
+    # 配置模型优化器
+    optimizer = initialize_optimizer('train', parallel_model, kwargs)
+
     best_test_accuracy = 0.0
+    lr = 0.0
     for epoch in range(kwargs['epochs']):
         # write logger
         logger.info(epoch)
@@ -140,16 +140,16 @@ def main(*args, **kwargs):
             x = inputs
             y = labels
 
-            optimizer.zero_grad()
             output = parallel_model(x, y)
             loss = criterion(output, y)
 
             # record model loss
             xp.train.classif_loss.update(loss.item())
 
+            # reset grad zero
+            optimizer.zero_grad()
             # compute gradients
             loss.backward()
-
             # update parameter
             optimizer.step()
 
@@ -179,18 +179,22 @@ def main(*args, **kwargs):
                 accuracy_evaluator.caculate(*processed_data)
 
             AccuracyEvaluator.stop()
-            test_accuracy = accuracy_evaluator.accuracy()
-            xp.test.accuracy.update(test_accuracy)
+            test_accuracy_top_1, test_accuracy_top_5 = accuracy_evaluator.accuracy()
+            xp.test.accuracy.update(test_accuracy_top_1)
             mlogger.update()
 
+            # print log
+            print('epoch %d, lr %f, top1 %f, top5 %f',
+                  epoch, (float)(lr), (float)(test_accuracy_top_1), (float)(test_accuracy_top_5))
+
             # save best model state
-            if best_test_accuracy < test_accuracy:
+            if best_test_accuracy < test_accuracy_top_1:
                 if not os.path.exists("./supernetwork"):
                     os.makedirs("./supernetwork")
 
                 path = os.path.join("./supernetwork", "check")
                 torch.save(model.state_dict(), '%s.supernet.model' % path)
-                best_test_accuracy = test_accuracy
+                best_test_accuracy = test_accuracy_top_1
 
 
 if __name__ == '__main__':

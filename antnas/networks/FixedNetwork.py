@@ -25,7 +25,6 @@ class FixedNetwork(nn.Module):
         
         architecture_path = kwargs.get('architecture', None)
         self.output_layer_cls = kwargs.get('output_layer_cls', None)
-        self._loss = kwargs.get('loss_func', None)
         self._accuracy_evaluator_cls = kwargs.get('accuracy_evaluator_cls', None)
         self._network_name = kwargs.get('network_name', 'network')
         self.graph = nx.read_gpickle(architecture_path)
@@ -115,9 +114,6 @@ class FixedNetwork(nn.Module):
         if (isinstance(input, tuple) or isinstance(input, list)) and len(input) == 1:
             input = input[0]
         return input
-
-    def loss(self, predictions, labels):
-        return self._loss(predictions, labels)
 
     def accuracy_evaluator(self):
         return self._accuracy_evaluator_cls()

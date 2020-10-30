@@ -41,7 +41,7 @@ def antnas_argment(func):
     parser.add_argument('-population_size', action='store', default=2, type=int,
                         help='population size for NSGAII')
 
-    parser.add_argument('-optim', action='store', default='RMS', type=str,
+    parser.add_argument('-optim', action='store', default='SGD', type=str,
                         help='Optimization method')
     parser.add_argument('-nesterov', action='store', default=False, type=bool,
                         help='Use Nesterov for SGD momentum')

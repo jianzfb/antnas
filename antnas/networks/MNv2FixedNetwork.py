@@ -20,7 +20,6 @@ from antnas.networks.mobilenetv2 import *
 class MNV2FixedNetwork(nn.Module):
     def __init__(self, *args, **kwargs):
         super(MNV2FixedNetwork, self).__init__()
-        self._loss = kwargs.get('loss_func', None)
         self._accuracy_evaluator_cls = kwargs.get('accuracy_evaluator_cls', None)
         self.blocks = mobilenetv2()
 
@@ -30,9 +29,6 @@ class MNV2FixedNetwork(nn.Module):
 
     def __str__(self):
         return ''
-
-    def loss(self, predictions, labels):
-        return self._loss(predictions, labels)
 
     def accuracy_evaluator(self):
         return self._accuracy_evaluator_cls()
