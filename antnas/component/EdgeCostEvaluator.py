@@ -6,6 +6,10 @@ from antnas.component.CostEvaluator import CostEvaluator
 from antnas.component.NetworkBlock import *
 import torch
 import networkx as nx
+from ctypes import cdll
+import ctypes
+heft_dll = cdll.LoadLibrary('./antnas/extent/heft.so')
+heft_dll.get.restype = ctypes.c_double
 
 
 class EdgeCostEvaluator(CostEvaluator):
@@ -24,91 +28,34 @@ class EdgeCostEvaluator(CostEvaluator):
             return architecture_cost
         else:
             assert(len(self.costs.shape) == 3)
-            devices = torch.as_tensor(devices)
-            reshape_costs = torch.reshape(self.costs, (self.costs.shape[0], -1))
-            reset_architectures = torch.reshape(devices, (self.costs.shape[0], 1)) * NetworkBlock.state_num + architectures
-            costs = torch.gather(reshape_costs, dim=1, index=reset_architectures.long())
-            device_num = NetworkBlock.device_num
-            node_num = architectures.shape[0]
+            # devices_num = len(devices)
+            devices_num = 2
+            task_num = len(self.model.traversal_order)
 
-            # 记录设备占用情况
-            record_path_nodes = {}
+            computing_cost = [0 for _ in range(task_num*devices_num)]
+            communication_cost = [-1 for _ in range(task_num*task_num)]
 
-            # 1. 结构代价
-            # root node
-            root_node = self.model.traversal_order[0]
-            # devices: n_nodes
-            accumulate_cost = torch.zeros((node_num))
-            for node_name in self.model.traversal_order:
-                node_index = self.model.path_recorder.node_index[node_name]
-                incoming = torch.zeros((device_num, node_num))
-                dependent_pre_indexes = []
-                dependent_pre_devices = []
-                for prev in self.model.net.predecessors(node_name):
-                    pre_index = self.model.path_recorder.node_index[prev]
-                    dependent_pre_indexes.append(pre_index)
-                    dependent_pre_devices.append(devices[pre_index])
-                    for device_i in range(device_num):
-                        incoming[device_i][pre_index] = \
-                            (devices[pre_index] == device_i).float() * accumulate_cost[pre_index]
+            for node in self.model.traversal_order:
+                from_index = self.model.arch_node_index[node]
+                for succ in self.model.net.successors(node):
+                    to_index = self.model.arch_node_index[succ]
+                    communication_cost[(int)(from_index * task_num + to_index)] = \
+                        EdgeCostEvaluator.base_transfer_time
 
-                if len(dependent_pre_indexes) == 0:
-                    continue
+                    if node.startswith('T'):
+                        if (int)(architectures[from_index, 0]) == 0:
+                            communication_cost[(int)(from_index * task_num + to_index)] = 0
 
-                # 对节点A和CELL（按照搜索空间设计规范，A节点用于汇聚多分支数据的节点），考虑数据传输代价(估计)
-                # 假设数据传输时间占到计算时间的1.0倍，base-1ms
-                if node_name.startswith('A'):
-                    # A节点的设备与其下继节点的设备一致
-                    # 验证约定规范
-                    for next_node in self.model.net.successors(node_name):
-                        next_node_index = self.model.path_recorder.node_index[next_node]
-                        assert(devices[node_index] == devices[next_node_index])
-                        break
+            for node in self.model.traversal_order:
+                from_index = self.model.arch_node_index[node]
+                for device_index in range(devices_num):
+                    computing_cost[from_index*devices_num+device_index] =\
+                        (float)(self.costs[from_index, (int)(device_index), (int)(architectures[from_index, 0])])
 
-                    # 统计传输代价
-                    for prev in self.model.net.predecessors(node_name):
-                        # 如果前继节点非CELL和T，则忽略数据传输代价
-                        pre_index = self.model.path_recorder.node_index[prev]
-                        if prev.startswith('CELL'):
-                            # 不鼓励：两个CELL在不同的设备上
-                            if devices[pre_index] != devices[node_index]:
-                                accumulate_cost[node_index] += EdgeCostEvaluator.base_transfer_time
-                        elif prev.startswith('T'):
-                            # 不鼓励：使用T链接的两个CELL在不同的设备上
-                            assert(architectures[pre_index] <= 1)
-                            if devices[pre_index] != devices[node_index] and architectures[pre_index] == 1:
-                                accumulate_cost[node_index] += EdgeCostEvaluator.base_transfer_time
-                elif node_name.startswith('CELL'):
-                    for prev in self.model.net.predecessors(node_name):
-                        pre_index = self.model.path_recorder.node_index[prev]
-                        if prev.startswith('CELL'):
-                            if devices[pre_index] != devices[node_index]:
-                                accumulate_cost[node_index] += EdgeCostEvaluator.base_transfer_time
-
-                # device_num x node_num
-                incoming = incoming[:, dependent_pre_indexes]
-                incoming_min = incoming.min(1, keepdim=True)[0]
-                incoming = incoming - incoming_min
-                incoming = torch.sum(incoming, 1, keepdim=True)
-                incoming = incoming + incoming_min
-
-                # consider device has been occupied
-                # 当在当前深度下，设备已经被占用，则当前节点在此设备下的计算时间将会延长
-                node_deep = nx.shortest_path_length(self.model.net, root_node, node_name)
-                if node_deep not in record_path_nodes:
-                    record_path_nodes[node_deep] = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0}
-
-                # device_num(1) x node_num(1)
-                accumulate_cost[node_index] += \
-                    (costs[node_index] +
-                     record_path_nodes[node_deep][(int)(devices[node_index])] +
-                     incoming.max(0, keepdim=True)[0].squeeze())[0]
-
-                # 记录设备占用
-                record_path_nodes[node_deep][(int)(devices[node_index])] = costs[node_index]
-
-            out_index = self.model.path_recorder.node_index[self.model.out_node]
-            architecture_cost = accumulate_cost[out_index]
+            ccomputing_cost = (ctypes.c_double * len(computing_cost))(*computing_cost)
+            ccommunication_cost = (ctypes.c_double * len(communication_cost))(*communication_cost)
+            time_span = heft_dll.get(task_num, devices_num, ccomputing_cost, ccommunication_cost)
+            architecture_cost = torch.tensor(time_span)
 
             return torch.reshape(architecture_cost, [1])
 

@@ -102,10 +102,10 @@ def main(*args, **kwargs):
     #                      output_layer_cls=ImageNetOutLayer,
     #                      accuracy_evaluator_cls=lambda: ClassificationAccuracyEvaluator(),
     #                      network_name='heterogeneous-nas')
-    model = MNV2FixedNetwork(architecture=kwargs['architecture'],
+    model = FixedNetwork(architecture=kwargs['architecture'],
                          output_layer_cls=ImageNetOutLayer,
                          accuracy_evaluator_cls=lambda: ClassificationAccuracyEvaluator(topk=(1,5)),
-                         network_name='heterogeneous-nas-3')
+                         network_name='heterogeneous-nas-4')
     xp.architecture.update(kwargs['architecture'])
 
     # 配置数据并行环境
@@ -184,8 +184,8 @@ def main(*args, **kwargs):
             mlogger.update()
 
             # print log
-            print('epoch %d, lr %f, top1 %f, top5 %f',
-                  epoch, (float)(lr), (float)(test_accuracy_top_1), (float)(test_accuracy_top_5))
+            print('epoch %d, lr %f, top1 %f, top5 %f'%(
+                  epoch, (float)(lr), (float)(test_accuracy_top_1), (float)(test_accuracy_top_5)))
 
             # save best model state
             if best_test_accuracy < test_accuracy_top_1:

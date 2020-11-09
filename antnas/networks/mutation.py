@@ -12,38 +12,6 @@ from antnas.networks.nsga2 import *
 from antnas.component.NetworkBlock import *
 
 
-def refine_device_select(devices, net):
-    # 设备选择约束条件
-    # CELL 节点：自由选择设备
-    # A,T,L节点：设备选择保持与下继节点设备选择一致
-    # I,O,F节点：设备保持不变（0）
-    traversal_order = list(nx.topological_sort(net))
-    for node_name in traversal_order:
-        cur_node = net.node[node_name]
-        if node_name.startswith('I') or node_name.startswith('O') or node_name.startswith('FIXED'):
-            devices[cur_node['sampling_param']] = 0
-
-    for node_name in traversal_order:
-        cur_node = net.node[node_name]
-        if node_name.startswith('A'):
-            # 寻找下继节点
-            # 按照构建搜索空间的约定，A节点的后继节点必然是CELL节点或O节点
-            for nn in net.successors(node_name):
-                nn_node = net.node[nn]
-                assert (nn.startswith('CELL') or nn.startswith('O'))
-                devices[cur_node['sampling_param']] = devices[nn_node['sampling_param']]
-                break
-        elif node_name.startswith('T'):
-            # 寻找上继节点
-            # 按照构建搜索空间的约定，T节点的上继节点必然CELL节点
-            for pre in net.predecessors(node_name):
-                assert (pre.startswith('CELL'))
-                pre_node = net.node[pre]
-                devices[cur_node['sampling_param']] = devices[pre_node['sampling_param']]
-                break
-    return devices
-
-
 class Mutation(object):
     def __init__(self, multi_points, **kwargs):
         self.multi_points = multi_points    # -1: auto
@@ -64,71 +32,6 @@ class Mutation(object):
     @generation.setter
     def generation(self, val):
         self._generation = val
-
-    def _mutate_device_based_matrices(self, *args, **kwargs):
-        fitness_values = kwargs['fitness_values']       # 设备
-
-        # fitness_values: [(index, fitness, gene), (), ]
-        N = len(fitness_values)         # 个数
-        M = len(fitness_values[0][2])   # 基因长度
-
-        C = np.zeros((N, 1))  # fitness cumulative probability of chromosome i,
-        # can be considered as an information measure of chromosome i
-        ordered_fitness = [(f[0], f[1]) for f in fitness_values]
-        ordered_fitness = sorted(ordered_fitness, key=lambda x: x[1])
-        probability_fitness = np.array([m[1] for m in ordered_fitness])
-        PF_SUM = np.sum(probability_fitness)
-        if PF_SUM < 0.0000001:
-            probability_fitness = probability_fitness + 0.0000001
-            PF_SUM = np.sum(probability_fitness)
-        probability_fitness = probability_fitness / PF_SUM
-
-        c_sum = 0.0
-        for a, b in zip(ordered_fitness, probability_fitness):
-            c_sum += b
-            C[a[0], 0] = c_sum
-
-        # which individual should mutation
-        alpha = 1.0 - C  # the probability to choose which individual for mutation
-
-        # 选择允许进行设备变异位置（仅考虑CELL节点）
-        explore_position = []
-        for node_name in list(nx.topological_sort(self.network.net)):
-            cur_node = self.network.net.node[node_name]
-            if node_name.startswith('CELL'):
-                explore_position.append(cur_node['sampling_param'])
-
-        # 变异选择
-        mutation_result = []
-        for f_index, f in enumerate(fitness_values):
-            # 变异比例
-            mutation_ratio = alpha[f[0]]
-
-            # 2.step mutation pos selection
-            # mutation points number
-            multi_points = self.multi_points if self.multi_points > 0 else int(mutation_ratio * len(explore_position))
-            multi_points = min(multi_points, len(explore_position))
-            if multi_points == 0:
-                print('(device select) no mutation pos')
-                mutation_result.append((f + ([], [])))
-            else:
-                mutation_position = np.random.choice(explore_position, multi_points, replace=False)
-                mutation_position = mutation_position.flatten().tolist()
-                mutation_state = []
-                for mutation_p in mutation_position:
-                    candidate_state = set(list(range(NetworkBlock.device_num)))
-                    candidate_state.discard(f[2][mutation_p])
-                    candidate_state = list(candidate_state)
-
-                    s = np.random.choice(candidate_state,
-                                         1,
-                                         replace=False)
-                    mutation_state.append(int(s))
-
-                print("(device select) individual %d mutation at %s to state %s" % (f_index, str(mutation_position), str(mutation_state)))
-                mutation_result.append((f + (mutation_position, mutation_state)))
-
-        return mutation_result
 
     def _mutate_based_matrices(self, *args, **kwargs):
         # fitness_values: [(index, fitness, gene, rate), (index, fitness, gene, rate), ...]
@@ -287,34 +190,5 @@ class EvolutionMutation(Mutation):
             mutation_population.population.append(new_individual)
             # 记录变异个体和原个体映射关系
             index_map[individual_index] = len(mutation_population.population) - 1
-
-        # 2.step 计算设备 变异
-        if population.population[0].devices is not None:
-            fitness_values = []
-            for individual_index, individual in enumerate(population.population):
-                fitness_values.append((individual_index,                                # index
-                                       1.0/(individual.objectives[1]+0.000000001),      # architecture loss
-                                       individual.devices,                              # feature
-                                        ))
-
-            mutation_individuals = \
-                self._mutate_device_based_matrices(fitness_values=fitness_values)
-
-            for _, individual in enumerate(mutation_individuals):
-                individual_index = individual[0]
-                mutation_position = individual[-2]
-                mutation_state = individual[-1]
-
-                mutation_population.population[index_map[individual_index]].devices = \
-                    copy.deepcopy(population.population[individual_index].devices)
-
-                # 设置变异后的节点设备
-                for mp, ms in zip(mutation_position, mutation_state):
-                    mutation_population.population[index_map[individual_index]].devices[mp] = ms
-
-                # 重新约束个体的设备选择有效性
-                mutation_population.population[index_map[individual_index]].devices = \
-                    refine_device_select(mutation_population.population[index_map[individual_index]].devices,
-                                         self.network.net)
 
         return mutation_population

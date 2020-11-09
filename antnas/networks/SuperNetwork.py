@@ -21,6 +21,7 @@ from antnas.component.AccuracyEvaluator import *
 import copy
 from tqdm import tqdm
 import antvis.client.mlogger as mlogger
+from antnas.utils.threadpool import *
 
 
 class ArchitectureModelProblem(Problem):
@@ -64,8 +65,9 @@ class ArchitectureModelProblem(Problem):
               self.max_objectives[0] = individual.objectives[0]
 
       # caculate batch f2 values
+      f2_value_list = self.__batch_f2(batch_individuals)
       for index, individual in enumerate(batch_individuals):
-          individual.objectives[1] = self.__f2(individual)
+          individual.objectives[1] = f2_value_list[index]
 
           if self.min_objectives[1] is None or individual.objectives[1] < self.min_objectives[1]:
               self.min_objectives[1] = individual.objectives[1]
@@ -121,7 +123,10 @@ class ArchitectureModelProblem(Problem):
       AccuracyEvaluator.stop()
       batch_accuracy = []
       for arc_index in range(len(arc_list)):
-          batch_accuracy.append(1.0 - accuracy_evaluators[arc_index].accuracy())
+          accuracy_v = accuracy_evaluators[arc_index].accuracy()
+          if type(accuracy_v) == list or type(accuracy_v) == tuple:
+              accuracy_v = accuracy_v[0]
+          batch_accuracy.append(1.0 - accuracy_v)
 
       del accuracy_evaluators
       return batch_accuracy
@@ -161,9 +166,47 @@ class ArchitectureModelProblem(Problem):
       return 1.0 - accuracy
 
   def __f2(self, arc):
-      loss = self.supernetwork_manager.supernetwork.arc_loss(arc.features, self.arc_loss[0], arc.devices)
-      loss = loss.numpy()[0]
+      loss = \
+          self.supernetwork_manager.supernetwork.arc_loss(arc.features,
+                                                          self.arc_loss[0],
+                                                          [d for d in range(NetworkBlock.device_num)])
+      loss = loss[0].numpy()[0]
       return loss
+
+  def __batch_f2(self, arc_list):
+      pruned_arc_list = []
+      for arc in arc_list:
+          arc = arc.features
+          sampling = torch.Tensor()
+          active = torch.Tensor()
+          for node_name in self.supernetwork_manager.supernetwork.traversal_order:
+              cur_node = self.supernetwork_manager.supernetwork.net.node[node_name]
+              sampling, active = \
+                  self.supernetwork_manager.supernetwork.path_recorder.add_sampling(node_name,
+                                                  torch.as_tensor([arc[cur_node['sampling_param']]]).reshape(
+                                                      [1, 1, 1, 1]),
+                                                  sampling,
+                                                  active,
+                                                  self.supernetwork_manager.supernetwork.blocks[cur_node['module']].structure_fixed)
+
+          sampled_arc, pruned_arc = \
+              self.supernetwork_manager.supernetwork.path_recorder.get_arch(self.supernetwork_manager.supernetwork.out_node,
+                                                                            sampling, active)
+
+          pruned_arc_list.append(pruned_arc)
+
+      result = []
+      for index, arc in enumerate(pruned_arc_list):
+          if self.arc_loss[0] == 'latency':
+              evaluator = self.supernetwork_manager.supernetwork.arch_cost_evaluators['latency']
+              ss = evaluator.get_costs([arc], [d for d in range(NetworkBlock.device_num)])
+              result.append(ss[0].item())
+          else:
+              evaluator = self.supernetwork_manager.supernetwork.arch_cost_evaluators[self.arc_loss[0]]
+              ss = evaluator.get_costs([arc])
+              result.append(ss[0].item())
+
+      return result
 
 
 class SuperNetwork(nn.Module):
@@ -476,6 +519,10 @@ class SuperNetwork(nn.Module):
     def arch_node_index(self):
         return self.path_recorder.node_index
 
+    @property
+    def arch_rev_node_index(self):
+        return self.path_recorder.rev_node_index
+
     def search_and_save(self, folder=None, name=None):
         pass
 
@@ -517,42 +564,6 @@ class SuperNetwork(nn.Module):
     def sample_arch(self, *args, **kwargs):
         # support Thread reentry
         raise NotImplementedError
-
-    def sample_device(self, *args, **kwargs):
-        if self._devices is not None and (len(self._devices) > 1):
-            devices = np.random.choice(self._devices, size=len(self.net.nodes))
-            devices = devices.tolist()
-
-            # 设备选择约束条件
-            # CELL 节点：自由选择设备
-            # A节点：设备选择保持与下继节点设备选择一致
-            # T,L节点：设备选择保持与上继节点设备选择一致
-            # I,O,F节点：设备保持不变（0）
-            for node_name in self.traversal_order:
-                cur_node = self.net.node[node_name]
-                if node_name.startswith('I') or node_name.startswith('O') or node_name.startswith('FIXED'):
-                    devices[cur_node['sampling_param']] = 0
-
-            for node_name in self.traversal_order:
-                cur_node = self.net.node[node_name]
-                if node_name.startswith('A'):
-                    # 寻找下继节点
-                    # 按照构建搜索空间的约定，A节点的后继节点必然是CELL节点或O节点
-                    for nn in self.net.successors(node_name):
-                        nn_node = self.net.node[nn]
-                        assert(nn.startswith('CELL') or nn.startswith('O'))
-                        devices[cur_node['sampling_param']] = devices[nn_node['sampling_param']]
-                        break
-                elif node_name.startswith('T'):
-                    # 寻找上继节点
-                    # 按照构建搜索空间的约定，T节点的上继节点必然CELL节点
-                    for pre in self.net.predecessors(node_name):
-                        assert(pre.startswith('CELL'))
-                        pre_node = self.net.node[pre]
-                        devices[cur_node['sampling_param']] = devices[pre_node['sampling_param']]
-                        break
-            return devices
-        return None
 
     def is_satisfied_constraint(self, feature):
         return True
@@ -610,11 +621,11 @@ class SuperNetwork(nn.Module):
 
         pruned_cost = 0.0
         if name == 'latency' and device is not None:
-            _, pruned_cost = \
-                self.arch_cost_evaluators[name].get_costs([sampled_arc, pruned_arc], device)
+            pruned_cost = \
+                self.arch_cost_evaluators[name].get_costs([pruned_arc], device)
         else:
-            _, pruned_cost = \
-                self.arch_cost_evaluators[name].get_costs([sampled_arc, pruned_arc])
+            pruned_cost = \
+                self.arch_cost_evaluators[name].get_costs([pruned_arc])
 
         return pruned_cost
 
@@ -743,7 +754,7 @@ class SuperNetwork(nn.Module):
             individual = evolution.problem.generateIndividual()
             individual.features = self.sample_arch()
             # individual.features = [1,2,3,4,1,1,1]
-            individual.devices = self.sample_device()
+            # individual.devices = self.sample_device()
             # individual.devices = [0,1,1,0,0,0,0]
             population.population.append(individual)
         evolution.problem.calculateBatchObjectives(population.population)
@@ -791,9 +802,6 @@ class SuperNetwork(nn.Module):
             for node in self.traversal_order:
                 node_sampling_val = torch.squeeze(pruned_arch[self.path_recorder.node_index[node]]).item()
                 self.net.node[node]['sampled'] = int(node_sampling_val)
-
-                if individual.devices is not None:
-                    self.net.node[node]['device'] = int(individual.devices[self.path_recorder.node_index[node]])
 
             # 3.3.step get architecture parameter number
             parameter_num = 0

@@ -73,10 +73,17 @@ class NetworkBlock(nn.Module):
             return False
 
     @staticmethod
-    def proximate_latency(op_name, profile, device='cpu'):
+    def proximate_latency(op_name, profile, device='cpu', mode='soft'):
         if op_name in NetworkBlock.lookup_table[device]['op']:
             if profile in NetworkBlock.lookup_table[device]['op'][op_name]['latency']:
                 return NetworkBlock.lookup_table[device]['op'][op_name]['latency'][profile]
+            else:
+                if mode == 'soft':
+                    # 采用近似方式获取
+                    input_s,input_c,output_s,output_c = profile.split('x')
+                    soft_profile = '%dx%dx%dx%d'%((int)(output_s), (int)(input_c),(int)(output_s),(int)(output_c))
+                    if soft_profile in NetworkBlock.lookup_table[device]['op'][op_name]['latency']:
+                        return NetworkBlock.lookup_table[device]['op'][op_name]['latency'][soft_profile]
 
         print('(%s - %s) not in latency lookup table'%(op_name, profile))
         return 0.0
@@ -351,6 +358,8 @@ class ConvBn(NetworkBlock):
                                                                      int(after_h),
                                                                      self.conv.out_channels),
                                                     'cpu')
+
+
         latency_cost = [0] + [op_latency] + [0] * (NetworkBlock.state_num - 2)
 
         if NetworkBlock.device_num > 1:

@@ -36,7 +36,7 @@ class ClassificationAccuracyEvaluator(AccuracyEvaluator):
             res = []
             for index, k in enumerate(self.topk):
                 correct_k = correct[:k].view(-1).float().sum(0)
-                res.append(correct_k.mul_(100.0 / batch_size))
+                res.append(correct_k.mul_(1.0 / batch_size))
 
                 self.accuracy_sum[index] += res[index] * batch_size
                 self.accuracy_count[index] += batch_size

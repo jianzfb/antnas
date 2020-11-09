@@ -72,7 +72,7 @@ class Drawer(object):
         nodes_for_device_0 = []
         nodes_for_device_1 = []
         nodes_for_others = []
-        if 'device' in graph.nodes(nodes[0]):
+        if 'device' in graph.nodes[nodes[0]]:
             if nodefilter:
                 nodes_for_device_0 = [node for node in graph.nodes() if
                                       nodefilter(node) and graph.nodes[node]['device'] == 0]
@@ -87,7 +87,7 @@ class Drawer(object):
         nodes_value_for_device_0 = []
         nodes_value_for_device_1 = []
         nodes_value_for_others = []
-        if 'device' in graph.nodes(nodes[0]):
+        if 'device' in graph.nodes[nodes[0]]:
             if samplinger:
                 nodes_value_for_device_0 = [samplinger(node) for node in graph.nodes() if
                                             nodefilter(node) and graph.nodes[node]['device'] == 0]
