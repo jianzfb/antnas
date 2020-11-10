@@ -58,30 +58,6 @@ class ImageNetOutLayer(NetworkBlock):
         return x
 
 
-# class ImageNetOutLayer(NetworkBlock):
-#     n_layers = 1
-#     n_comp_steps = 1
-#
-#     def __init__(self, in_chan):
-#         super(ImageNetOutLayer, self).__init__()
-#         self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
-#         self.classifier = nn.Linear(320, 1000)
-#
-#         self.params = {
-#             'module_list': ['ImageNetOutLayer'],
-#             'name_list': ['ImageNetOutLayer'],
-#             'ImageNetOutLayer': {'in_chan': in_chan},
-#             'out': 'outname',
-#             'in_chan': in_chan,
-#         }
-#
-#     def forward(self, x, sampling=None):
-#         x = self.global_pool(x)
-#         x = x.view(x.shape[0], -1)
-#         x = self.classifier(x)
-#         return x
-#
-
 @antnas_argment
 def main(*args, **kwargs):
     if torch.cuda.is_available():
@@ -169,11 +145,13 @@ def main(*args, **kwargs):
         logger.warning('Running *WITHOUT* cuda')
 
     # training and searching iterately
+    # 只针对迭代搜索模式下使用
     if kwargs['warmup'] > 0:
         for warmup_epoch in range(kwargs['warmup']):
             for i, (inputs, labels) in enumerate(tqdm(train_loader, desc='Train', ascii=True)):
                 # adjust learning rate
-                warmup_lr = nas_manager.adjust_lr(kwargs, warmup_epoch, i, len(train_loader), logger)
+                warmup_lr = \
+                    nas_manager.adjust_lr(kwargs, warmup_epoch, i, len(train_loader), logger)
                 xp.train.learning_rate.update(warmup_lr)
 
                 # set model status (train)
@@ -181,9 +159,11 @@ def main(*args, **kwargs):
                 y = labels
 
                 # train and return predictions, loss, correct
+                loss, _, _, _ = \
+                    nas_manager.train(x, y, epoch=warmup_epoch)
+
+                # reset grad zero
                 nas_manager.optimizer.zero_grad()
-                loss, model_accuracy, model_sampled_cost, model_pruned_cost = \
-                    nas_manager.train(x, y, epoch=warmup_epoch, warmup=True)
 
                 # update model parameter
                 loss.backward()
@@ -211,9 +191,6 @@ def main(*args, **kwargs):
                 # set model status (train)
                 x = inputs
                 y = labels
-
-                # train and return predictions, loss, correct
-                nas_manager.optimizer.zero_grad()
 
                 loss, _, a, b = \
                     nas_manager.train(x, y, epoch=epoch, index=index)
@@ -252,11 +229,16 @@ def main(*args, **kwargs):
                 xp.train.classif_loss.update(loss.item())
                 logging.info('loss %f'%xp.train.classif_loss.value)
 
+                # train and return predictions, loss, correct
+                nas_manager.optimizer.zero_grad()
+
                 # update model parameter
                 loss.backward()
 
                 # update parameter
                 nas_manager.optimizer.step()
+
+                mlogger.update()
 
             # eval process
             if epoch % 1 == 0:

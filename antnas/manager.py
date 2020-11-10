@@ -14,6 +14,7 @@ import math
 import queue
 import threading
 from antnas.utils.adjust import *
+from antnas.component.AccuracyEvaluator import *
 
 
 class Manager(object):
@@ -88,9 +89,9 @@ class Manager(object):
         if state_dict_path is not None:
             self._model.load_state_dict(torch.load(state_dict_path, map_location='cpu'))
 
-    def train(self, x, y, epoch=None, warmup=False, index=None):
-        if not self.parallel.training:
-            self.parallel.train()
+    def train(self, x, y, epoch=None, index=None):
+        # 设置标记
+        self.parallel.train()
         
         # sampling architecture
         if self.arctecture is None:
@@ -108,7 +109,7 @@ class Manager(object):
         
         # 1.step forward model
         loss, _, a, b = \
-            self.parallel(x, y, self.arctecture, epoch=epoch, warmup=warmup)
+            self.parallel(x, y, self.arctecture, epoch=epoch)
 
         # 2.step get last sampling
         if loss is not None:
@@ -117,9 +118,8 @@ class Manager(object):
         return loss, None, a, b
 
     def eval(self, x, y, loader, name=''):
-        # 使用单卡计算
-        if self.parallel.training:
-            self.parallel.eval()
+        # 设置标记
+        self.parallel.eval()
 
         # sampling architecture
         if self.arctecture is None:
@@ -153,6 +153,9 @@ class Manager(object):
         # 获得模型精度
         AccuracyEvaluator.stop()
         accuracy = accuracy_evaluator.accuracy()
+        if type(accuracy) == list or type(accuracy) == tuple:
+            accuracy = accuracy[0]
+
         return accuracy
 
     @property
