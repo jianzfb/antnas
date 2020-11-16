@@ -43,8 +43,8 @@ class PrefetchedWrapper(object):
         if cuda_is_available:
             stream = torch.cuda.Stream()
             first = True
-            mean = torch.tensor([0.485, 0.456, 0.406]).cuda().view(1,3,1,1)
-            std = torch.tensor([0.229, 0.224, 0.225]).cuda().view(1,3,1,1)
+            mean = torch.tensor([0.485, 0.456, 0.406]).cuda().view(1, 3, 1, 1)
+            std = torch.tensor([0.229, 0.224, 0.225]).cuda().view(1, 3, 1, 1)
 
             input = None
             target = None
@@ -225,7 +225,6 @@ def get_ImageNetV2(path, *args):
     train_dst = ImageNetV2Data(root=path,
                                image_set='train',
                                transform=transforms.Compose([
-                                transforms.Scale(256),
                                 transforms.RandomSizedCrop(224),
                                 transforms.RandomHorizontalFlip(),
                                 transforms.ToTensor()
@@ -413,13 +412,15 @@ def get_data(ds_name, batch_size, path, kwargs=None):
     logger.info("N train : %d" % len(train_set))
     logger.info("N test : %d" % len(test_set))
 
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,
-                              num_workers=1, drop_last=True) if train_set is not None else None
-    test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False,
-                             num_workers=1) if test_set is not None else None
+    train_loader = \
+        DataLoader(train_set, batch_size=batch_size, shuffle=True,
+                              num_workers=16, drop_last=True) if train_set is not None else None
+    test_loader = \
+        DataLoader(test_set, batch_size=batch_size, shuffle=False,
+                             num_workers=8) if test_set is not None else None
 
-    # train_loader = PrefetchedWrapper(train_loader)
-    # test_loader = PrefetchedWrapper(test_loader)
+    train_loader = PrefetchedWrapper(train_loader)
+    test_loader = PrefetchedWrapper(test_loader)
 
     data_properties = {
         'img_dim': img_dim,

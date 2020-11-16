@@ -270,15 +270,20 @@ class PKAsynImageNetSN(UniformSamplingSuperNetwork):
         # set graph
         self.set_graph(self.graph, in_name, out_name)
 
+        # 损失函数
+        self._criterion = nn.CrossEntropyLoss()
+
         # 保存搜索空间图
         a = NASDrawer()
         a.draw(self.graph, filename='./searchspace.svg')
 
-    def loss(self, predictions, labels):
-        return self._loss(predictions, labels)
+    @property
+    def criterion(self):
+        return self._criterion
 
+    @property
     def accuracy_evaluator(self):
-        return ClassificationAccuracyEvaluator()
+        return ClassificationAccuracyEvaluator
 
     def hierarchical(self):
         return self.sbca.hierarchical

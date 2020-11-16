@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-python -u $1 -exp-project dual -exp-name v1 -arch PKAsynImageNetSN -bs 384 -epochs 0 -evo_epochs 50 -dset ImageNetV2 -path ./portrait_dataset/ -model_path=./supernetwork/supernetwork_state_0.supernet.model -population_size 50 -cuda 0 -lr_decay cos -optim SGD
+python -u imagenet_train_and_search.py -exp-project dual -exp-name v2 -arch PKAsynImageNetSN -bs 384 -epochs 150 -evo_epochs 0 -dset ImageNetV2 -path ./portrait_dataset/ -population_size 50 -cuda 0,1,2,3,4,5,6,7 -lr_decay cos -optim SGD

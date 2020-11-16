@@ -159,8 +159,9 @@ def main(*args, **kwargs):
                 y = labels
 
                 # train and return predictions, loss, correct
-                loss, _, _, _ = \
+                _, model_out, _, _ = \
                     nas_manager.train(x, y, epoch=warmup_epoch)
+                loss = nas_manager.criterion(model_out, y)
 
                 # reset grad zero
                 nas_manager.optimizer.zero_grad()
@@ -187,13 +188,14 @@ def main(*args, **kwargs):
                 # adjust learning rate
                 lr = nas_manager.adjust_lr(kwargs, epoch, i, len(train_loader), ['path'])
                 xp.train.learning_rate.update(lr)
-                
+
                 # set model status (train)
                 x = inputs
                 y = labels
 
-                loss, _, a, b = \
+                _, model_out, a, b = \
                     nas_manager.train(x, y, epoch=epoch, index=index)
+                loss = nas_manager.criterion(model_out, y)
 
                 # train anchor arch network
                 if nas_manager.supernetwork.anchors is not None:
@@ -209,14 +211,14 @@ def main(*args, **kwargs):
                         sample_index_in_batch = np.where(b == anchor_index)[0]
                         if sample_index_in_batch.size == 0:
                             continue
-                        
+
                         anchor_consistent_loss = 0.0
                         for k, v in a.items():
                             anchor_node_output = nas_manager.supernetwork.anchors.output(anchor_index, k)
 
                             sample_a_in_batch = v[sample_index_in_batch, :, :, :]
                             sample_anchor_node_output_in_batch = anchor_node_output[sample_index_in_batch, :, :, :]
-                            
+
                             anchor_consistent_loss += torch.mean((sample_a_in_batch-sample_anchor_node_output_in_batch)**2)
 
                         anchor_consistent_loss /= len(a)

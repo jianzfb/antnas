@@ -34,6 +34,8 @@ class Manager(object):
         self.arctecture_queue = queue.Queue(128)
         self.arctecture_sampling_thread_list = None
         self.arctecture = None
+        self._criterion = None
+        self._accuracy_evaluator = None
 
     def initialize_optimizer(self):
         if self._optimizer is not None:
@@ -89,6 +91,9 @@ class Manager(object):
         if state_dict_path is not None:
             self._model.load_state_dict(torch.load(state_dict_path, map_location='cpu'))
 
+        self._criterion = self._model.criterion
+        self._accuracy_evaluator = self._model.accuracy_evaluator
+
     def train(self, x, y, epoch=None, index=None):
         # 设置标记
         self.parallel.train()
@@ -108,14 +113,10 @@ class Manager(object):
             self.arctecture.resize_(1, len(sampling_arc[0])).copy_(torch.as_tensor(sampling_arc))
         
         # 1.step forward model
-        loss, _, a, b = \
+        _, model_out, a, b = \
             self.parallel(x, y, self.arctecture, epoch=epoch)
 
-        # 2.step get last sampling
-        if loss is not None:
-            loss = loss.mean()
-
-        return loss, None, a, b
+        return None, model_out, a, b
 
     def eval(self, x, y, loader, name=''):
         # 设置标记
@@ -138,7 +139,7 @@ class Manager(object):
 
         # 跑测试集，获得评估精度
         AccuracyEvaluator.launch_thread_pool(1)
-        accuracy_evaluator = self.supernetwork.accuracy_evaluator()
+        accuracy_evaluator = self.accuracy_evaluator()
         for images, labels in tqdm(loader, desc=name, ascii=True):
             x.resize_(images.size()).copy_(images)
             y.resize_(labels.size()).copy_(labels)
@@ -169,6 +170,14 @@ class Manager(object):
     @property
     def supernetwork(self):
         return self._supernetwork
+
+    @property
+    def criterion(self):
+        return self._criterion
+
+    @property
+    def accuracy_evaluator(self):
+        return self._accuracy_evaluator
 
     def adjust_lr(self, args, epoch, iteration, num_iter, except_groups=None):
         lr = adjust_lr(args, self.optimizer, epoch, iteration, num_iter, except_groups)

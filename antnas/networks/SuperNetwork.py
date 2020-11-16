@@ -103,7 +103,7 @@ class ArchitectureModelProblem(Problem):
 
       # 批量统计推荐网络结构精度
       AccuracyEvaluator.launch_thread_pool(5)
-      accuracy_evaluators = [self.supernetwork_manager.supernetwork.accuracy_evaluator() for _ in range(len(arc_list))]
+      accuracy_evaluators = [self.supernetwork_manager.accuracy_evaluator() for _ in range(len(arc_list))]
       for images, labels in tqdm(self.data_loader, desc='Test', ascii=True):
           x.resize_(images.size()).copy_(images)
           y.resize_(labels.size()).copy_(labels)
@@ -429,18 +429,6 @@ class SuperNetwork(nn.Module):
         return input
 
     def arch_optimize(self, *args, **kwargs):
-        raise NotImplementedError
-
-    '''
-        网络损失函数
-    '''
-    def loss(self, predictions, labels):
-        raise NotImplementedError
-
-    '''
-        精度计算评估对象
-    '''
-    def accuracy_evaluator(self):
         raise NotImplementedError
 
     @property

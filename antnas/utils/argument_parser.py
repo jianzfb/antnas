@@ -31,7 +31,7 @@ def antnas_argment(func):
 
     parser.add_argument('-dset', default='PLACEHOLDER', type=str, help='Dataset')
     parser.add_argument('-bs', action='store', default=4, type=int, help='Size of each batch')
-    parser.add_argument('-epochs', action='store', default=0, type=int,
+    parser.add_argument('-epochs', action='store', default=1, type=int,
                         help='Number of training epochs')
     parser.add_argument('-evo_epochs', action='store', default=1, type=int,
                         help='Number of architecture searching epochs')
