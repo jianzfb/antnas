@@ -160,7 +160,7 @@ def main(*args, **kwargs):
             mlogger.update()
 
         # test process on test dataset
-        if (epoch + 1) % 5 == 0:
+        if epoch % 1 == 0:
             logger.info('\nEvaluation')
 
             # test process
@@ -195,6 +195,7 @@ def main(*args, **kwargs):
                 path = os.path.join("./supernetwork", "check")
                 torch.save(model.state_dict(), '%s.supernet.model' % path)
                 best_test_accuracy = test_accuracy_top_1
+                print('best accuracy %f'%best_test_accuracy)
 
 
 if __name__ == '__main__':
