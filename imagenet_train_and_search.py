@@ -119,7 +119,7 @@ def main(*args, **kwargs):
     # initialize supernetwork
     logging.info('initialize supernetwork basic info')
     nas_manager.supernetwork.init(shape=(2, data_properties['in_channels'], data_properties['img_dim'], data_properties['img_dim']),
-                                  arc_loss="latency",
+                                  arc_loss=kwargs['cost_evaluation'][0],
                                   data_loader=test_loader,
                                   supernetwork_manager=nas_manager)
 
