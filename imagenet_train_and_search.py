@@ -75,10 +75,16 @@ def main(*args, **kwargs):
     # 创建NAS模型
     nas_manager = Manager(kwargs, data_properties, out_layer=ImageNetOutLayer(320))
 
+
     # pk mobilenetv2
     nas_manager.build(blocks_per_stage=[1, 1, 1, 2, 2],
                       cells_per_block=[[2], [2], [3], [4, 4], [3, 3]],
                       channels_per_block=[[16], [24], [32], [64, 96], [160, 320]])
+
+    # # pk mobilenetv2
+    # nas_manager.build(blocks_per_stage=[1, 1, 2, 2, 2],
+    #                   cells_per_block=[[2], [2], [2, 2], [3, 3], [2, 2]],
+    #                   channels_per_block=[[8], [12], [24, 32], [64, 96], [112, 160]])
 
     # 构建结构Anchor
     anchors = None

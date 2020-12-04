@@ -179,6 +179,7 @@ class ArchitectureModelProblem(Problem):
           arc = arc.features
           sampling = torch.Tensor()
           active = torch.Tensor()
+
           for node_name in self.supernetwork_manager.supernetwork.traversal_order:
               cur_node = self.supernetwork_manager.supernetwork.net.node[node_name]
               sampling, active = \

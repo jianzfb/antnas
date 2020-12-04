@@ -9,8 +9,28 @@ from __future__ import print_function
 
 import torch.nn as nn
 import math
+import ununiformpool
+import torch
 
 __all__ = ['mobilenetv2']
+
+
+class UniformPoolFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, data, mask):
+        data_tensor = torch.tensor(data)
+        mask_tensor = torch.tensor(mask)
+        outputlist = ununiformpool.forward(data_tensor, mask_tensor)
+        output = outputlist[0]
+        pooling_x_region = outputlist[1]
+        pooling_y_region = outputlist[2]
+        ctx.save_for_backward(pooling_x_region, pooling_y_region)
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        output = ununiformpool.backward(grad_output, *ctx.saved_variables)[0]
+        return output, None
 
 
 def _make_divisible(v, divisor, min_value=None):
@@ -50,12 +70,15 @@ def conv_1x1_bn(inp, oup):
 
 
 class InvertedResidual(nn.Module):
-    def __init__(self, inp, oup, stride, expand_ratio):
+    def __init__(self, inp, oup, stride, expand_ratio, using_ununiformpool=False):
         super(InvertedResidual, self).__init__()
         assert stride in [1, 2]
+        self.using_ununiformpool = using_ununiformpool
+        self.stride = stride
 
         hidden_dim = round(inp * expand_ratio)
         self.identity = stride == 1 and inp == oup
+        self.conv = None
 
         if expand_ratio == 1:
             self.conv = nn.Sequential(
@@ -68,25 +91,72 @@ class InvertedResidual(nn.Module):
                 nn.BatchNorm2d(oup),
             )
         else:
-            self.conv = nn.Sequential(
+            if not self.using_ununiformpool:
+                self.conv = nn.Sequential(
+                    # pw
+                    nn.Conv2d(inp, hidden_dim, 1, 1, 0, bias=False),
+                    nn.BatchNorm2d(hidden_dim),
+                    nn.ReLU6(inplace=True),
+                    # dw
+                    nn.Conv2d(hidden_dim, hidden_dim, 3, stride, 1, groups=hidden_dim, bias=False),
+                    nn.BatchNorm2d(hidden_dim),
+                    nn.ReLU6(inplace=True),
+                    # pw-linear
+                    nn.Conv2d(hidden_dim, oup, 1, 1, 0, bias=False),
+                    nn.BatchNorm2d(oup),
+                )
+            else:
+                self.conv = []
                 # pw
-                nn.Conv2d(inp, hidden_dim, 1, 1, 0, bias=False),
-                nn.BatchNorm2d(hidden_dim),
-                nn.ReLU6(inplace=True),
+                self.conv.append(nn.Conv2d(inp, hidden_dim, 1, 1, 0, bias=False))
+                self.conv.append(nn.BatchNorm2d(hidden_dim))
+                self.conv.append(nn.ReLU6(inplace=True))
                 # dw
-                nn.Conv2d(hidden_dim, hidden_dim, 3, stride, 1, groups=hidden_dim, bias=False),
-                nn.BatchNorm2d(hidden_dim),
-                nn.ReLU6(inplace=True),
+                self.conv.append(nn.Conv2d(hidden_dim, hidden_dim, 3, 1, 1, groups=hidden_dim, bias=False))
+                self.conv.append(nn.BatchNorm2d(hidden_dim))
+                self.conv.append(nn.ReLU6(inplace=True))
                 # pw-linear
-                nn.Conv2d(hidden_dim, oup, 1, 1, 0, bias=False),
-                nn.BatchNorm2d(oup),
-            )
+                self.conv.append(nn.Conv2d(hidden_dim, oup, 1, 1, 0, bias=False))
+                self.conv.append(nn.BatchNorm2d(oup))
+
+                self.se_global_pool = nn.AdaptiveAvgPool2d((6, 6))
+                self.se_conv_layer = nn.Conv2d(hidden_dim,
+                                                 1,
+                                                 kernel_size=1,
+                                                 bias=True,
+                                                 stride=1,
+                                                 padding=0)
 
     def forward(self, x):
-        if self.identity:
-            return x + self.conv(x)
+        if self.using_ununiformpool:
+            y = self.conv[0](x)
+            y = self.conv[1](y)
+            y = self.conv[2](y)
+
+            y_se = self.se_global_pool(y)
+            y_se = self.se_conv_layer(y_se)
+            y_se = torch.sigmoid(y_se)
+            y_se = torch.nn.functional.upsample_bilinear(y_se, (y.shape[2], y.shape[3]))
+            y = torch.mul(y, y_se)
+
+            y_cpu = UniformPoolFunction.apply(y.cpu(), y_se.cpu())
+            y = y_cpu.to(x.device)
+            y = self.conv[3](y)
+            y = self.conv[4](y)
+            y = self.conv[5](y)
+
+            y = self.conv[6](y)
+            y = self.conv[7](y)
+
+            if self.identity:
+                return x + y
+            else:
+                return y
         else:
-            return self.conv(x)
+            if self.identity:
+                return x + self.conv(x)
+            else:
+                return self.conv(x)
 
 
 class MobileNetV2(nn.Module):
@@ -109,11 +179,18 @@ class MobileNetV2(nn.Module):
         layers = [conv_3x3_bn(3, input_channel, 2)]
         # building inverted residual blocks
         block = InvertedResidual
+        count = 0
         for t, c, n, s in self.cfgs:
             output_channel = _make_divisible(c * width_mult, 4 if width_mult == 0.1 else 8)
             for i in range(n):
-                layers.append(block(input_channel, output_channel, s if i == 0 else 1, t))
-                input_channel = output_channel
+                if i == 0 and s == 2 and count < 2:
+                    layers.append(block(input_channel, output_channel, s if i == 0 else 1, t, True))
+                    input_channel = output_channel
+                else:
+                    layers.append(block(input_channel, output_channel, s if i == 0 else 1, t))
+                    input_channel = output_channel
+            count += 1
+
         self.features = nn.Sequential(*layers)
         # building last several layers
         output_channel = _make_divisible(1280 * width_mult, 4 if width_mult == 0.1 else 8) if width_mult > 1.0 else 1280

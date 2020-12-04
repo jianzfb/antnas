@@ -179,58 +179,66 @@ void avail(TaskProcessor* tasks, int size, double computationCost, double* earli
         *earliestTime = 0;
         return;
     }
+
     qsort((void*) tasks, size, sizeof(TaskProcessor), comparator);
-    int curr = 0;
-    int i;
-    for(i = 1; i < size; ++i) {
-        if(tasks[i].AST - tasks[curr].AFT >= computationCost) {
-            *earliestTime = tasks[curr].AFT;
-            return;
-        } else {
-            curr++;
-            tasks[curr] = tasks[i];
-        }
-    }
-    *earliestTime = tasks[curr].AFT;
-    //*earliestTime = tasks[size-1].AFT;
+
+//    int i;
+//    for(i = 1; i < size; ++i) {
+//        if(tasks[i].AST - tasks[i-1].AFT >= computationCost) {
+//            printf("tasks i %d AST %f AFT %f (upper task %d)\n",tasks[i].process, (float)(tasks[i].AST), (float)(tasks[i-1].AFT),tasks[i-1].process);
+//            *earliestTime = tasks[i-1].AFT;
+//            return;
+//        }
+//    }
+    *earliestTime = tasks[size-1].AFT;
     return;
 }
 
 // Function to calcuate the EST
 void calculateEST(int task, int processor, double* EST) {
+    // 第一步：获得在processor处理单元中，最早可用时间槽
     double earliestTime;
     if(processorSchedule[processor]->size == 0) {
         earliestTime = 0.0;
     } else {
         int i, add = 0;
         for(i = 0; i < numOftasks; ++i) {
+            // i是task的上继节点
+            // AFTs[i]是i的实际完成时间
+            // proc[i]是i的实际处理位置
             if(dag[i][task] != -1 && AFTs[i] != -1 && proc[i] != processor) {
-                add = dag[i][task];
+                if(add < dag[i][task]){
+                    add = dag[i][task];
+                }
             }
         }
+
+        // 获得在processor上的允许的最早开始时间
         avail(processorSchedule[processor]->tasks,
               processorSchedule[processor]->size,
               computationCost[task][processor] + add, &earliestTime);
     }
-    //printf("Earliest Available %g\n", earliestTime);
+
+    // 第二步：获得任务在processor处理单元中，最早开始时间
     double max = DBL_MIN;
     int i;
     for(i = 0; i < numOftasks; ++i) {
         if(dag[i][task] != -1) {
             if(proc[i] == processor) {
+                // 任务i和任务task在同一个处理单元中
                 if(max < AFTs[i]) {
                     max = AFTs[i];
                 }
             } else {
+                // 任务i和任务task在不同处理单元中
                 if(max < AFTs[i] + dag[i][task]) {
                     max = AFTs[i] + dag[i][task];
                 }
             }
-
         }
     }
+
     *EST = maxDouble(earliestTime, max);
-    //printf("EST on %d is %g\n\n", processor+1, *EST);
     return;
 }
 
@@ -239,7 +247,8 @@ void heft() {
     int i;
     for(i = 0; i < numOftasks; ++i) {
         int task = sortedTasks[i];
-        //printf("Schdeuling %d\n", task+1);
+//        printf("HEFT Schdeuling %d\n", task+1);
+
         if(isEntryTask(task)) {
             double min = DBL_MAX;
             int processor;
@@ -264,14 +273,19 @@ void heft() {
             int processor;
             int j;
             for(j = 0; j < numOfProcessors; ++j) {
+                // 获得任务在处理器j上的最好允许开始时间
                 double EST;
                 calculateEST(task, j, &EST);
+
+                // 获得最佳处理器选择
                 if(EST + computationCost[task][j] < minEFT) {
                     minEFT = EST + computationCost[task][j];
                     selectedEST = EST;
                     processor = j;
                 }
             }
+
+            // 分配任务task到指定处理器 processor
             processorSchedule[processor]->tasks
                             = (TaskProcessor*)realloc(processorSchedule[processor]->tasks,
                                                       sizeof(TaskProcessor)*((processorSchedule[processor]->size) + 1));
@@ -342,10 +356,14 @@ void freeSpace() {
 
 
 double get(int task_num, int processor_num, double* computation_cost, double* communication_cost){
+    // 第一步：准备相关空间
     prepare(task_num, processor_num, computation_cost, communication_cost);
+    // 第二步：计算任务排序
     calculateAndDisplayRanks();
+    // 第三步：调度任务
     heft();
 
+    // 第四步：获得调度总时间
     int i;
     double makespan = DBL_MIN;
     for(i = 0; i < numOftasks; ++i) {
@@ -354,6 +372,7 @@ double get(int task_num, int processor_num, double* computation_cost, double* co
         }
     }
 
+    // 第五部：显示调度细节
     displaySchedule();
     freeSpace();
     return makespan;

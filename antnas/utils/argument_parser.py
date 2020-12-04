@@ -31,7 +31,7 @@ def antnas_argment(func):
 
     parser.add_argument('-dset', default='PLACEHOLDER', type=str, help='Dataset')
     parser.add_argument('-bs', action='store', default=4, type=int, help='Size of each batch')
-    parser.add_argument('-epochs', action='store', default=1, type=int,
+    parser.add_argument('-epochs', action='store', default=0, type=int,
                         help='Number of training epochs')
     parser.add_argument('-evo_epochs', action='store', default=1, type=int,
                         help='Number of architecture searching epochs')
@@ -69,7 +69,7 @@ def antnas_argment(func):
     parser.add_argument('-cuda', action='store', default='', type=str,
                         help='Enables cuda and select device')
     parser.add_argument('-latency', action='store',
-                        default='/Users/zhangjian52/Downloads/latency.cpu.gpu.855.224.lookuptable.json', type=str,
+                        default='./supernetwork/latency.cpu.gpu.855.224.lookuptable.json', type=str,
                         help='latency lookup table')
 
     parser.add_argument('-static_proba', action='store', default=-1, type=restricted_float(0, 1),

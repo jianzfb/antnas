@@ -102,7 +102,7 @@ def main(*args, **kwargs):
     #                      output_layer_cls=ImageNetOutLayer,
     #                      accuracy_evaluator_cls=lambda: ClassificationAccuracyEvaluator(),
     #                      network_name='heterogeneous-nas')
-    model = FixedNetwork(architecture=kwargs['architecture'],
+    model = MNV2FixedNetwork(architecture=kwargs['architecture'],
                          output_layer_cls=ImageNetOutLayer,
                          accuracy_evaluator_cls=lambda: ClassificationAccuracyEvaluator(topk=(1,5)),
                          network_name='heterogeneous-nas-4')

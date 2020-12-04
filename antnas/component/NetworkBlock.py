@@ -53,9 +53,9 @@ class NetworkBlock(nn.Module):
 
     def get_latency(self, x):
         if NetworkBlock.device_num == 1:
-            return [0.0] * NetworkBlock.state_num
+            return [0.01] * NetworkBlock.state_num
         else:
-            return [[0.0] * NetworkBlock.state_num, [0.0] * NetworkBlock.state_num]
+            return [[0.01] * NetworkBlock.state_num, [0.01] * NetworkBlock.state_num]
 
     def get_param_num(self, x):
         return [0.0] * NetworkBlock.state_num
@@ -86,7 +86,7 @@ class NetworkBlock(nn.Module):
                         return NetworkBlock.lookup_table[device]['op'][op_name]['latency'][soft_profile]
 
         print('(%s - %s) not in latency lookup table'%(op_name, profile))
-        return 0.0
+        return 0.01
 
     @staticmethod
     def get_conv2d_flops(m, x_size=None, y_size=None):
@@ -229,9 +229,9 @@ class Zero(NetworkBlock):
 
     def get_latency(self, x):
         if NetworkBlock.device_num == 1:
-            return [0] * self.state_num
+            return [0.01] * self.state_num
         else:
-            return [[0] * self.state_num, [0] * self.state_num]
+            return [[0.01] * self.state_num, [0.01] * self.state_num]
 
 
 class Skip(NetworkBlock):
@@ -283,9 +283,9 @@ class Skip(NetworkBlock):
 
     def get_latency(self, x):
         if NetworkBlock.device_num == 1:
-            return [0] * NetworkBlock.state_num
+            return [0.01] * NetworkBlock.state_num
         else:
-            return [[0] * self.state_num, [0] * self.state_num]
+            return [[0.01] * self.state_num, [0.01] * self.state_num]
 
 
 class ConvBn(NetworkBlock):
@@ -352,24 +352,19 @@ class ConvBn(NetworkBlock):
 
         input_h, _ = x.shape[2:]
         after_h = input_h // self.conv.stride[0]
-        op_latency = NetworkBlock.proximate_latency(op_name,
-                                                    '%dx%dx%dx%d' % (int(input_h),
-                                                                     self.conv.in_channels,
-                                                                     int(after_h),
-                                                                     self.conv.out_channels),
-                                                    'cpu')
+        op_latency = \
+            NetworkBlock.proximate_latency(op_name,
+                                           '%dx%dx%dx%d' % (int(input_h),self.conv.in_channels,int(after_h), self.conv.out_channels),
+                                           'cpu')
 
-
-        latency_cost = [0] + [op_latency] + [0] * (NetworkBlock.state_num - 2)
+        latency_cost = [0.01] + [op_latency] + [0.01] * (NetworkBlock.state_num - 2)
 
         if NetworkBlock.device_num > 1:
-            op_latency = NetworkBlock.proximate_latency(op_name,
-                                                        '%dx%dx%dx%d' % (int(input_h),
-                                                                         self.conv.in_channels,
-                                                                         int(after_h),
-                                                                         self.conv.out_channels),
-                                                        'gpu')
-            latency_cost_gpu = [0] + [op_latency] + [0] * (NetworkBlock.state_num - 2)
+            op_latency =\
+                NetworkBlock.proximate_latency(op_name,
+                                               '%dx%dx%dx%d' % (int(input_h),self.conv.in_channels,int(after_h),self.conv.out_channels),
+                                               'gpu')
+            latency_cost_gpu = [0.01] + [op_latency] + [0.01] * (NetworkBlock.state_num - 2)
             return [latency_cost, latency_cost_gpu]
 
         return latency_cost
@@ -469,22 +464,18 @@ class SepConvBN(NetworkBlock):
 
         input_h, _ = x.shape[2:]
         after_h = input_h // self.depthwise_conv.stride[0]
-        op_latency = NetworkBlock.proximate_latency(op_name,
-                                                    '%dx%dx%dx%d' % (int(input_h),
-                                                                     self.depthwise_conv.in_channels,
-                                                                     int(after_h),
-                                                                     self.depthwise_conv.out_channels),
-                                                    'cpu')
-        latency_cost = [0] + [op_latency] + [0] * (NetworkBlock.state_num - 2)
+        op_latency = \
+            NetworkBlock.proximate_latency(op_name,
+                                           '%dx%dx%dx%d' % (int(input_h),self.depthwise_conv.in_channels,int(after_h),self.depthwise_conv.out_channels),
+                                           'cpu')
+        latency_cost = [0.01] + [op_latency] + [0.01] * (NetworkBlock.state_num - 2)
 
         if NetworkBlock.device_num > 1:
-            op_latency = NetworkBlock.proximate_latency(op_name,
-                                                        '%dx%dx%dx%d' % (int(input_h),
-                                                                         self.depthwise_conv.in_channels,
-                                                                         int(after_h),
-                                                                         self.depthwise_conv.out_channels),
-                                                        'gpu')
-            latency_cost_gpu = [0] + [op_latency] + [0] * (NetworkBlock.state_num - 2)
+            op_latency = \
+                NetworkBlock.proximate_latency(op_name,
+                                               '%dx%dx%dx%d' % (int(input_h),self.depthwise_conv.in_channels,int(after_h),self.depthwise_conv.out_channels),
+                                               'gpu')
+            latency_cost_gpu = [0.01] + [op_latency] + [0.01] * (NetworkBlock.state_num - 2)
             return [latency_cost, latency_cost_gpu]
 
         return latency_cost
@@ -551,16 +542,18 @@ class ResizedBlock(NetworkBlock):
 
         input_h, _ = x.shape[2:]
         after_h = (int)(self.scale_factor * input_h)
-        op_latency = NetworkBlock.proximate_latency(op_name,
-                                                    '%dx%d' % (int(input_h), int(after_h)),
-                                                    'cpu')
-        latency_cost = [0] + [op_latency] + [0] * (NetworkBlock.state_num - 2)
+        op_latency = \
+            NetworkBlock.proximate_latency(op_name,
+                                           '%dx%d' % (int(input_h), int(after_h)),
+                                           'cpu')
+        latency_cost = [0.01] + [op_latency] + [0.01] * (NetworkBlock.state_num - 2)
 
         if NetworkBlock.device_num > 1:
-            op_latency = NetworkBlock.proximate_latency(op_name,
-                                                        '%dx%d' % (int(input_h), int(after_h)),
-                                                        'gpu')
-            latency_cost_gpu = [0] + [op_latency] + [0] * (NetworkBlock.state_num - 2)
+            op_latency = \
+                NetworkBlock.proximate_latency(op_name,
+                                               '%dx%d' % (int(input_h), int(after_h)),
+                                               'gpu')
+            latency_cost_gpu = [0.01] + [op_latency] + [0.01] * (NetworkBlock.state_num - 2)
             return [latency_cost, latency_cost_gpu]
 
         return latency_cost
@@ -975,17 +968,18 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
 
         input_h, _ = x.shape[2:]
         after_h = input_h if not self.reduction else input_h // 2
-        irb_latency = NetworkBlock.proximate_latency(irb_name,
-                                                     "%dx%dx%dx%d"%(int(input_h), self.in_chan, int(after_h), self.out_chan),
-                                                     'cpu')
-        latency_cost = [0] + [irb_latency] + [0] * (NetworkBlock.state_num - 2)
+        irb_latency = \
+            NetworkBlock.proximate_latency(irb_name,
+                                           "%dx%dx%dx%d"%(int(input_h), self.in_chan, int(after_h), self.out_chan),
+                                           'cpu')
+        latency_cost = [0.01] + [irb_latency] + [0.01] * (NetworkBlock.state_num - 2)
 
         if NetworkBlock.device_num > 1:
-            irb_latency = NetworkBlock.proximate_latency(irb_name,
-                                                         "%dx%dx%dx%d" % (
-                                                         int(input_h), self.in_chan, int(after_h), self.out_chan),
-                                                         'gpu')
-            latency_cost_gpu = [0] + [irb_latency] + [0] * (NetworkBlock.state_num - 2)
+            irb_latency = \
+                NetworkBlock.proximate_latency(irb_name,
+                                               "%dx%dx%dx%d" % (int(input_h), self.in_chan, int(after_h), self.out_chan),
+                                               'gpu')
+            latency_cost_gpu = [0.01] + [irb_latency] + [0.01] * (NetworkBlock.state_num - 2)
             return [latency_cost, latency_cost_gpu]
 
         return latency_cost

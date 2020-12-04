@@ -64,14 +64,21 @@ class Arc(object):
     @offset.setter
     def offset(self, val):
         self._offset = val
-    
-    def arc_loss(self, shape, loss='latency', feature=None):
+
+    @property
+    def net(self):
+        return self.graph
+
+    def arc_loss(self, shape, loss='latency', feature=None, latency_lookup_table=None, devices=[]):
+        if len(devices) > 1:
+            NetworkBlock.device_num = len(devices)
+
         # 创建统计结构损失对象
         assert(loss in ['comp', 'latency', 'param'])
         if loss == 'comp':
             self.cost_evaluator = ComputationalCostEvaluator(model=self, main_cost=False)
         elif loss == 'latency':
-            self.cost_evaluator = LatencyCostEvaluator(model=self, main_cost=False)
+            self.cost_evaluator = LatencyCostEvaluator(model=self, main_cost=False, latency=latency_lookup_table)
         else:
             self.cost_evaluator = ParameterCostEvaluator(model=self, main_cost=False)
 
@@ -104,7 +111,8 @@ class Arc(object):
         sampled_arc, pruned_arc = \
             self.path_recorder.get_arch(self.out_node, sampling, active)
         sampled_cost, pruned_cost = \
-            self.cost_evaluator.get_costs([sampled_arc, pruned_arc])
+            self.cost_evaluator.get_costs([sampled_arc, pruned_arc],
+                                          device=None if len(devices) <= 1 else [i for i in range(len(devices))])
 
         return sampled_cost, pruned_cost
     

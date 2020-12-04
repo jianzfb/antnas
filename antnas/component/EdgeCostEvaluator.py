@@ -13,7 +13,7 @@ heft_dll.get.restype = ctypes.c_double
 
 
 class EdgeCostEvaluator(CostEvaluator):
-    base_transfer_time = 2.0
+    base_transfer_time = 1.0
 
     def get_cost(self, architectures, devices=None):
         # self.costs is N x state or N x state x device
@@ -43,7 +43,8 @@ class EdgeCostEvaluator(CostEvaluator):
                         EdgeCostEvaluator.base_transfer_time
 
                     if node.startswith('T'):
-                        if (int)(architectures[from_index, 0]) == 0:
+                        if (int)(architectures[from_index, 0]) == 0 or \
+                                type(self.model.blocks[self.model.net.node[node]['module']]) == Zero:
                             communication_cost[(int)(from_index * task_num + to_index)] = 0
 
             for node in self.model.traversal_order:

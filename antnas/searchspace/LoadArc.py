@@ -21,6 +21,7 @@ class LoadArc(Arc):
         assert(tail is not None)
         self.traversal_order = list(nx.topological_sort(self.graph))
         self.blocks = nn.ModuleList([None for _ in range(len(self.traversal_order))])
+
         for node_index, node_name in enumerate(self.traversal_order):
             if node_index == 0:
                 self.in_node = node_name
@@ -34,6 +35,7 @@ class LoadArc(Arc):
             sampled_module = None
             sampled_module_name = ''
             if len(module_list) == 1:
+                # 单模块，开关状态
                 if sampled_module_index == 1:
                     if node_index == len(self.traversal_order) - 1:
                         sampled_module = tail
@@ -44,13 +46,17 @@ class LoadArc(Arc):
                     self.blocks[cur_node['module']] = \
                         sampled_module(**cur_node['module_params'][sampled_module_name])
                 else:
-                    self.blocks[cur_node['module']] = Zero()
+                    sampled_module_name = cur_node['module_params']['name_list'][0]
+                    self.blocks[cur_node['module']] = Zero(**cur_node['module_params'][sampled_module_name])
+                    sampled_module_name = 'ZERO'
             else:
+                # 多模块，多选自选择
                 sampled_module = globals()[module_list[sampled_module_index]]
                 sampled_module_name = cur_node['module_params']['name_list'][sampled_module_index]
-
                 self.blocks[cur_node['module']] = \
                     sampled_module(**cur_node['module_params'][sampled_module_name])
+
+            print('build node %s with sampling %s op' % (node_name, sampled_module_name))
 
         return self.in_node, self.out_node
 
