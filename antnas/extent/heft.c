@@ -247,7 +247,7 @@ void heft() {
     int i;
     for(i = 0; i < numOftasks; ++i) {
         int task = sortedTasks[i];
-//        printf("HEFT Schdeuling %d\n", task+1);
+        // printf("HEFT Schdeuling %d\n", task+1);
 
         if(isEntryTask(task)) {
             double min = DBL_MAX;

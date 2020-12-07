@@ -918,10 +918,7 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
         return [0] + [params] + [0]*(NetworkBlock.state_num - 2)
 
     def get_flop_cost(self, x):
-        step_1_in_size = torch.Size([1, *x.shape[1:]])
-        step_1_out_size = [1, self.conv1.out_channels, x.shape[2], x.shape[3]]
-        step_1_out_size = torch.Size(step_1_out_size)
-
+        step_1_out_size = torch.Size([1, *x.shape[1:]])
         step_2_out_size = [1, self.dwconv2.out_channels, x.shape[2], x.shape[3]]
         if self.reduction:
             step_2_out_size[2] = step_2_out_size[2] // 2
@@ -935,6 +932,10 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
         flops_2 = 0.0
         flops_3 = 0.0
         if self.expansion != 1:
+            step_1_in_size = torch.Size([1, *x.shape[1:]])
+            step_1_out_size = [1, self.conv1.out_channels, x.shape[2], x.shape[3]]
+            step_1_out_size = torch.Size(step_1_out_size)
+
             flops_1 = self.get_conv2d_flops(self.conv1, step_1_in_size, step_1_out_size)
             flops_2 = self.get_bn_flops(self.bn1, step_1_out_size, step_1_out_size)
 
@@ -995,7 +996,7 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
             flops_8 +\
             flops_se
 
-        flop_cost = [0] + [total_flops] * (NetworkBlock.state_num - 2)
+        flop_cost = [0] + [total_flops] + [0]*(NetworkBlock.state_num - 2)
         return flop_cost
 
     def get_latency(self, x):

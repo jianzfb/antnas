@@ -6,17 +6,16 @@ from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
 from antnas.searchspace.LoadArc import *
+from sota.mobilenet_v3 import *
+from antnas.utils.misc import *
+import argparse
 
-def parse_latency():
-    pass
-
-
-def parse_flops():
-    pass
-
-
-def parse_params():
-    pass
+parser = argparse.ArgumentParser()
+parser.add_argument('--architecture', type=str, default='',
+                        help='input batch size for training (default: 64)')
+parser.add_argument('--cost_evaluation', default=['latency'], type=restricted_list('comp', 'latency', 'param'))
+parser.add_argument('--devices', default='0', type=str)
+parser.add_argument('--shape', default='1,3,224,224', type=str)
 
 
 class ImageNetOutLayer(NetworkBlock):
@@ -60,12 +59,25 @@ class ImageNetOutLayer(NetworkBlock):
 
 
 if __name__ == '__main__':
-    pk = LoadArc('/Users/zhangjian52/Downloads/44/accuray_0.5105_latency_7.31_params_16275984.architecture')
+    args = parser.parse_args()
+
+    # model path
+    architecture_path = args.architecture
+    cost_evaluation = args.cost_evaluation
+    devices = args.devices
+    shape = args.shape
+
+    # 加载模型
+    pk = LoadArc(architecture_path)
     pk.generate(tail=ImageNetOutLayer)
-    sampled_loss, pruned_loss = \
-        pk.arc_loss([1, 3, 224, 224],
-                    'latency',
-                    latency_lookup_table='./supernetwork/latency.cpu.gpu.855.224.lookuptable.json',
-                    devices=[0,1])
-    print(sampled_loss)
-    pass
+
+    # 计算代价
+    input_shape = [(int)(s) for s in shape.split(',')]
+    for ce in cost_evaluation:
+        sampled_loss, pruned_loss = \
+            pk.arc_loss(input_shape,
+                        ce,
+                        latency_lookup_table='./supernetwork/latency.cpu.gpu.855.224.lookuptable.json',
+                        devices=[] if ce != 'latency' else [(int)(m) for m in devices.split(',')])
+
+        print('%s - %f'%(ce, pruned_loss[0].item()))

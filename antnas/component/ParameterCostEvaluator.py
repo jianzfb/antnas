@@ -29,8 +29,6 @@ class ParameterCostEvaluator(EdgeCostEvaluator):
                 if (isinstance(input, tuple) or isinstance(input, list)) and len(input) == 1:
                     input = input[0]
 
-                print(node)
-                print(cur_node['sampling_param'])
                 # 获得输出
                 out = model.blocks[cur_node['module']](input)
                 # 获得代价

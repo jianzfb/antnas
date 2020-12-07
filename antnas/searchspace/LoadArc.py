@@ -15,6 +15,9 @@ from antnas.searchspace.Arc import *
 class LoadArc(Arc):
     def __init__(self, architecture, graph=None):
         self.graph = nx.read_gpickle(architecture)
+        # 保存搜索空间图
+        a = NASDrawer()
+        a.draw(self.graph, filename='./arc.svg')
         super(LoadArc, self).__init__(self.graph)
 
     def generate(self, head=None, tail=None):

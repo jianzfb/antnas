@@ -39,7 +39,7 @@ def mobilenetv3_large(head, tail, prefix):
     ]
 
     graph = nx.DiGraph()
-    pk = PKAutoArc(graph)
+    pk = PKAutoArc(graph, None)
     pk.generate(head, tail, modules)
     pk.save('./', '%s_mobilenetv3_large' % prefix)
 
