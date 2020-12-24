@@ -81,27 +81,27 @@ class Mutation(object):
                     block_i = np.random.randint(0, block_num)
                     explore_position = self.hierarchical[stage_i][block_i]
                     mutation_ratio = 1.0
-                    print('whole block %d mutation in hierarchical'%block_i)
+                    print('block %d(%d) mutation in hierarchical'%(block_i, len(explore_position)))
                 else:
                     # cell selecting in block
                     if np.random.random() < 0.7:
                         block_i = np.random.randint(0, block_num)
                         explore_position = self.hierarchical[stage_i][block_i]
-                        print('local cell mutation in block %d in hierarchical'%block_i)
+                        print('cell mutation in block %d(%d) in hierarchical'%(block_i, len(explore_position)))
                     else:
                         explore_position = kwargs['explore_position']
-                        print('random cell mutation')
+                        print('cell mutation(%d) in hierarchical'%len(explore_position))
 
             # 2.step mutation pos selection
             # mutation points number
             multi_points = self.multi_points if self.multi_points > 0 else int(mutation_ratio * len(explore_position))
             multi_points = min(multi_points, len(explore_position))
             if multi_points == 0:
-                print('no mutation pos')
+                print('individual %d no mutation'%f_index)
                 mutation_result.append((f + ([], [])))
             else:
                 is_ok = False
-                
+                check_count = 0
                 while not is_ok:
                     mutation_position = np.random.choice(explore_position, multi_points, replace=False)
                     mutation_position = mutation_position.flatten().tolist()
@@ -125,13 +125,20 @@ class Mutation(object):
                                 if s not in [0, 1]:
                                     s = 1
                         else:
-                            print("shouldnt mutation at this pos %d(%s)"%(mutation_p, node_name))
+                            print("error: shouldnt mutation at this pos %d(%s)"%(mutation_p, node_name))
 
                         mutation_state.append(int(s))
                         feature[mutation_p] = int(s)
                     
                     # 检查变异后基因是否满足约束条件
                     if not self.network.is_satisfied_constraint(feature):
+                        check_count += 1
+
+                        if check_count > 5:
+                            # 重新获取变异候选位置
+                            explore_position = kwargs['explore_position']
+                            print('reselect cell mutation(%d) in hierarchical' % len(explore_position))
+                            check_count = 0
                         continue
                     
                     is_ok = True

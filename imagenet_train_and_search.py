@@ -75,7 +75,6 @@ def main(*args, **kwargs):
     # 创建NAS模型
     nas_manager = Manager(kwargs, data_properties, out_layer=ImageNetOutLayer(320))
 
-
     # pk mobilenetv2
     nas_manager.build(blocks_per_stage=[1, 1, 1, 2, 2],
                       cells_per_block=[[2], [2], [3], [4, 4], [3, 3]],
@@ -118,12 +117,11 @@ def main(*args, **kwargs):
 
     # initialize supernetwork
     logging.info('initialize supernetwork basic info')
-    nas_manager.supernetwork.init(shape=(2, data_properties['in_channels'], data_properties['img_dim'], data_properties['img_dim']),
-                                  arc_loss=kwargs['cost_evaluation'][0],
-                                  data_loader=test_loader,
-                                  supernetwork_manager=nas_manager)
-
-    nas_manager.supernetwork.draw()
+    nas_manager.init(shape=(2, data_properties['in_channels'], data_properties['img_dim'], data_properties['img_dim']),
+                     arc_loss=kwargs['cost_evaluation'][0],
+                     data_loader=test_loader,
+                     supernetwork_manager=nas_manager,
+                     architecture=kwargs['architecture'])
 
     # initialize parameter
     logging.info('initialize supernetwork parameter')
@@ -153,11 +151,12 @@ def main(*args, **kwargs):
     # training and searching iterately
     # 只针对迭代搜索模式下使用
     if kwargs['warmup'] > 0:
+        logging.info("[warmup] training")
         for warmup_epoch in range(kwargs['warmup']):
             for i, (inputs, labels) in enumerate(tqdm(train_loader, desc='Train', ascii=True)):
                 # adjust learning rate
                 warmup_lr = \
-                    nas_manager.adjust_lr(kwargs, warmup_epoch, i, len(train_loader), logger)
+                    nas_manager.adjust_lr(kwargs, warmup_epoch, i, len(train_loader))
                 xp.train.learning_rate.update(warmup_lr)
 
                 # set model status (train)
@@ -178,11 +177,13 @@ def main(*args, **kwargs):
                 # update parameter
                 nas_manager.optimizer.step()
 
-    logging.info("training and searching")
-    nas_manager.supernetwork.search_init()
-    evo_epochs = kwargs['evo_epochs'] if kwargs['iterator_search'] else 1
+    logging.info("[search] training and searching")
+    nas_manager.supernetwork.search_init(max_generation=kwargs['max_generation'],
+                                        population_size=kwargs['population_size'],
+                                        folder='./supernetwork/')
+    evo_epochs = kwargs['evo_epochs']
     for evo_epoch in range(evo_epochs):
-        logging.info("training network parameters")
+        logging.info("training network parameters in evo_epoch %d"%evo_epoch)
         for epoch in range(kwargs['warmup'], kwargs['epochs']+kwargs['warmup']):
             logging.info("training network parameters for epoch %d(%d)"%(epoch, kwargs['epochs']))
 
@@ -260,11 +261,14 @@ def main(*args, **kwargs):
             nas_manager.supernetwork.search_and_save('./supernetwork/',
                                                      'supernetwork_state_%d'%(epoch%kwargs['latest_num']))
 
-        logging.info("searching network architecture")
-        nas_manager.supernetwork.search(max_generation=1 if kwargs['iterator_search'] else kwargs['evo_epochs'],
-                                        population_size=kwargs['population_size'],
-                                        epoch=evo_epoch,
-                                        folder='./supernetwork/')
+        logging.info("searching network architecture in evo_epoch %d"%evo_epoch)
+        if kwargs['max_generation'] > 0:
+            nas_manager.supernetwork.search(max_generation=kwargs['max_generation'],
+                                            population_size=kwargs['population_size'],
+                                            era=evo_epoch,
+                                            folder='./supernetwork/')
+            # 重置内部状态
+            nas_manager.reset()
 
 
 if __name__ == '__main__':

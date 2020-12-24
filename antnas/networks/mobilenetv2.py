@@ -11,6 +11,8 @@ import torch.nn as nn
 import math
 import ununiformpool
 import torch
+from torchinterp1d import Interp1d
+import numpy as np
 
 __all__ = ['mobilenetv2']
 
@@ -106,7 +108,7 @@ class InvertedResidual(nn.Module):
                     nn.BatchNorm2d(oup),
                 )
             else:
-                self.conv = []
+                self.conv = nn.ModuleList([])
                 # pw
                 self.conv.append(nn.Conv2d(inp, hidden_dim, 1, 1, 0, bias=False))
                 self.conv.append(nn.BatchNorm2d(hidden_dim))
@@ -139,15 +141,66 @@ class InvertedResidual(nn.Module):
             y_se = torch.nn.functional.upsample_bilinear(y_se, (y.shape[2], y.shape[3]))
             y = torch.mul(y, y_se)
 
-            y_cpu = UniformPoolFunction.apply(y.cpu(), y_se.cpu())
-            y = y_cpu.to(x.device)
+            #################
+            B = y.shape[0]
+            C = y.shape[1]
+            H = y.shape[2]
+            W = y.shape[3]
+            target_c = W // 2
+            target_r = H // 2
+            downsample_y = \
+                torch.zeros((B, C, target_r, target_c), dtype=torch.float32, device=y.device)
+            for b in range(B):
+                # 获得第b个样本
+                yb = y[b]               # C,H,W
+                yb_se = y_se[b, 0]      # H,W
+
+                # 获得X方向重采样
+                row_mask = yb_se + 0.001
+                row_mask_sum = torch.sum(row_mask, axis=1)
+                row_mask_sum = torch.unsqueeze(row_mask_sum, dim=-1)
+                w = (W - W * 0.5) / row_mask_sum
+                xx = w * row_mask + 0.5
+                xx = torch.cumsum(xx, dim=1)
+                xx = xx.repeat(C, 1, 1)
+                xx = xx.detach()
+
+                middle_feature = torch.zeros((C, H, target_c), dtype=torch.float32, device=y.device)
+                middle_mask = torch.zeros((H, target_c), dtype=torch.float32, device=y.device)
+                for r in range(H):
+                    check_p = np.tile(np.expand_dims(np.array(list(range(target_c))) * 2, 0), [C, 1])
+                    check_p = torch.tensor(check_p, device=y.device)
+                    middle_feature[:, r, :] =\
+                        Interp1d()(xx[:, r, :], yb[:, r, :], check_p)
+                    middle_mask[r] = \
+                        Interp1d()(xx[0, r], yb_se[r], torch.tensor(np.array(list(range(target_c))) * 2, device=y.device))
+
+                # 获得Y方向重采样
+                col_mask = middle_mask + 0.001
+                col_mask_sum = torch.sum(col_mask, axis=0)
+                col_mask_sum = torch.unsqueeze(col_mask_sum, 0)
+                w = (H - H * 0.5) / col_mask_sum
+                yy = w * col_mask + 0.5
+                yy = torch.cumsum(yy, axis=0)
+                yy = yy.repeat(C, 1, 1)
+                yy = yy.detach()
+
+                final_feature = torch.zeros((C, target_r, target_c), dtype=torch.float32, device=y.device)
+                for c in range(target_c):
+                    check_p = np.tile(np.expand_dims(np.array(list(range(target_r))) * 2, 0), [C, 1])
+                    check_p = torch.tensor(check_p, device=y.device)
+                    final_feature[:, :, c] = Interp1d()(yy[:, :, c], middle_feature[:, :, c], check_p)
+
+                downsample_y[b] = final_feature
+            #################
+            y = downsample_y
+
             y = self.conv[3](y)
             y = self.conv[4](y)
             y = self.conv[5](y)
 
             y = self.conv[6](y)
             y = self.conv[7](y)
-
             if self.identity:
                 return x + y
             else:

@@ -33,12 +33,12 @@ def antnas_argment(func):
     parser.add_argument('-bs', action='store', default=4, type=int, help='Size of each batch')
     parser.add_argument('-epochs', action='store', default=0, type=int,
                         help='Number of training epochs')
-    parser.add_argument('-evo_epochs', action='store', default=1, type=int,
+    parser.add_argument('-evo_epochs', action='store', default=2, type=int,
                         help='Number of architecture searching epochs')
     parser.add_argument('-warmup', action='store', default=0, type=int,help='warmup epochs before searching architecture')
-    parser.add_argument('-iterator_search', action='store', default=False, type=bool,
-                        help='is iterator search')
     parser.add_argument('-population_size', action='store', default=2, type=int,
+                        help='population size for NSGAII')
+    parser.add_argument('-max_generation', action='store', default=1, type=int,
                         help='population size for NSGAII')
 
     parser.add_argument('-optim', action='store', default='SGD', type=str,

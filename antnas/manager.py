@@ -15,6 +15,7 @@ import queue
 import threading
 from antnas.utils.adjust import *
 from antnas.component.AccuracyEvaluator import *
+import time
 
 
 class Manager(object):
@@ -31,8 +32,11 @@ class Manager(object):
         # 模型优化器
         self._optimizer = None
         self.cuda_list = []
-        self.arctecture_queue = queue.Queue(128)
+        self.arctecture_queue = queue.Queue()
         self.arctecture_sampling_thread_list = None
+        self.state = threading.Condition()
+        self.paused = False
+
         self.arctecture = None
         self._criterion = None
         self._accuracy_evaluator = None
@@ -45,29 +49,61 @@ class Manager(object):
         self._optimizer = initialize_optimizer('search', self.parallel, self.args)
         return self._optimizer
 
-    def initialize(self):
+    def __initialize(self):
         # 1.step 初始化优化器
+        print('[manager] initialize optimizer')
         self.initialize_optimizer()
         
         # 2.step 初始化模型参数
+        print('[manager] initialize weights')
         initialize_weights(self._model)
 
         # 3.step 初始化结构采样线程
+        print('[manager] launch architecture sampling thread')
         self.arctecture_sampling_thread_list = \
-            [threading.Thread(target=self.__samplingArcFunc, daemon=True) for _ in range(2)]
-        
-    def __samplingArcFunc(self):
-        while True:
-            arc = self._supernetwork.sample_arch()
-            if arc is None:
-                continue
+            [threading.Thread(target=self.__asyn_sampling_arc_func, daemon=True) for _ in range(1)]
 
-            self.arctecture_queue.put(arc)
-    
-    def launchSamplingArcProcess(self):
+        # launch arc sampling thread
         for t in self.arctecture_sampling_thread_list:
             t.start()
-    
+
+    def __asyn_sampling_arc_func(self):
+        while True:
+            with self.state:
+                # 是否暂停
+                if self.paused:
+                    self.state.wait()
+
+                # 判断是否超过容量
+                if self.arctecture_queue.qsize() >= 128:
+                    time.sleep(1)
+                    continue
+
+                # 获取采样结构
+                arc = self._supernetwork.sample_arch()
+                if arc is None:
+                    continue
+
+                # 将采样结构加入队列
+                self.arctecture_queue.put(arc)
+
+    def reset(self):
+        # 采样线程暂停
+        print('[manager/reset] pause sampling thread')
+        with self.state:
+            self.paused = True
+
+        # 清空结构候选池
+        print('[manager/reset] clear architecture queue')
+        while not self.arctecture_queue.empty():
+            self.arctecture_queue.get()
+
+        # 采样线程启动
+        print('[manager/reset] resume sampling thread')
+        with self.state:
+            self.paused = False
+            self.state.notify()
+
     @property
     def optimizer(self):
         return self._optimizer
@@ -83,9 +119,6 @@ class Manager(object):
         search_space_args.update({'out_layer': self._out_layer})
         self._model = self._search_space.build(**search_space_args)
         self._supernetwork = self._model
-
-        # initialize
-        self.initialize()
         
         # load checkpoint
         if state_dict_path is not None:
@@ -93,6 +126,14 @@ class Manager(object):
 
         self._criterion = self._model.criterion
         self._accuracy_evaluator = self._model.accuracy_evaluator
+
+    def init(self, *args, **kwargs):
+        # init supernetwork
+        self._supernetwork.init(**kwargs)
+        # draw
+        self._supernetwork.draw()
+        # init manager
+        self.__initialize()
 
     def train(self, x, y, epoch=None, index=None):
         # 设置标记

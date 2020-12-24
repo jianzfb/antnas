@@ -86,6 +86,11 @@ class ArchitectureModelProblem(Problem):
           return worse_than_other and better_than_other
 
   def __batch_f1(self, arc_list):
+      # batch_accuracy = []
+      # for _ in range(len(arc_list)):
+      #     batch_accuracy.append((float)(np.random.random()))
+      # return batch_accuracy
+
       # logits, loss, accuracy
       # data, label, architecture
       x, y, a = None, None, None
@@ -174,6 +179,11 @@ class ArchitectureModelProblem(Problem):
       return loss
 
   def __batch_f2(self, arc_list):
+      # batch_accuracy = []
+      # for _ in range(len(arc_list)):
+      #     batch_accuracy.append((float)(np.random.random()))
+      # return batch_accuracy
+
       pruned_arc_list = []
       for arc in arc_list:
           arc = arc.features
@@ -311,8 +321,20 @@ class SuperNetwork(nn.Module):
     def anchors(self, val):
         self._anchors = val
 
+    # 更新超网络信息，如在ContinueSuperNetwork中的结构采样候选池
+    def update(self, *args, **kwargs):
+        print('empty update')
+
+    # 初始化超网络信息
     def init(self, *args, **kwargs):
-        # define problem
+        # 加载结构附属信息
+        architecture_path = kwargs.get('architecture', None)
+        if architecture_path is not None:
+            load_graph = nx.read_gpickle(architecture_path)
+            for node_index, node_name in enumerate(self.traversal_order):
+                self.graph.node[node_name]['sampled'] = load_graph.node[node_name]['sampled']
+
+        # 定义搜索问题
         arc_loss = kwargs.get('arc_loss', 'latency')
         data_loader = kwargs.get('data_loader', None)
         supernetwork_manager = kwargs.get('supernetwork_manager', None)
@@ -409,11 +431,7 @@ class SuperNetwork(nn.Module):
             print("ARCH LATENCY MIN-%f,MAX-%f"%(self.arch_objective_latency_min,self.arch_objective_latency_max))
         elif self.cost_evaluation == "param":
             print("ARCH PARAM MIN-%f,MAX-%f"%(self.arch_objective_param_min,self.arch_objective_param_max))
-        
-        # launch arc sampling thread
-        print('launch archtecture sampling thread')
-        supernetwork_manager.launchSamplingArcProcess()
-        
+
     def forward(self, *input):
         raise NotImplementedError
 
@@ -618,7 +636,7 @@ class SuperNetwork(nn.Module):
 
         return pruned_cost
 
-    def _evolution_callback_func(self, population, generation_index, arc_loss, folder):
+    def _evolution_callback_func(self, population, generation_index, era, arc_loss, folder):
         # 1.step draw pareto front image
         print('render pareto front( population size %d )'%len(population))
         # draw pareto front
@@ -657,8 +675,11 @@ class SuperNetwork(nn.Module):
 
         if folder is None:
             folder = './'
+        target_folder = os.path.join(folder, 'era_%d'%era, 'pareto_optimal')
+        if not os.path.exists(target_folder):
+            os.makedirs(target_folder)
 
-        plt.savefig(os.path.join(folder, 'generation_%d_pareto_optimal.png'%generation_index))
+        plt.savefig(os.path.join(target_folder, 'generation_%d_pareto_optimal.png'%generation_index))
         plt.close()
 
         # 2.step show population architecture info distribution (on visdom)
@@ -674,7 +695,7 @@ class SuperNetwork(nn.Module):
         arch_loss_list = [individual.objectives[1] for individual in population]
 
         # 2.1.step architecture loss distribution (直方图)
-        self.search_log.arch_loss.update(arch_loss_list)
+        # self.search_log.arch_loss.update(list(range()),arch_loss_list)
 
         # 2.2.step pareto front (标签的散点图)
         self.search_log.pareto_front.update([arch_loss_list, arch_error_list])
@@ -691,86 +712,12 @@ class SuperNetwork(nn.Module):
 
         # refresh
         mlogger.update()
-        # # 2.4.step structure sampling visualization
-        # data = np.array(GENE)
-        # data = data.astype(np.int32)
-        # for node_index, node_name in enumerate(self.traversal_order):
-        #     counts = np.bincount(data[:, node_index])
-        #     sampling_val = np.argmax(counts)
-        #     self.net.node[node_name]['sampling_val'] = sampling_val
-        #
-        # self.draw()
-    
-    def draw(self, net=None):
-        net = net if net is not None else self.net
-        # self.drawer.draw(net)
-        
-    def hierarchical(self):
-        # get network hierarchical
-        return []
-        
-    def search_init(self, *args, **kwargs):
-        pass
-    
-    def search(self, *args, **kwargs):
-        max_generation = kwargs.get('max_generation', 100)                  # 最大种群代
-        population_size = kwargs.get('population_size', 50)                 # 种群大小
-        crossover_multi_points = kwargs.get('crossover_multi_points', 5)    # 交叉操作基因位数
-        mutation_multi_points = kwargs.get('mutation_multi_points', -1)     # 变异操作基因位数
-        folder = kwargs.get('folder', './supernetwork/')
 
-        if not os.path.exists(folder):
-            os.makedirs(folder)
-
-        # build nsga2 evolution algorithm
-        mutation_control = \
-            EvolutionMutation(multi_points=mutation_multi_points, network=self)
-        crossover_control = \
-            EvolutionCrossover(multi_points=crossover_multi_points,
-                               size=population_size, network=self)
-        evolution = Nsga2(self.problem,
-                          mutation_control,
-                          crossover_control,
-                          num_of_generations=max_generation,
-                          callback=functools.partial(self._evolution_callback_func,
-                                                     arc_loss=self.problem.arc_loss,
-                                                     folder=folder),
-                          using_bayesian=False)
-
-        # 1.step init population
-        population = Population()
-        for individual_index in range(population_size):
-            individual = evolution.problem.generateIndividual()
-            individual.features = self.sample_arch()
-            # individual.features = [1,2,3,4,1,1,1]
-            # individual.devices = self.sample_device()
-            # individual.devices = [0,1,1,0,0,0,0]
-            population.population.append(individual)
-        evolution.problem.calculateBatchObjectives(population.population)
-
-        # 2.step evolution to find parate front
-        explore_position = []
-        for node_name in self.traversal_order:
-            cur_node = self.net.node[node_name]
-            if node_name.startswith('CELL') or node_name.startswith('T'):
-                explore_position.append(cur_node['sampling_param'])
-                
-        # 2.1.step add hierarchical info
-        # stage/block/cell
-        hierarchical = self.hierarchical()
-
-        elited_population = \
-            evolution.evolve(population,
-                             explore_position=explore_position,
-                             hierarchical=hierarchical,
-                             network=self)
-
-        # 3.step save architecture
-        print('final elited population %d'%len(elited_population))
-        for individual in elited_population:
+        # 2.4.step 保存推荐结构
+        for individual in population:
             batched_sampling = torch.Tensor(individual.features).view(1, len(individual.features))
 
-            # 3.1.step prune sampling network
+            # 2.4.1.step prune sampling network
             sampling = torch.Tensor()
             active = torch.Tensor()
 
@@ -787,23 +734,23 @@ class SuperNetwork(nn.Module):
 
             _, pruned_arch = self.path_recorder.get_arch(self.out_node, sampling, active)
 
-            # 3.2.step write to graph
+            # 2.4.2.step write to graph
             for node in self.traversal_order:
                 node_sampling_val = torch.squeeze(pruned_arch[self.path_recorder.node_index[node]]).item()
                 self.net.node[node]['sampled'] = int(node_sampling_val)
 
-            # 3.3.step get architecture parameter number
+            # 2.4.3.step get architecture parameter number
             parameter_num = 0
             for node in self.traversal_order:
                 sampled_state = self.net.node[node]['sampled']
                 cur_node = self.net.node[node]
                 parameter_num += self.blocks[cur_node['module']].get_param_num(None)[sampled_state]
 
-            # 3.4.step save architecture
+            # 2.4.4.step save architecture
             architecture_info = ''
-            if self.problem.arc_loss[0] == 'comp':
+            if arc_loss == 'comp':
                 architecture_info = 'flops_%d' % int(individual.objectives[1])
-            elif self.problem.arc_loss[0] == 'latency':
+            elif arc_loss == 'latency':
                 architecture_info = 'latency_%0.2f' % individual.objectives[1]
             else:
                 architecture_info = 'para_%d' % int(individual.objectives[1])
@@ -811,5 +758,84 @@ class SuperNetwork(nn.Module):
             architecture_tag = 'accuray_%0.4f_%s_params_%d.architecture' % (1.0-individual.objectives[0],
                                                                             architecture_info,
                                                                             int(parameter_num))
-            architecture_path = os.path.join(folder, architecture_tag)
+
+            architecture_folder = os.path.join(folder, 'era_%d'%era, 'architecture_in_generation_%d'%generation_index)
+            if not os.path.exists(architecture_folder):
+                os.makedirs(architecture_folder)
+
+            architecture_path = os.path.join(architecture_folder, architecture_tag)
             nx.write_gpickle(self.net, architecture_path)
+
+    def draw(self, net=None):
+        net = net if net is not None else self.net
+        # self.drawer.draw(net)
+        
+    def hierarchical(self):
+        # get network hierarchical
+        return []
+        
+    def search_init(self, *args, **kwargs):
+        # 初始化遗传算法
+        max_generation = kwargs.get('max_generation', 100)                  # 最大种群代
+        population_size = kwargs.get('population_size', 50)                 # 种群大小
+        crossover_multi_points = kwargs.get('crossover_multi_points', 5)    # 交叉操作基因位数
+        mutation_multi_points = kwargs.get('mutation_multi_points', -1)     # 变异操作基因位数
+        folder = kwargs.get('folder', './supernetwork/')
+
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+
+        # build nsga2 evolution algorithm
+        print('[search_init] build supernetwork NSGAII')
+        mutation_control = \
+            EvolutionMutation(multi_points=mutation_multi_points, network=self)
+        crossover_control = \
+            EvolutionCrossover(multi_points=crossover_multi_points,
+                               size=population_size, network=self)
+        self.evolution = Nsga2(self.problem,
+                          mutation_control,
+                          crossover_control,
+                          num_of_generations=max_generation,
+                          callback=functools.partial(self._evolution_callback_func,
+                                                     arc_loss=self.problem.arc_loss[0],
+                                                     folder=folder),
+                          using_bayesian=False)
+
+    def search(self, *args, **kwargs):
+        population_size = kwargs.get('population_size', 50)                 # 种群大小
+
+        # 获得下一代种群
+        # 1.step 设置搜索年代
+        self.evolution.era = kwargs.get('era', 0)
+
+        # 2.step init population
+        print('[search] init NSGAII population')
+        population = Population()
+        for individual_index in range(population_size):
+            individual = self.evolution.problem.generateIndividual()
+            individual.features = self.sample_arch()
+            population.population.append(individual)
+        self.evolution.problem.calculateBatchObjectives(population.population)
+
+        # 3.step add hierarchical info
+        # stage/block/cell
+        print('[search] get hierarchical info')
+        explore_position = []
+        for node_name in self.traversal_order:
+            cur_node = self.net.node[node_name]
+            if node_name.startswith('CELL') or node_name.startswith('T'):
+                explore_position.append(cur_node['sampling_param'])
+
+        hierarchical = self.hierarchical()
+
+        # 4.step evolve
+        print('[search] evolve')
+        elited_population = \
+            self.evolution.evolve(population,
+                             explore_position=explore_position,
+                             hierarchical=hierarchical,
+                             network=self)
+
+        # 5.step update
+        print('[search] update elited population')
+        self.update(elited_population=elited_population)

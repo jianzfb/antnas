@@ -88,6 +88,15 @@ class Nsga2(object):
     self.num_of_generations = num_of_generations
     self.callback = callback
     self.using_bayesian = using_bayesian
+    self._era = 0
+
+  @property
+  def era(self):
+    return self._era
+
+  @era.setter
+  def era(self, val):
+    self._era = val
 
   def fast_nondominated_sort(self, population):
     population.fronts = []
@@ -168,23 +177,20 @@ class Nsga2(object):
     children_population = None
     if self.crossover_controler is not None:
       # crossover (交叉)
-      print('crossover population')
+      print('[nsga2/create_children] crossover population')
       crossover_population = \
         self.crossover_controler.crossover(population=population, **kwargs)
       children_population = crossover_population
       
     if self.mutation_controler is not None:
       # mutation（变异）
-      print('mutation population')
+      print('[nsga2/create_children] mutation population')
       mutation_population = \
-        self.mutation_controler.mutate(population=crossover_population, **kwargs)
+        self.mutation_controler.mutate(population=children_population, **kwargs)
       children_population = mutation_population
-      # children_population.population.extend(mutation_population.population)
-    
+
     # recalculate objectives
-    print('caculate population objectives')
-    # for individual in children_population.population:
-    #   self.problem.calculateObjectives(individual)
+    print('[nsga2/create_children] caculate population objectives')
     self.problem.calculateBatchObjectives(children_population.population)
 
     # return children population
@@ -198,19 +204,19 @@ class Nsga2(object):
     #   self.calculate_crowding_distance(front)
 
     # 2.step generate next children generation
-    print('create children')
+    print('[nsga2/evolve] create children')
     children = self.__create_children(population, **kwargs)
 
     # 3.step environment pooling
     for i in range(self.num_of_generations):
-      print('evolve generation %d' % i)
+      print('[nsga2/evolve] evolve generation %d' % i)
 
       # 3.1.step expand population
-      print('extend population')
+      print('[nsga2/evolve] extend population')
       population.extend(children)
 
       # 3.2.step re-fast-nondominated-sort
-      print('nondominated sort')
+      print('[nsga2/evolve] nondominated sort')
       self.fast_nondominated_sort(population)
 
       new_population = Population()
@@ -235,11 +241,12 @@ class Nsga2(object):
       # for the last genration, dont generate children
       if i != self.num_of_generations - 1:
         # 1.step create children
-        print('create children for generation %d'%i)
+        print('[nsga2/evolve] create children for generation %d'%i)
         children = self.__create_children(population, **kwargs)
 
         # 2.step using_bayesian to expand
         if self.using_bayesian:
+          print('[nsga2/evolve] bayesian process')
           acq_num = (int)(0.2 * population_size)
           acq_num = acq_num if acq_num > 0 else population_size
           
@@ -318,10 +325,11 @@ class Nsga2(object):
           children.extend(bayesian_population)
       
       if self.callback is not None:
-        print('plot pareto front')
-        self.callback(population, i)
+        print('[nsga2/evolve] callback')
+        self.callback(population, i, self.era)
 
     return population
+
 
 # test nsga2
 class ZDT1(Problem):

@@ -10,6 +10,7 @@ from __future__ import print_function
 import networkx as nx
 from antnas.component.NetworkCell import *
 from antnas.networks.UniformSamplingSuperNetwork import UniformSamplingSuperNetwork
+from antnas.networks.ContinuousSuperNetwork import ContinueSuperNetwork
 from antnas.utils.drawers.NASDrawer import NASDrawer
 from antnas.component.ClassificationAccuracyEvaluator import *
 from antnas.searchspace.DualStageBlockCellArc import *

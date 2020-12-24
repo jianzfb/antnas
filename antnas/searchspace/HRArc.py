@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 from antnas.searchspace.Arc import *
 
+
 class HRArc(Arc):
     def __init__(self,cell_cls, C, graph):
         super(HRArc, self).__init__(graph)

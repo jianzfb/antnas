@@ -37,7 +37,7 @@ def adjust_lr(args, optimizer, epoch, iteration, num_iter, except_groups=None):
         raise ValueError('Unknown lr mode {}'.format(args['lr_decay']))
 
     if epoch < warmup_epoch:
-        lr = args['lr'] * current_iter / warmup_iter
+        lr = args['lr']
 
     if args['end_lr'] > 0:
         if lr < args['end_lr']:
