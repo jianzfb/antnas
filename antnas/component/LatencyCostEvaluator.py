@@ -46,6 +46,7 @@ class LatencyCostEvaluator(EdgeCostEvaluator):
                     input = input[0]
 
                 # 获得输出
+                # print(node)
                 out = model.blocks[cur_node['module']](input)
                 # 获得代价
                 if node.startswith('F'):

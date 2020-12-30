@@ -85,7 +85,7 @@ class CrossOver(object):
                 first_chromosome_index = np.random.choice(list(range(N)), p=chromosome_probability)
         
                 # selecting second chromosome
-                PCII = H[first_chromosome_index, :]/(np.sum(H[first_chromosome_index, :])+0.000001)
+                PCII = H[first_chromosome_index, :]/np.sum(H[first_chromosome_index, :])
                 second_chromosome_index = np.random.choice(list(range(N)), p=PCII)
                 
                 # crossover pos number

@@ -17,12 +17,14 @@ logger = logging.getLogger(__name__)
 
 
 class PlaceholderData(data.Dataset):
-    def __init__(self, img_size, img_channels, out_channels):
+    def __init__(self, img_size, img_channels, out_channels, task_type='CLASSIFICATION'):
         self.img_size = img_size
         self.img_channels = img_channels
         self.out_channels = out_channels
         if type(self.out_channels) == tuple:
             self.out_channels = self.out_channels[0]
+
+        self.task_type = task_type
 
     def __getitem__(self, index):
         random_img = \
@@ -31,7 +33,12 @@ class PlaceholderData(data.Dataset):
                               (self.img_channels,self.img_size,self.img_size), dtype=np.uint8)
         random_norm_img = random_img/255.0
         random_norm_img = random_norm_img.astype(np.float32)
-        return random_norm_img, (int)(np.random.random()*self.out_channels)
+
+        random_label = (int)(np.random.random()*self.out_channels)
+        if self.task_type == 'SEGMENTATION':
+            random_label = np.random.randint(0, 2, (self.img_size, self.img_size), dtype=np.long)
+
+        return random_norm_img, random_label
 
     def __len__(self):
         return 100
@@ -383,10 +390,15 @@ def get_Placeholder(path, kwargs):
     img_dim = kwargs['img_size']
     in_channels = kwargs['in_channels']
     out_size = (kwargs['out_channels'],)
+    task_type = kwargs['task']
 
-    train_set = PlaceholderData(img_dim, in_channels, out_size)
-    val_set = PlaceholderData(img_dim, in_channels, out_size)
+    train_set = PlaceholderData(img_dim, in_channels, out_size, task_type)
+    val_set = PlaceholderData(img_dim, in_channels, out_size, task_type)
     return train_set, None, val_set, img_dim, in_channels, out_size
+
+
+def get_Cityscape(path, kwargs):
+    pass
 
 
 sets = {
@@ -398,6 +410,7 @@ sets = {
     'ImageNetV2': get_ImageNetV2,
     'PASCAL2012SEG': get_PASCAL2012_SEG,
     'PLACEHOLDER': get_Placeholder,
+    'CITYSCAPE': get_Cityscape,
 }
 
 

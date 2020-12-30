@@ -226,6 +226,7 @@ class SuperNetwork(nn.Module):
     _AGGREGATION_NODE_FORMAT = 'A_{}_{}'        # 不可学习
     _CELL_NODE_FORMAT = 'CELL_{}_{}'            # 可学习  (多种状态)
     _TRANSFORMATION_FORMAT = 'T_{}_{}-{}_{}'    # 可学习 （激活/不激活）
+    _BINARY_NODE_FORMAT = 'T_{}_{}'             # 可学习  (激活/不激活)
     _LINK_FORMAT = 'L_{}_{}-{}_{}'              # 不可学习
     _FIXED_NODE_FORMAT = 'FIXED_{}_{}'          # 不可学习
 
@@ -329,7 +330,7 @@ class SuperNetwork(nn.Module):
     def init(self, *args, **kwargs):
         # 加载结构附属信息
         architecture_path = kwargs.get('architecture', None)
-        if architecture_path is not None:
+        if architecture_path is not None and architecture_path != '':
             load_graph = nx.read_gpickle(architecture_path)
             for node_index, node_name in enumerate(self.traversal_order):
                 self.graph.node[node_name]['sampled'] = load_graph.node[node_name]['sampled']

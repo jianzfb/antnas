@@ -54,7 +54,10 @@ class ContinuousSuperNetwork(UniformSamplingSuperNetwork):
         feature = [None for _ in range(len(self.traversal_order))]
         for node_index, node_name in enumerate(self.traversal_order):
             cur_node = self.graph.node[node_name]
-            feature[cur_node['sampling_param']] = cur_node['sampled']
+            sampled = getattr(cur_node, 'sampled', None)
+            if sampled is None:
+                sampled = 1
+            feature[cur_node['sampling_param']] = sampled
 
         assert(feature[0] is not None)
         self.candidate_archs = [feature]

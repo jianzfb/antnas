@@ -331,12 +331,12 @@ class ConvBn(NetworkBlock):
 
     def get_param_num(self, x):
         return [0] + \
-               [self.conv.kernel_size[0]*self.conv.kernel_size[1]*self.conv.in_channels*self.conv.out_channels +  2*self.out_chan] + \
+               [self.conv.kernel_size[0]*self.conv.kernel_size[1]*self.conv.in_channels*self.conv.out_channels + 2*self.out_chan] + \
                [0]*(NetworkBlock.state_num - 2)
 
     def get_flop_cost(self, x):
         conv_in_data_size = torch.Size([1, *x.shape[1:]])
-        conv_out_data_size = torch.Size([1, self.out_chan, x.shape[-1]//self.conv.stride[0], x.shape[-1]//self.conv.stride[1]])
+        conv_out_data_size = torch.Size([1, self.out_chan, x.shape[-2]//self.conv.stride[0], x.shape[-1]//self.conv.stride[1]])
 
         flops_1 = self.get_conv2d_flops(self.conv, conv_in_data_size, conv_out_data_size)
         flops_2 = self.get_bn_flops(self.bn, conv_out_data_size, conv_out_data_size)
@@ -571,22 +571,29 @@ class AddBlock(NetworkBlock):
     n_layers = 0
     n_comp_steps = 1
 
-    def __init__(self):
+    def __init__(self, relu=False):
         super(AddBlock, self).__init__()
         self.params = {
             'module_list': ['AddBlock'],
             'name_list': ['AddBlock'],
-            'AddBlock': {},
+            'AddBlock': {
+                'relu': relu
+            },
             'in_chan': 0,
             'out_chan': 0
         }
         self.structure_fixed = True
+        self.relu = relu
 
     def forward(self, x, sampling=None):
         if not isinstance(x, list):
+            if self.relu:
+                return F.relu(x)
             return x
 
         assert isinstance(x, list)
+        if self.relu:
+            return F.relu(sum(x))
         return sum(x)
 
     def get_flop_cost(self, x):
@@ -738,6 +745,315 @@ class AvgPoolingBlock(NetworkBlock):
                                stride=self.stride,
                                padding=(self.k_size-1)//2)(x)
         return x
+
+
+class BasicBlock(NetworkBlock):
+    def __init__(self, in_chan, out_chan, k_size=3, stride=1):
+        super(BasicBlock, self).__init__()
+        self.structure_fixed = False
+
+        self.params = {
+            'module_list': ['BasicBlock'],
+            'name_list': ['BasicBlock'],
+            'BasicBlock': {'in_chan': in_chan,
+                           'out_chan': out_chan,
+                           'k_size': k_size,
+                           'stride': stride},
+            'in_chan': in_chan,
+            'out_chan': out_chan
+        }
+        self.conv1 = \
+            nn.Conv2d(in_chan,
+                      out_chan,
+                      kernel_size=k_size,
+                      stride=stride,
+                      padding=k_size//2,
+                      bias=False)
+        self.bn1 = \
+            nn.BatchNorm2d(out_chan,
+                           momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                           track_running_stats=NetworkBlock.bn_track_running_stats)
+        self.conv2 = \
+            nn.Conv2d(out_chan,
+                      out_chan,
+                      kernel_size=k_size,
+                      stride=1,
+                      padding=k_size//2,
+                      bias=False)
+        self.bn2 = \
+            nn.BatchNorm2d(out_chan,
+                           momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                           track_running_stats=NetworkBlock.bn_track_running_stats)
+
+        self.in_chan = in_chan
+        self.out_chan = out_chan
+        self.stride = stride
+        self.k_size = k_size
+
+    def forward(self, x, sampling=None):
+        residual = x
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = F.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        if self.stride == 1 and self.in_chan == self.out_chan:
+            out = out + residual
+        out = F.relu(out)
+
+        if sampling is None:
+            return out
+
+        is_activate = int(sampling.item())
+        if is_activate == 1:
+            return out
+        else:
+            return torch.zeros(out.shape, device=out.device)
+
+    def get_param_num(self, x):
+        conv1_params = \
+            self.conv1.kernel_size[0]*self.conv1.kernel_size[1]*self.conv1.in_channels*self.conv1.out_channels + 2*self.out_chan
+        conv2_params = \
+            self.conv2.kernel_size[0]*self.conv2.kernel_size[1]*self.conv2.in_channels*self.conv2.out_channels + 2*self.out_chan
+
+        return [0] + [conv1_params+conv2_params] + [0]*(NetworkBlock.state_num - 2)
+
+    def get_flop_cost(self, x):
+        conv_in_data_size = torch.Size([1, *x.shape[1:]])
+        conv_out_data_size = torch.Size([1, self.out_chan, x.shape[-2]//self.conv1.stride[0], x.shape[-1]//self.conv1.stride[1]])
+
+        flops_1 = self.get_conv2d_flops(self.conv1, conv_in_data_size, conv_out_data_size)
+        flops_2 = self.get_bn_flops(self.bn1, conv_out_data_size, conv_out_data_size)
+        flops_3 = 0
+        # thop: relu 的计算量不考虑在flops中
+        # if self.relu:
+        #     flops_3 = self.get_relu_flops(None, conv_out_data_size, conv_out_data_size)
+
+        conv1_flops = flops_1 + flops_2 + flops_3
+
+        conv_in_data_size = conv_out_data_size
+        flops_1 = self.get_conv2d_flops(self.conv2, conv_in_data_size, conv_out_data_size)
+        flops_2 = self.get_bn_flops(self.bn2, conv_out_data_size, conv_out_data_size)
+        flops_3 = 0
+
+        conv2_flops = flops_1 + flops_2 + flops_3
+
+        flop_cost = [0] + [conv1_flops + conv2_flops] + [0] * (self.state_num - 2)
+        return flop_cost
+
+    def get_latency(self, x):
+        op_name = "basic_%dx%d" % (self.k_size, self.k_size)
+
+        input_h, _ = x.shape[2:]
+        after_h = input_h // self.stride
+        op_latency = \
+            NetworkBlock.proximate_latency(op_name,
+                                           '%dx%dx%dx%d' % (int(input_h), self.in_chan, int(after_h), self.out_chan),
+                                           'cpu')
+
+        latency_cost = [0.01] + [op_latency] + [0.01] * (NetworkBlock.state_num - 2)
+
+        if NetworkBlock.device_num > 1:
+            op_latency =\
+                NetworkBlock.proximate_latency(op_name,
+                                               '%dx%dx%dx%d' % (int(input_h), self.in_chan, int(after_h), self.out_chan),
+                                               'gpu')
+            latency_cost_gpu = [0.01] + [op_latency] + [0.01] * (NetworkBlock.state_num - 2)
+            return [latency_cost, latency_cost_gpu]
+
+        return latency_cost
+
+
+class BottleneckBlock(NetworkBlock):
+    def __init__(self, in_chan, out_chan, k_size, stride=1, expansion=4):
+        super(BottleneckBlock, self).__init__()
+        self.structure_fixed = False
+
+        self.params = {
+            'module_list': ['BottleneckBlock'],
+            'name_list': ['BottleneckBlock'],
+            'BottleneckBlock': {
+                'in_chan': in_chan,
+                'out_chan': out_chan,
+                'k_size': k_size,
+                'stride': stride,
+                'expansion': expansion},
+            'in_chan': in_chan,
+            'out_chan': out_chan
+        }
+        self.in_chan = in_chan
+        self.out_chan = out_chan
+        self.k_size = k_size
+        self.stride = stride
+        self.expansion = expansion
+
+        self.conv1 = \
+            nn.Conv2d(in_chan,
+                      out_chan,
+                      kernel_size=1,
+                      stride=1,
+                      padding=0,
+                      bias=False)
+        self.bn1 = \
+            nn.BatchNorm2d(out_chan,
+                           momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                           track_running_stats=NetworkBlock.bn_track_running_stats)
+        self.conv2 = \
+            nn.Conv2d(out_chan,
+                      out_chan,
+                      kernel_size=k_size,
+                      stride=stride,
+                      padding=k_size//2,
+                      bias=False)
+        self.bn2 = \
+            nn.BatchNorm2d(out_chan,
+                           momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                           track_running_stats=NetworkBlock.bn_track_running_stats)
+
+        self.conv3 =             \
+            nn.Conv2d(out_chan,
+                      out_chan*expansion,
+                      kernel_size=1,
+                      stride=1,
+                      padding=0,
+                      bias=False)
+        self.bn3 =             \
+            nn.BatchNorm2d(out_chan*expansion,
+                           momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                           track_running_stats=NetworkBlock.bn_track_running_stats)
+
+        self.skip_conv = None
+        self.skip_bn = None
+        if self.in_chan != self.out_chan * expansion and self.stride == 1:
+            self.skip_conv = \
+                nn.Conv2d(in_chan,
+                          out_chan*expansion,
+                          kernel_size=1,
+                          stride=1,
+                          padding=0,
+                          bias=False)
+            self.skip_bn =             \
+                nn.BatchNorm2d(out_chan*expansion,
+                           momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                           track_running_stats=NetworkBlock.bn_track_running_stats)
+
+    def forward(self, x, sampling=None):
+        residual = x
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = F.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = F.relu(out)
+
+        out = self.conv3(out)
+        out = self.bn3(out)
+
+        if self.stride == 1:
+            if self.skip_conv is None:
+                out = out + residual
+            else:
+                a = self.skip_conv(residual)
+                a = self.skip_bn(a)
+                out = out + a
+        out = F.relu(out)
+
+        if sampling is None:
+            return out
+
+        is_activate = int(sampling.item())
+        if is_activate == 1:
+            return out
+        else:
+            return torch.zeros(out.shape, device=out.device)
+
+    def get_param_num(self, x):
+        conv1_params = \
+            self.conv1.kernel_size[0]*self.conv1.kernel_size[1]*self.conv1.in_channels*self.conv1.out_channels + 2*self.conv1.out_channels
+        conv2_params = \
+            self.conv2.kernel_size[0]*self.conv2.kernel_size[1]*self.conv2.in_channels*self.conv2.out_channels + 2*self.conv2.out_channels
+        conv3_params = \
+            self.conv3.kernel_size[0]*self.conv3.kernel_size[1]*self.conv3.in_channels*self.conv3.out_channels + 2*self.conv3.out_channels
+
+        conv4_params = 0
+        if self.skip_conv is not None and self.skip_bn is not None:
+            conv4_params = \
+                self.skip_conv.kernel_size[0] * self.skip_conv.kernel_size[
+                    1] * self.skip_conv.in_channels * self.skip_conv.out_channels + 2 * self.skip_conv.out_channels
+
+        return [0] + [conv1_params+conv2_params+conv3_params+conv4_params] + [0]*(NetworkBlock.state_num - 2)
+
+    def get_flop_cost(self, x):
+        conv_in_data_size = torch.Size([1, *x.shape[1:]])
+        conv_out_data_size = torch.Size([1, self.out_chan, x.shape[-2], x.shape[-1]])
+
+        flops_1 = self.get_conv2d_flops(self.conv1, conv_in_data_size, conv_out_data_size)
+        flops_2 = self.get_bn_flops(self.bn1, conv_out_data_size, conv_out_data_size)
+        flops_3 = 0
+        # thop: relu 的计算量不考虑在flops中
+        # if self.relu:
+        #     flops_3 = self.get_relu_flops(None, conv_out_data_size, conv_out_data_size)
+
+        conv1_flops = flops_1 + flops_2 + flops_3
+
+        conv_in_data_size = conv_out_data_size
+        conv_out_data_size = \
+            torch.Size([1, self.out_chan, x.shape[-2]//self.conv2.stride[0], x.shape[-1]//self.conv2.stride[1]])
+
+        flops_1 = self.get_conv2d_flops(self.conv2, conv_in_data_size, conv_out_data_size)
+        flops_2 = self.get_bn_flops(self.bn2, conv_out_data_size, conv_out_data_size)
+        flops_3 = 0
+
+        conv2_flops = flops_1 + flops_2 + flops_3
+
+        conv_in_data_size = conv_out_data_size
+        conv_out_data_size = \
+            torch.Size([1, self.out_chan*self.expansion, x.shape[-2] // self.conv2.stride[0], x.shape[-1] // self.conv2.stride[1]])
+
+        flops_1 = self.get_conv2d_flops(self.conv3, conv_in_data_size, conv_out_data_size)
+        flops_2 = self.get_bn_flops(self.bn3, conv_out_data_size, conv_out_data_size)
+        flops_3 = 0
+
+        conv3_flops = flops_1 + flops_2 + flops_3
+
+        conv4_flops = 0.0
+        if self.skip_conv is not None and self.skip_bn is not None:
+            conv_in_data_size = torch.Size([1, *x.shape[1:]])
+            conv_out_data_size = \
+                torch.Size([1, self.out_chan*self.expansion, x.shape[-2], x.shape[-1]])
+
+            flops_1 = self.get_conv2d_flops(self.skip_conv, conv_in_data_size, conv_out_data_size)
+            flops_2 = self.get_bn_flops(self.skip_bn, conv_out_data_size, conv_out_data_size)
+            flops_3 = 0
+            conv4_flops = flops_1 + flops_2 + flops_3
+
+        flop_cost = [0] + [conv1_flops + conv2_flops + conv3_flops + conv4_flops] + [0] * (self.state_num - 2)
+        return flop_cost
+
+    def get_latency(self, x):
+        op_name = "bottleneck_%dx%d" % (self.k_size, self.k_size)
+
+        input_h, _ = x.shape[2:]
+        after_h = input_h // self.stride
+        op_latency = \
+            NetworkBlock.proximate_latency(op_name,
+                                           '%dx%dx%dx%d' % (int(input_h), self.in_chan, int(after_h), self.out_chan),
+                                           'cpu')
+
+        latency_cost = [0.01] + [op_latency] + [0.01] * (NetworkBlock.state_num - 2)
+
+        if NetworkBlock.device_num > 1:
+            op_latency =\
+                NetworkBlock.proximate_latency(op_name,
+                                               '%dx%dx%dx%d' % (int(input_h), self.in_chan, int(after_h), self.out_chan),
+                                               'gpu')
+            latency_cost_gpu = [0.01] + [op_latency] + [0.01] * (NetworkBlock.state_num - 2)
+            return [latency_cost, latency_cost_gpu]
+
+        return latency_cost
 
 
 def _make_divisible(v, divisor=8, min_value=8):

@@ -35,6 +35,7 @@ def antnas_argment(func):
                         help='Number of training epochs')
     parser.add_argument('-evo_epochs', action='store', default=2, type=int,
                         help='Number of architecture searching epochs')
+
     parser.add_argument('-warmup', action='store', default=0, type=int,help='warmup epochs before searching architecture')
     parser.add_argument('-population_size', action='store', default=2, type=int,
                         help='population size for NSGAII')
@@ -113,7 +114,7 @@ def antnas_argment(func):
     parser.add_argument('-anchor_archs', dest="anchor_archs", action='store', default=[], type=list)
     parser.add_argument('-anchor_states', dest="anchor_states", action='store', default=[], type=list)
 
-    parser.add_argument('-architecture', action='store', default="/Users/zhangjian52/Downloads/check-nas/accuray_0.4946_latency_22.92_params_5513760.architecture", type=str, help="architecture path")
+    parser.add_argument('-architecture', action='store', default="", type=str, help="architecture path")
 
     kargs = vars(parser.parse_known_args()[0])
 

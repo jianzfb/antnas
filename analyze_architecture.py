@@ -16,6 +16,8 @@ parser.add_argument('--architecture', type=str, default='',
 parser.add_argument('--cost_evaluation', default=['latency'], type=restricted_list('comp', 'latency', 'param'))
 parser.add_argument('--devices', default='0', type=str)
 parser.add_argument('--shape', default='1,3,224,224', type=str)
+parser.add_argument('--latency_lookup_table', default='', type=str)
+
 
 
 class ImageNetOutLayer(NetworkBlock):
@@ -66,6 +68,7 @@ if __name__ == '__main__':
     cost_evaluation = args.cost_evaluation
     devices = args.devices
     shape = args.shape
+    latency_lookup_table = args.latency_lookup_table
 
     # 加载模型
     pk = LoadArc(architecture_path)
@@ -77,7 +80,7 @@ if __name__ == '__main__':
         sampled_loss, pruned_loss = \
             pk.arc_loss(input_shape,
                         ce,
-                        latency_lookup_table='./supernetwork/latency.cpu.gpu.855.224.lookuptable.json',
+                        latency_lookup_table=latency_lookup_table,
                         devices=[] if ce != 'latency' else [(int)(m) for m in devices.split(',')])
 
         print('%s - %f'%(ce, pruned_loss[0].item()))
