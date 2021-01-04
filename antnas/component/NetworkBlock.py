@@ -1208,13 +1208,13 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
         conv_se_2_param = 0
         bn_se_param = 0
         if self.se:
-            conv_se_1_param = self.se_conv_layer_1.kernel_size[0]*\
-                              self.se_conv_layer_1.kernel_size[1]*\
-                              self.se_conv_layer_1.in_channels*\
+            conv_se_1_param = self.se_conv_layer_1.kernel_size[0] *\
+                              self.se_conv_layer_1.kernel_size[1] *\
+                              self.se_conv_layer_1.in_channels *\
                               self.se_conv_layer_1.out_channels
-            conv_se_2_param = self.se_conv_layer_2.kernel_size[0]*\
-                              self.se_conv_layer_2.kernel_size[1]*\
-                              self.se_conv_layer_2.in_channels*\
+            conv_se_2_param = self.se_conv_layer_2.kernel_size[0] *\
+                              self.se_conv_layer_2.kernel_size[1] *\
+                              self.se_conv_layer_2.in_channels *\
                               self.se_conv_layer_2.out_channels
             bn_se_param = self.se_conv_layer_1.out_channels + self.se_conv_layer_2.out_channels
 
@@ -1222,14 +1222,14 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
         bn3_param = 2 * self.conv3.out_channels
 
         params = \
-            conv1_param+ \
-            conv2_param+\
-            conv_se_1_param+\
-            conv_se_2_param+\
+            conv1_param +\
+            conv2_param +\
+            conv_se_1_param +\
+            conv_se_2_param +\
             conv3_param +\
-            bn1_param + \
+            bn1_param +\
             bn2_param +\
-            bn3_param+\
+            bn3_param +\
             bn_se_param
         return [0] + [params] + [0]*(NetworkBlock.state_num - 2)
 

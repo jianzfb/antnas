@@ -3,45 +3,45 @@
 from antnas.searchspace.PKAutoArc import *
 
 
-def mobilenetv3_large(head, tail, prefix):
+def mobilenetv3_large(head, tail, prefix, scale=1.0):
     modules = [
         InvertedResidualBlockWithSEHS(
-            in_chan=head.params['out_chan'], out_chan=16, kernel_size=3, reduction=False, hs=False, se=False,
+            in_chan=head.params['out_chan'], out_chan=(int)(16*scale), kernel_size=3, reduction=False, hs=False, se=False,
             expansion=1),
         InvertedResidualBlockWithSEHS(
-            in_chan=16, out_chan=24, kernel_size=3, reduction=True, hs=False, se=False, expansion=4),
+            in_chan=(int)(16*scale), out_chan=(int)(24*scale), kernel_size=3, reduction=True, hs=False, se=False, expansion=4),
         InvertedResidualBlockWithSEHS(
-            in_chan=24, out_chan=24, kernel_size=3, reduction=False, hs=False, se=False, expansion=3),
+            in_chan=(int)(24*scale), out_chan=(int)(24*scale), kernel_size=3, reduction=False, hs=False, se=False, expansion=3),
         InvertedResidualBlockWithSEHS(
-            in_chan=24, out_chan=40, kernel_size=5, reduction=True, hs=False, se=True, expansion=3),
+            in_chan=(int)(24*scale), out_chan=(int)(40*scale), kernel_size=5, reduction=True, hs=False, se=True, expansion=3),
         InvertedResidualBlockWithSEHS(
-            in_chan=40, out_chan=40, kernel_size=5, reduction=False, hs=False, se=True, expansion=3),
+            in_chan=(int)(40*scale), out_chan=(int)(40*scale), kernel_size=5, reduction=False, hs=False, se=True, expansion=3),
         InvertedResidualBlockWithSEHS(
-            in_chan=40, out_chan=40, kernel_size=5, reduction=False, hs=False, se=True, expansion=3),
+            in_chan=(int)(40*scale), out_chan=(int)(40*scale), kernel_size=5, reduction=False, hs=False, se=True, expansion=3),
         InvertedResidualBlockWithSEHS(
-            in_chan=40, out_chan=80, kernel_size=3, reduction=True, hs=True, se=False, expansion=6),
+            in_chan=(int)(40*scale), out_chan=(int)(80*scale), kernel_size=3, reduction=True, hs=True, se=False, expansion=6),
         InvertedResidualBlockWithSEHS(
-            in_chan=80, out_chan=80, kernel_size=3, reduction=False, hs=True, se=False, expansion=2.5),
+            in_chan=(int)(80*scale), out_chan=(int)(80*scale), kernel_size=3, reduction=False, hs=True, se=False, expansion=2.5),
         InvertedResidualBlockWithSEHS(
-            in_chan=80, out_chan=80, kernel_size=3, reduction=False, hs=True, se=False, expansion=184 / 80),
+            in_chan=(int)(80*scale), out_chan=(int)(80*scale), kernel_size=3, reduction=False, hs=True, se=False, expansion=184 / 80),
         InvertedResidualBlockWithSEHS(
-            in_chan=80, out_chan=80, kernel_size=3, reduction=False, hs=True, se=False, expansion=184 / 80),
+            in_chan=(int)(80*scale), out_chan=(int)(80*scale), kernel_size=3, reduction=False, hs=True, se=False, expansion=184 / 80),
         InvertedResidualBlockWithSEHS(
-            in_chan=80, out_chan=112, kernel_size=3, reduction=False, hs=True, se=True, expansion=6),
+            in_chan=(int)(80*scale), out_chan=(int)(112*scale), kernel_size=3, reduction=False, hs=True, se=True, expansion=6),
         InvertedResidualBlockWithSEHS(
-            in_chan=112, out_chan=112, kernel_size=3, reduction=False, hs=True, se=True, expansion=6),
+            in_chan=(int)(112*scale), out_chan=(int)(112*scale), kernel_size=3, reduction=False, hs=True, se=True, expansion=6),
         InvertedResidualBlockWithSEHS(
-            in_chan=112, out_chan=160, kernel_size=5, reduction=True, hs=True, se=True, expansion=6),
+            in_chan=(int)(112*scale), out_chan=(int)(160*scale), kernel_size=5, reduction=True, hs=True, se=True, expansion=6),
         InvertedResidualBlockWithSEHS(
-            in_chan=160, out_chan=160, kernel_size=5, reduction=False, hs=True, se=True, expansion=6),
+            in_chan=(int)(160*scale), out_chan=(int)(160*scale), kernel_size=5, reduction=False, hs=True, se=True, expansion=6),
         InvertedResidualBlockWithSEHS(
-            in_chan=160, out_chan=160, kernel_size=5, reduction=False, hs=True, se=True, expansion=6),
+            in_chan=(int)(160*scale), out_chan=(int)(160*scale), kernel_size=5, reduction=False, hs=True, se=True, expansion=6),
     ]
 
     graph = nx.DiGraph()
     pk = PKAutoArc(graph, None)
     pk.generate(head, tail, modules)
-    pk.save('./', '%s_mobilenetv3_large' % prefix)
+    pk.save('./', '%s_mobilenetv3_large_%0.2f' % (prefix, scale))
 
 
 def mobilenetv3_small(head, tail, prefix):
@@ -72,7 +72,7 @@ def mobilenetv3_small(head, tail, prefix):
     ]
 
     graph = nx.DiGraph()
-    pk = PKAutoArc(graph)
+    pk = PKAutoArc(graph, None)
     pk.generate(head, tail, modules)
     pk.save('./', '%s_mobilenetv3_small' % prefix)
 

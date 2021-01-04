@@ -189,13 +189,13 @@ def main(*args, **kwargs):
 
             # write logger
             logger.info(epoch)
-            
+
+            # adjust learning rate
+            lr = nas_manager.adjust_lr(kwargs, epoch, epoch*len(train_loader), len(train_loader), ['path'])
+            xp.train.learning_rate.update(lr)
+
             # training architecture parameter
             for i, (inputs, labels) in enumerate(tqdm(train_loader, desc='Train', ascii=True)):
-                # adjust learning rate
-                lr = nas_manager.adjust_lr(kwargs, epoch, i, len(train_loader), ['path'])
-                xp.train.learning_rate.update(lr)
-
                 # set model status (train)
                 x = inputs
                 y = labels

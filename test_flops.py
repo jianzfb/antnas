@@ -48,7 +48,7 @@ print("antnas: macs %f params %f"%(cn_4.get_flop_cost(input)[1], cn_4.get_param_
 # 测试 5： InvertedResidualBlockWithSEHS flops, params
 cn_5 = \
     InvertedResidualBlockWithSEHS(in_chan=32,
-                                  expansion=3,
+                                  expansion=6,
                                   kernel_size=3,
                                   out_chan=64,
                                   skip=True,
