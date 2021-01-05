@@ -31,6 +31,7 @@ class ContinuousSuperNetwork(UniformSamplingSuperNetwork):
         self.explore_position = []
         self.pos_map = {}
         self.using_static_arch = False
+        self.disturb_ratio = 0.1
 
     def update(self, *args, **kwargs):
         # 使用精英种群更新候选结构池
@@ -88,7 +89,7 @@ class ContinuousSuperNetwork(UniformSamplingSuperNetwork):
         feature = copy.deepcopy(self.candidate_archs[(int)(random_i)])
 
         # 2.step 随机挑选10%个节点进行
-        disturb_num = (int)(0.1 * len(self.explore_position))
+        disturb_num = (int)(self.disturb_ratio * len(self.explore_position))
         disturb_position = np.random.choice(self.explore_position, disturb_num, replace=False)
         if type(disturb_position) != list:
             disturb_position = disturb_position.flatten().tolist()

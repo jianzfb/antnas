@@ -21,7 +21,7 @@ def adjust_lr(args, optimizer, epoch, iteration, num_iter, except_groups=None):
     warmup_epoch = args['warmup']
     warmup_iter = warmup_epoch * num_iter
     current_iter = iteration + epoch * num_iter
-    max_iter = args['epochs'] * num_iter
+    max_iter = (args['evo_epochs'] * args['epochs'] + warmup_epoch) * num_iter
 
     if args['lr_decay'] == 'step':
         lr = args['lr'] * (
@@ -37,7 +37,8 @@ def adjust_lr(args, optimizer, epoch, iteration, num_iter, except_groups=None):
         raise ValueError('Unknown lr mode {}'.format(args['lr_decay']))
 
     if epoch < warmup_epoch:
-        lr = args['lr']
+        # warmup阶段
+        lr = args['lr'] * (args['gamma'] ** (current_iter // num_iter))
 
     if args['end_lr'] > 0:
         if lr < args['end_lr']:

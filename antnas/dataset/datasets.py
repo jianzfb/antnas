@@ -390,7 +390,7 @@ def get_Placeholder(path, kwargs):
     img_dim = kwargs['img_size']
     in_channels = kwargs['in_channels']
     out_size = (kwargs['out_channels'],)
-    task_type = kwargs['task']
+    task_type = kwargs.get('task', 'CLASSIFICATION')
 
     train_set = PlaceholderData(img_dim, in_channels, out_size, task_type)
     val_set = PlaceholderData(img_dim, in_channels, out_size, task_type)

@@ -47,17 +47,17 @@ print("antnas: macs %f params %f"%(cn_4.get_flop_cost(input)[1], cn_4.get_param_
 
 # 测试 5： InvertedResidualBlockWithSEHS flops, params
 cn_5 = \
-    InvertedResidualBlockWithSEHS(in_chan=32,
+    InvertedResidualBlockWithSEHS(in_chan=16,
                                   expansion=6,
                                   kernel_size=3,
-                                  out_chan=64,
+                                  out_chan=32,
                                   skip=True,
                                   reduction=False,
                                   ratio=4,
                                   se=False,
                                   hs=False,
                                   dilation=1)
-input = torch.randn(1, 32, 224, 224)
+input = torch.randn(1, 16, 224, 224)
 macs, params = profile(cn_5, inputs=(input, ))
 print("test - 5")
 print("thop: macs %f params %f"%(macs, params))

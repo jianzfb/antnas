@@ -73,12 +73,12 @@ def main(*args, **kwargs):
         get_data(kwargs['dset'], kwargs['bs'], kwargs['path'], kwargs)
 
     # 创建NAS模型
-    nas_manager = Manager(kwargs, data_properties, out_layer=ImageNetOutLayer(320))
+    nas_manager = Manager(kwargs, data_properties, out_layer=ImageNetOutLayer(160))
 
     # pk mobilenetv2
     nas_manager.build(blocks_per_stage=[1, 1, 1, 2, 2],
-                      cells_per_block=[[2], [2], [3], [4, 4], [3, 3]],
-                      channels_per_block=[[16], [24], [32], [64, 96], [160, 320]])
+                      cells_per_block=[[2], [2], [2], [2, 2], [2, 2]],
+                      channels_per_block=[[8], [12], [24], [48, 96], [112, 160]])
 
     # # pk mobilenetv2
     # nas_manager.build(blocks_per_stage=[1, 1, 2, 2, 2],
@@ -177,10 +177,13 @@ def main(*args, **kwargs):
                 # update parameter
                 nas_manager.optimizer.step()
 
+        # 保存warmup参数
+        nas_manager.supernetwork.search_and_save('./supernetwork/', 'supernetwork_warmup_state')
+
     logging.info("[search] training and searching")
     nas_manager.supernetwork.search_init(max_generation=kwargs['max_generation'],
-                                        population_size=kwargs['population_size'],
-                                        folder='./supernetwork/')
+                                         population_size=kwargs['population_size'],
+                                         folder='./supernetwork/')
     evo_epochs = kwargs['evo_epochs']
     for evo_epoch in range(evo_epochs):
         logging.info("training network parameters in evo_epoch %d"%evo_epoch)
@@ -188,11 +191,12 @@ def main(*args, **kwargs):
             logging.info("training network parameters for epoch %d(%d)"%(epoch, kwargs['epochs']))
 
             # write logger
-            logger.info(epoch)
+            logger.info('epoch %d in (evo %d)'%(epoch-kwargs['warmup'], evo_epoch))
 
             # adjust learning rate
-            lr = nas_manager.adjust_lr(kwargs, epoch, epoch*len(train_loader), len(train_loader), ['path'])
+            lr = nas_manager.adjust_lr(kwargs, evo_epoch*kwargs['epochs']+epoch, 0, len(train_loader), ['path'])
             xp.train.learning_rate.update(lr)
+            logger.info('lr %f in epoch %d'%((float)(lr), epoch))
 
             # training architecture parameter
             for i, (inputs, labels) in enumerate(tqdm(train_loader, desc='Train', ascii=True)):
@@ -236,7 +240,6 @@ def main(*args, **kwargs):
 
                 # record model loss
                 xp.train.classif_loss.update(loss.item())
-                logging.info('loss %f'%xp.train.classif_loss.value)
 
                 # train and return predictions, loss, correct
                 nas_manager.optimizer.zero_grad()
@@ -259,7 +262,7 @@ def main(*args, **kwargs):
             # save model state
             nas_manager.supernetwork.search_and_plot('./supernetwork/')
             nas_manager.supernetwork.search_and_save('./supernetwork/',
-                                                     'supernetwork_state_%d'%(epoch%kwargs['latest_num']))
+                                                     'supernetwork_state_%d' % (epoch % kwargs['latest_num']))
 
         logging.info("searching network architecture in evo_epoch %d"%evo_epoch)
         if kwargs['max_generation'] > 0:

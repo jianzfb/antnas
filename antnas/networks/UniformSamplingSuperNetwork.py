@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*-
 # @Time    : 2019-09-29 11:14
-# @File    : EvolutionSuperNetwork.py
+# @File    : UniformSamplingSuperNetwork.py
 # @Author  : jian<jian@mltalker.com>
 from __future__ import division
 from __future__ import unicode_literals

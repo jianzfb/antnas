@@ -81,9 +81,6 @@ class Nsga2(object):
                using_bayesian=False):
     self.mutation_controler = mutation_op
     self.crossover_controler = crossover_op
-
-    self.solution = []
-    self.multi_objects = []
     self.problem = problem
     self.num_of_generations = num_of_generations
     self.callback = callback

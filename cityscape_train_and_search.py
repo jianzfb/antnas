@@ -178,11 +178,11 @@ def main(*args, **kwargs):
             logging.info("training network parameters for epoch %d(%d)" % (epoch, kwargs['epochs']))
 
             # write logger
-            logger.info(epoch)
+            logger.info('epoch %d in (evo %d)'%(epoch-kwargs['warmup'], evo_epoch))
 
             # 每个epoch调整一次学习率
             # adjust learning rate
-            lr = nas_manager.adjust_lr(kwargs, epoch, epoch*len(train_loader), len(train_loader), ['path'])
+            lr = nas_manager.adjust_lr(kwargs, evo_epoch*kwargs['epochs']+epoch, 0, len(train_loader), ['path'])
             xp.train.learning_rate.update(lr)
 
             # training architecture parameter
@@ -228,7 +228,6 @@ def main(*args, **kwargs):
 
                 # record model loss
                 xp.train.classif_loss.update(loss.item())
-                logging.info('loss %f' % xp.train.classif_loss.value)
 
                 # train and return predictions, loss, correct
                 nas_manager.optimizer.zero_grad()

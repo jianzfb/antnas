@@ -10,7 +10,6 @@ import networkx as nx
 from antnas.component.NetworkCell import *
 from antnas.networks.UniformSamplingSuperNetwork import UniformSamplingSuperNetwork
 from antnas.networks.AnchorsUniformSamplingSuperNetwork import *
-from antnas.networks.EvolutionSuperNetwork import *
 from antnas.utils.drawers.NASDrawer import NASDrawer
 from antnas.component.Loss import *
 from antnas.component.ClassificationAccuracyEvaluator import *

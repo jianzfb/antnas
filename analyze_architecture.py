@@ -11,8 +11,7 @@ from antnas.utils.misc import *
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--architecture', type=str, default='',
-                        help='input batch size for training (default: 64)')
+parser.add_argument('--architecture', type=str, default='')
 parser.add_argument('--cost_evaluation', default=['latency'], type=restricted_list('comp', 'latency', 'param'))
 parser.add_argument('--devices', default='0', type=str)
 parser.add_argument('--shape', default='1,3,224,224', type=str)

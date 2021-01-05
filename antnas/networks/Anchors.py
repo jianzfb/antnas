@@ -6,7 +6,6 @@ from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
 from antnas.component.NetworkCell import *
-from antnas.networks.EvolutionSuperNetwork import *
 from antnas.utils.drawers.NASDrawer import NASDrawer
 from antnas.component.Loss import *
 from antnas.component.ClassificationAccuracyEvaluator import *
