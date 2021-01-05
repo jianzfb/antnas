@@ -254,7 +254,7 @@ class PKAsynImageNetSN(UniformSamplingSuperNetwork):
         self.sbca = \
             DualStageBlockCellArc(ImageNetCellBlock,
                               ImageNetReductionCellBlock,
-                              AddBlock,
+                              ConcatBlock,
                               ConvBn,
                               self.graph,
                               cross_interval=1)

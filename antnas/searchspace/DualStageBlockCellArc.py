@@ -147,16 +147,20 @@ class DualStageBlockCellArc(Arc):
                               self.reduction_cell_cls(pre_block_channels if cell_i == 0 else channles, channles),
                               SuperNetwork._CELL_NODE_FORMAT)
             else:
+                in_channels = pre_block_channels if cell_i == 0 else channles
+                if cell_i >= self.cross_interval and self.aggregation_cls == ConcatBlock:
+                    in_channels = in_channels * 2
+
                 # branch 1
                 self.add_cell((0, pos_offset + cell_i * 4 + 1),
-                              self.cell_cls(pre_block_channels if cell_i == 0 else channles,
+                              self.cell_cls(in_channels,
                                             channles,
                                             reduction=False),
                               SuperNetwork._CELL_NODE_FORMAT)
 
                 # branch 2
                 self.add_cell((3, pos_offset + cell_i * 4 + 3),
-                              self.cell_cls(pre_block_channels if cell_i == 0 else channles,
+                              self.cell_cls(in_channels,
                                             channles,
                                             reduction=False),
                               SuperNetwork._CELL_NODE_FORMAT)

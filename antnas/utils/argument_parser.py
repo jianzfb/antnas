@@ -21,7 +21,7 @@ def antnas_argment(func):
     parser.add_argument('-dashboard_port', action='store', default=8999, type=int)
 
     # Model
-    parser.add_argument('-arch', action='store', default='PKAsynImageNetContinuousSN', type=str)
+    parser.add_argument('-arch', action='store', default='PKAsynImageNetSN', type=str)
     parser.add_argument('-deter_eval', action='store', default=False, type=bool,
                         help='Take blocks with probas >0.5 instead of sampling during evaluation')
 

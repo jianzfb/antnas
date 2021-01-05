@@ -1109,7 +1109,7 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
                                  kernel_size=kernel_size,
                                  groups=expansion_channels,
                                  stride=2 if reduction else 1,
-                                 padding=kernel_size // 2 + (kernel_size-1)*(dilation-1) // 2,
+                                 padding=kernel_size // 2 + (kernel_size - 1) * (dilation - 1) // 2,
                                  bias=False,
                                  dilation=dilation)
         self.bn2 = nn.BatchNorm2d(expansion_channels,
