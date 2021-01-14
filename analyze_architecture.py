@@ -8,7 +8,10 @@ from __future__ import print_function
 from antnas.searchspace.LoadArc import *
 from sota.mobilenet_v3 import *
 from antnas.utils.misc import *
+from antnas.networks.FixedNetwork import *
 import argparse
+from thop import profile
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--architecture', type=str, default='')
@@ -16,7 +19,6 @@ parser.add_argument('--cost_evaluation', default=['latency'], type=restricted_li
 parser.add_argument('--devices', default='0', type=str)
 parser.add_argument('--shape', default='1,3,224,224', type=str)
 parser.add_argument('--latency_lookup_table', default='', type=str)
-
 
 
 class ImageNetOutLayer(NetworkBlock):
@@ -43,6 +45,7 @@ class ImageNetOutLayer(NetworkBlock):
             'out': 'outname',
             'in_chan': in_chan,
         }
+        pass
 
     def forward(self, x, sampling=None):
         x = self.conv_1(x)
@@ -69,17 +72,29 @@ if __name__ == '__main__':
     shape = args.shape
     latency_lookup_table = args.latency_lookup_table
 
+    end_pos = architecture_path.split('/')[-1].find('.architecture')
+    architecture_name = architecture_path.split('/')[-1][:end_pos]
+
     # 加载模型
     pk = LoadArc(architecture_path)
     pk.generate(tail=ImageNetOutLayer)
-
     # 计算代价
-    input_shape = [(int)(s) for s in shape.split(',')]
-    for ce in cost_evaluation:
-        sampled_loss, pruned_loss = \
-            pk.arc_loss(input_shape,
-                        ce,
-                        latency_lookup_table=latency_lookup_table,
-                        devices=[] if ce != 'latency' else [(int)(m) for m in devices.split(',')])
+    # input_shape = [(int)(s) for s in shape.split(',')]
+    # for ce in cost_evaluation:
+    #     sampled_loss, pruned_loss = \
+    #         pk.arc_loss(input_shape,
+    #                     ce,
+    #                     latency_lookup_table=latency_lookup_table,
+    #                     devices=[] if ce != 'latency' else [(int)(m) for m in devices.split(',')])
+    #
+    #     print('%s - %f'%(ce, pruned_loss[0].item()))
 
-        print('%s - %f'%(ce, pruned_loss[0].item()))
+    model = FixedNetwork(architecture=architecture_path,
+                         output_layer_cls=ImageNetOutLayer,
+                         accuracy_evaluator_cls=None,
+                         network_name=architecture_name)
+    input_size = (1, 3, 224, 224)
+    input = torch.randn(1, 3, 224, 224)
+    flops, params = profile(model, inputs=(input, None))
+    print('Total params: %.2fM' % (params/1000000.0))
+    print('Total flops: %.2fM' % (flops/1000000.0))

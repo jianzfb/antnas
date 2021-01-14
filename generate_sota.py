@@ -55,7 +55,7 @@ class ImageNetOutLayer(NetworkBlock):
 
 # mobilenetv3-large
 # head (固定计算节点，对应激活参数不可学习)
-head = ConvBn(3, 16, k_size=3, stride=1, relu=True)
+head = ConvBn(3, 16, k_size=3, stride=2, relu=True)
 # tail (固定计算节点，结构不可学习)
 tail = ImageNetOutLayer((int)(160*0.75))
 mobilenetv3_large(head, tail, "", 0.75)

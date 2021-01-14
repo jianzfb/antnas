@@ -11,6 +11,7 @@ import numpy as np
 import torch
 import json
 import os
+import math
 
 
 class NetworkBlock(nn.Module):
@@ -1056,7 +1057,7 @@ class BottleneckBlock(NetworkBlock):
         return latency_cost
 
 
-def _make_divisible(v, divisor=8, min_value=8):
+def _make_divisible(v, divisor=4, min_value=None):
     if min_value is None:
         min_value = divisor
     new_v = max(min_value, int(v + divisor / 2) // divisor * divisor)
@@ -1094,7 +1095,7 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
         # expansion,
         expansion_channels = in_chan
         if expansion != 1:
-            expansion_channels = _make_divisible(in_chan * expansion)
+            expansion_channels = _make_divisible(in_chan * expansion, 4)
             self.conv1 = nn.Conv2d(in_chan,
                                    expansion_channels,
                                    kernel_size=1,
@@ -1118,7 +1119,7 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
 
         # for se
         if se:
-            squeeze_channels = _make_divisible(expansion_channels / ratio, divisor=8)
+            squeeze_channels = _make_divisible(expansion_channels / ratio, divisor=4)
             self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
             self.se_conv_layer_1 = nn.Conv2d(expansion_channels,
                                              squeeze_channels,
@@ -1345,6 +1346,219 @@ class InvertedResidualBlockWithSEHS(NetworkBlock):
             return [latency_cost, latency_cost_gpu]
 
         return latency_cost
+
+
+def hard_sigmoid(x, inplace: bool = False):
+    if inplace:
+        return x.add_(3.).clamp_(0., 6.).div_(6.)
+    else:
+        return F.relu6(x + 3.) / 6.
+
+
+class SqueezeExcite(nn.Module):
+    def __init__(self, in_chs, se_ratio=0.25, reduced_base_chs=None,
+                 act_layer=nn.ReLU, gate_fn=hard_sigmoid, divisor=4, **_):
+        super(SqueezeExcite, self).__init__()
+        self.gate_fn = gate_fn
+        reduced_chs = _make_divisible((reduced_base_chs or in_chs) * se_ratio, divisor)
+
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.conv_reduce = nn.Conv2d(in_chs, reduced_chs, 1, bias=True)
+        self.act1 = act_layer(inplace=True)
+        self.conv_expand = nn.Conv2d(reduced_chs, in_chs, 1, bias=True)
+
+    def forward(self, x):
+        x_se = self.avg_pool(x)
+        x_se = self.conv_reduce(x_se)
+        x_se = self.act1(x_se)
+        x_se = self.conv_expand(x_se)
+        x = x * self.gate_fn(x_se)
+        return x
+
+    def param(self):
+        conv1_param = \
+            self.conv_reduce.kernel_size[0]*\
+            self.conv_reduce.kernel_size[1]*\
+            self.conv_reduce.in_channels*self.conv_reduce.out_channels+self.conv_reduce.out_channels
+        conv2_param = \
+            self.conv_expand.kernel_size[0]*\
+            self.conv_expand.kernel_size[1]*\
+            self.conv_expand.in_channels*self.conv_expand.out_channels+self.conv_expand.out_channels
+
+        return conv1_param+conv2_param
+
+    def flops(self):
+        return 0
+
+
+class GhostModule(nn.Module):
+    def __init__(self, inp, oup, kernel_size=1, ratio=2, dw_size=3, stride=1, relu=True):
+        super(GhostModule, self).__init__()
+        self.inp = inp
+        self.oup = oup
+        self.init_channels = math.ceil(oup / ratio)
+        self.new_channels = self.init_channels*(ratio-1)
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.dw_size = dw_size
+
+        self.primary_conv = nn.Sequential(
+            nn.Conv2d(inp, self.init_channels, kernel_size, stride, kernel_size//2, bias=False),
+            nn.BatchNorm2d(self.init_channels),
+            nn.ReLU(inplace=True) if relu else nn.Sequential(),
+        )
+
+        self.cheap_operation = nn.Sequential(
+            nn.Conv2d(self.init_channels, self.new_channels, dw_size, 1, dw_size//2, groups=self.init_channels, bias=False),
+            nn.BatchNorm2d(self.new_channels),
+            nn.ReLU(inplace=True) if relu else nn.Sequential(),
+        )
+
+    def forward(self, x):
+        x1 = self.primary_conv(x)
+        x2 = self.cheap_operation(x1)
+        out = torch.cat([x1,x2], dim=1)
+        return out[:,:self.oup,:,:]
+
+    def param(self):
+        conv1_param = self.inp * self.init_channels * self.kernel_size * self.kernel_size
+        bn1_param = 2 * self.init_channels
+
+        group = self.init_channels
+        conv2_param = self.dw_size*self.dw_size*group*(self.init_channels//group)*(self.new_channels//group)
+        bn2_param = 2 * self.new_channels
+        return conv1_param+bn1_param+conv2_param+bn2_param
+
+    def flops(self):
+        return 0
+
+
+class GhostBottleneck(NetworkBlock):
+    """ Ghost bottleneck w/ optional SE"""
+
+    def __init__(self, in_chan,  out_chan, mid_chan=None, expansion=None, dw_kernel_size=3,
+                 stride=1, act_layer=nn.ReLU, se_ratio=0., reduction=False, **kwargs):
+        super(GhostBottleneck, self).__init__()
+        self.structure_fixed = False
+
+        if mid_chan is None:
+            mid_chan = _make_divisible(in_chan * expansion, 4)
+
+        if reduction:
+            stride = 2
+
+        self.params = {
+            'module_list': ['GhostBottleneck'],
+            'name_list': ['GhostBottleneck'],
+            'GhostBottleneck': {'in_chan': in_chan,
+                                'se_ratio': se_ratio,
+                                'dw_kernel_size': dw_kernel_size,
+                                'out_chan': out_chan,
+                                'mid_chan': mid_chan,
+                                'expansion': expansion,
+                                'stride': stride},
+            'in_chan': in_chan,
+            'out_chan': out_chan
+        }
+
+        has_se = se_ratio is not None and se_ratio > 0.
+        self.stride = stride
+
+        # Point-wise expansion
+        self.ghost1 = GhostModule(in_chan, mid_chan, relu=True)
+
+        # Depth-wise convolution
+        if self.stride > 1:
+            self.conv_dw = nn.Conv2d(mid_chan, mid_chan, dw_kernel_size, stride=stride,
+                                     padding=(dw_kernel_size - 1) // 2,
+                                     groups=mid_chan, bias=False)
+            self.bn_dw = nn.BatchNorm2d(mid_chan)
+
+        # Squeeze-and-excitation
+        if has_se:
+            self.se = SqueezeExcite(mid_chan, se_ratio=se_ratio)
+        else:
+            self.se = None
+
+        # Point-wise linear projection
+        self.ghost2 = GhostModule(mid_chan, out_chan, relu=False)
+
+        # shortcut
+        if (in_chan == out_chan and self.stride == 1):
+            self.shortcut = nn.Sequential()
+        else:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_chan, in_chan, dw_kernel_size, stride=stride,
+                          padding=(dw_kernel_size - 1) // 2, groups=in_chan, bias=False),
+                nn.BatchNorm2d(in_chan),
+                nn.Conv2d(in_chan, out_chan, 1, stride=1, padding=0, bias=False),
+                nn.BatchNorm2d(out_chan),
+            )
+        self.in_chan = in_chan
+        self.out_chan = out_chan
+        self.dw_kernel_size = dw_kernel_size
+
+    def forward(self, x, sampling=None):
+        residual = x
+
+        # 1st ghost bottleneck
+        x = self.ghost1(x)
+
+        # Depth-wise convolution
+        if self.stride > 1:
+            x = self.conv_dw(x)
+            x = self.bn_dw(x)
+
+        # Squeeze-and-excitation
+        if self.se is not None:
+            x = self.se(x)
+
+        # 2nd ghost bottleneck
+        x = self.ghost2(x)
+
+        x += self.shortcut(residual)
+
+        if sampling is None:
+            return x
+
+        is_activate = int(sampling.item())
+        if is_activate == 1:
+            return x
+        else:
+            return torch.zeros(x.shape, device=x.device)
+
+    def get_param_num(self, x):
+        ghost1_param = self.ghost1.param()
+        depth_wise_conv_param = 0
+        if self.stride > 1:
+            depth_wise_conv_param += \
+                self.conv_dw.kernel_size[0]*\
+                self.conv_dw.kernel_size[1]*\
+                self.conv_dw.groups*\
+                (self.conv_dw.in_channels//self.conv_dw.groups)*\
+                (self.conv_dw.out_channels//self.conv_dw.groups)
+
+            depth_wise_conv_param += 2*self.conv_dw.out_channels
+        se_param = 0
+        if self.se is not None:
+            se_param = self.se.param()
+
+        ghost2_param = self.ghost2.param()
+
+        shortcut_param = 0
+        if not (self.in_chan == self.out_chan and self.stride == 1):
+            shortcut_param += self.in_chan*self.dw_kernel_size*self.dw_kernel_size
+            shortcut_param += 2*self.in_chan
+
+            shortcut_param += self.in_chan*self.out_chan
+            shortcut_param += 2*self.out_chan
+
+        params = ghost1_param+depth_wise_conv_param+se_param+ghost2_param+shortcut_param
+
+        return [0] + [params] + [0]*(NetworkBlock.state_num - 2)
+
+    def get_flop_cost(self, x):
+        return [0] + [0] + [0]*(NetworkBlock.state_num - 2)
 
 
 class ASPPBlock(NetworkBlock):

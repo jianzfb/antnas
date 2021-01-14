@@ -91,3 +91,22 @@ macs, params = profile(cn_7, inputs=(input, ))
 print("test - 7")
 print("thop: macs %f params %f"%(macs, params))
 print("antnas: macs %f params %f"%(cn_7.get_flop_cost(input)[1], cn_7.get_param_num(input)[1]))
+
+
+# 测试 8: GhostBottleneck flops, params
+cn_8 = GhostBottleneck(32, 64, expansion=3, stride=2, se_ratio=1.0)
+input = torch.randn(1, 32, 224, 224)
+macs, params = profile(cn_8, inputs=(input, ))
+
+print("test - 8")
+print("thop: macs %f params %f"%(macs, params))
+print("antnas: macs %f params %f"%(cn_8.get_flop_cost(input)[1], cn_8.get_param_num(input)[1]))
+
+# 测试9： BottleneckBlock flops, params
+cn_9 = BottleneckBlock(32, 64, k_size=3, stride=2)
+input = torch.randn(1, 32, 224, 224)
+macs, params = profile(cn_9, inputs=(input, ))
+
+print("test - 9")
+print("thop: macs %f params %f"%(macs, params))
+print("antnas: macs %f params %f"%(cn_9.get_flop_cost(input)[1], cn_9.get_param_num(input)[1]))

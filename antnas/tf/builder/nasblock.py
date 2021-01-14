@@ -107,8 +107,9 @@ class InvertedResidualBlockWithSEHS(NasBlock):
                             activation_fn=None,
                             normalizer_fn=slim.batch_norm,
                             padding='SAME')
-        
-            if input_shape[-1] == out_chan and (stride == 1):
+
+            skip = kwargs.get('skip', True)
+            if input_shape[-1] == out_chan and (stride == 1) and skip:
                 x = tf.add(x, inputs)
             return x
 

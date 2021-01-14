@@ -72,7 +72,9 @@ class FixedNetwork(nn.Module):
             print('build node %s with sampling %s op' % (node_name, sampled_module_name))
 
         # 绘制网络结构图
-        NASDrawer().draw(self.graph, filename='./%s.svg' % self._network_name)
+        end_pos = architecture_path.split('/')[-1].find('.architecture')
+        architecture_name = architecture_path.split('/')[-1][:end_pos]
+        NASDrawer().draw(self.graph, filename='./%s.svg' % architecture_name)
 
         # 初始化网络权重
         initialize_weights(self)
