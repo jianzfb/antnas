@@ -62,6 +62,23 @@ class FixedNetwork(nn.Module):
                     sampled_module_name = cur_node['module_params']['name_list'][0]
                     self.blocks[cur_node['module']] = Zero(**cur_node['module_params'][sampled_module_name])
                     sampled_module_name = 'ZERO'
+
+                # if node_name.startswith('A'):
+                #     # 检查前一个是否为空
+                #     is_modify = False
+                #     for succ in self.graph.predecessors(node_name):
+                #         mm = self.graph.node[succ]['module_params']['name_list'][0]
+                #         out_chan = self.graph.node[succ]['module_params'][mm]['out_chan']
+                #         if succ.startswith("T") and self.graph.node[succ]['sampled'] == 0:
+                #             is_modify = True
+                #             break
+                #
+                #     for des in self.graph.successors(node_name):
+                #         if des.startswith('CELL') and is_modify:
+                #             ss = self.graph.node[des]['sampled']
+                #             ss_name = self.graph.node[des]['module_params']['name_list'][ss]
+                #             in_chan = self.graph.node[des]['module_params'][ss_name]['in_chan']
+                #             self.graph.node[des]['module_params'][ss_name]['in_chan'] = in_chan // 2
             else:
                 # 多模块，多选自选择
                 sampled_module = globals()[module_list[sampled_module_index]]
@@ -89,7 +106,11 @@ class FixedNetwork(nn.Module):
 
         model_out = None
         for node in self.traversal_order:
+            print(node)
             cur_node = self.graph.node[node]
+            # if node.startswith('T') and cur_node['sampled'] == 0:
+            #     continue
+
             input = self.format_input(data_dict[node])
 
             # 3.2.step execute node op

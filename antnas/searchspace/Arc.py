@@ -69,7 +69,7 @@ class Arc(object):
     def net(self):
         return self.graph
 
-    def arc_loss(self, shape, loss='latency', feature=None, latency_lookup_table=None, devices=[]):
+    def arc_loss(self, shape, loss='latency', latency_lookup_table=None, devices=[]):
         if len(devices) > 1:
             NetworkBlock.device_num = len(devices)
 
@@ -89,20 +89,20 @@ class Arc(object):
         sampling = torch.Tensor()
         active = torch.Tensor()
 
-        # 初始化path_recorder
-        if feature is None:
-            feature = [1 for _ in range(len(self.traversal_order))]
-            
         for node_name in self.traversal_order:
             cur_node = self.graph.node[node_name]
+            sampled_v = cur_node['sampled']
+
+            structure_fixed = False
+            if node_name.startswith('CELL'):
+                structure_fixed = True
 
             sampling, active = \
                 self.path_recorder.add_sampling(node_name,
-                                                torch.as_tensor([feature[cur_node['sampling_param']]]).reshape(
-                                                    [1, 1, 1, 1]),
+                                                torch.as_tensor([sampled_v]).reshape([1, 1, 1, 1]),
                                                 sampling,
                                                 active,
-                                                self.blocks[cur_node['module']].structure_fixed)
+                                                structure_fixed)
 
         # 初始化结构损失估计函数
         self.cost_evaluator.init_costs(self, self.graph, input_node=self.in_node, input_shape=shape)

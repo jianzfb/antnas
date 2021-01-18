@@ -29,36 +29,46 @@ class ImageNetOutLayer(NetworkBlock):
         super(ImageNetOutLayer, self).__init__()
         self.global_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
 
-        self.conv_1 = nn.Conv2d(in_chan, 960, kernel_size=1, stride=1, padding=0, bias=False)
-        self.bn_1 = nn.BatchNorm2d(960,
-                                   momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
-                                   track_running_stats=NetworkBlock.bn_track_running_stats)
+        # self.conv_1 = nn.Conv2d(160, 960, kernel_size=1, stride=1, padding=0, bias=False)
+        # self.bn_1 = nn.BatchNorm2d(960,
+        #                            momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+        #                            track_running_stats=NetworkBlock.bn_track_running_stats)
+        #
+        # self.conv_2 = nn.Conv2d(960, 1280, kernel_size=1, stride=1, padding=0, bias=False)
+        # self.classifier = nn.Linear(1280, 1000)
 
-        self.conv_2 = nn.Conv2d(960, 1280, kernel_size=1, stride=1, padding=0, bias=False)
-        self.classifier = nn.Linear(1280, 1000)
-        self.dropout = torch.nn.Dropout(p=0.9)
-
-        self.params = {
-            'module_list': ['ImageNetOutLayer'],
-            'name_list': ['ImageNetOutLayer'],
-            'ImageNetOutLayer': {'in_chan': in_chan},
-            'out': 'outname',
-            'in_chan': in_chan,
-        }
+        # self.conv_1 = nn.Conv2d(160, 576, kernel_size=1, stride=1, padding=0, bias=False)
+        # self.bn_1 = nn.BatchNorm2d(576,
+        #                            momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+        #                            track_running_stats=NetworkBlock.bn_track_running_stats)
+        #
+        # self.conv_2 = nn.Conv2d(576, 1024, kernel_size=1, stride=1, padding=0, bias=False)
+        # self.classifier = nn.Linear(1024, 1000)
+        #
+        # self.dropout = torch.nn.Dropout(p=0.9)
+        #
+        # self.params = {
+        #     'module_list': ['ImageNetOutLayer'],
+        #     'name_list': ['ImageNetOutLayer'],
+        #     'ImageNetOutLayer': {'in_chan': in_chan},
+        #     'out': 'outname',
+        #     'in_chan': in_chan,
+        # }
         pass
 
     def forward(self, x, sampling=None):
-        x = self.conv_1(x)
-        x = self.bn_1(x)
-        x = F.relu(x)
-
-        x = self.global_pool(x)
-        x = self.conv_2(x)
-        x = F.relu(x)
-        x = self.dropout(x)
-
-        x = x.view(x.size(0), -1)
-        x = self.classifier(x)
+        # x = torch.zeros((1,160,7,7))
+        # x = self.conv_1(x)
+        # x = self.bn_1(x)
+        # x = F.relu(x)
+        #
+        # x = self.global_pool(x)
+        # x = self.conv_2(x)
+        # x = F.relu(x)
+        # x = self.dropout(x)
+        #
+        # x = x.view(x.size(0), -1)
+        # x = self.classifier(x)
         return x
 
 
@@ -75,10 +85,10 @@ if __name__ == '__main__':
     end_pos = architecture_path.split('/')[-1].find('.architecture')
     architecture_name = architecture_path.split('/')[-1][:end_pos]
 
-    # 加载模型
-    pk = LoadArc(architecture_path)
-    pk.generate(tail=ImageNetOutLayer)
-    # 计算代价
+    # # 加载模型
+    # pk = LoadArc(architecture_path)
+    # pk.generate(tail=ImageNetOutLayer)
+    # # 计算代价
     # input_shape = [(int)(s) for s in shape.split(',')]
     # for ce in cost_evaluation:
     #     sampled_loss, pruned_loss = \

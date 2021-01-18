@@ -1501,6 +1501,7 @@ class GhostBottleneck(NetworkBlock):
     def forward(self, x, sampling=None):
         residual = x
 
+        print(x.shape)
         # 1st ghost bottleneck
         x = self.ghost1(x)
 

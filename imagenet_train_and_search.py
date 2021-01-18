@@ -73,12 +73,12 @@ def main(*args, **kwargs):
         get_data(kwargs['dset'], kwargs['bs'], kwargs['path'], kwargs)
 
     # 创建NAS模型
-    nas_manager = Manager(kwargs, data_properties, out_layer=ImageNetOutLayer(320))
+    nas_manager = Manager(kwargs, data_properties, out_layer=ImageNetOutLayer(192))
 
     # pk mobilenetv2
     nas_manager.build(blocks_per_stage=[1, 1, 1, 2, 2],
                       cells_per_block=[[2], [2], [2], [2, 2], [2, 2]],
-                      channels_per_block=[[8], [12], [24], [48, 96], [112, 160]])
+                      channels_per_block=[[8], [12], [24], [48, 56], [80, 96]])
 
     # # pk mobilenetv2
     # nas_manager.build(blocks_per_stage=[1, 1, 2, 2, 2],
