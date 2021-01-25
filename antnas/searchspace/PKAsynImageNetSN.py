@@ -243,7 +243,6 @@ class PKAsynImageNetSN(UniformSamplingSuperNetwork):
         self._input_size = (self.in_chan, self.in_size, self.in_size)
         self.graph = nx.DiGraph()
         self.sampling_parameters = nn.ParameterList()
-        self._loss = nn.CrossEntropyLoss()
 
         # head (固定计算节点，对应激活参数不可学习)
         head = ConvBn(self.in_chan, channels_per_block[0][0], k_size=3, stride=2, relu=True)
@@ -254,8 +253,8 @@ class PKAsynImageNetSN(UniformSamplingSuperNetwork):
         self.sbca = \
             DualStageBlockCellArc(ImageNetCellBlock,
                               ImageNetReductionCellBlock,
-                              ConcatBlock,
-                              ConvBn,
+                              AddBlock,
+                              lambda in_chan, out_chan: ConvBn(in_chan, out_chan, relu=False),
                               self.graph,
                               cross_interval=1)
         in_name, out_name =\

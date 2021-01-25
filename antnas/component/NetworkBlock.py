@@ -294,13 +294,14 @@ class ConvBn(NetworkBlock):
     n_layers = 1
     n_comp_steps = 1
 
-    def __init__(self, in_chan, out_chan, relu, k_size=3, stride=1, dilation=1):
+    def __init__(self, in_chan, out_chan, relu=True, k_size=3, stride=1, dilation=1, use_bn=True):
         super(ConvBn, self).__init__()
         self.conv = nn.Conv2d(in_chan, out_chan, kernel_size=k_size, stride=stride, padding=k_size//2, bias=False, dilation=dilation)
         self.bn = nn.BatchNorm2d(out_chan,
                                  momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
                                  track_running_stats=NetworkBlock.bn_track_running_stats)
         self.relu = relu
+        self.use_bn = use_bn
         self.out_chan = out_chan
         self.params = {
             'module_list': ['ConvBn'],
@@ -310,7 +311,8 @@ class ConvBn(NetworkBlock):
                        'k_size': k_size,
                        'relu': relu,
                        'dilation': dilation,
-                       'in_chan': in_chan},
+                       'in_chan': in_chan,
+                       'use_bn': use_bn},
             'in_chan': in_chan,
             'out_chan': out_chan
         }
@@ -318,7 +320,8 @@ class ConvBn(NetworkBlock):
 
     def forward(self, x, sampling=None):
         x = self.conv(x)
-        x = self.bn(x)
+        if self.use_bn:
+            x = self.bn(x)
         if self.relu:
             x = F.relu(x)
         if sampling is None:
@@ -1055,6 +1058,298 @@ class BottleneckBlock(NetworkBlock):
             return [latency_cost, latency_cost_gpu]
 
         return latency_cost
+
+
+class AsynBasicBlock(NetworkBlock):
+    def __init__(self, in_chan, out_chan, k_size=3, stride=1):
+        super(AsynBasicBlock, self).__init__()
+        self.structure_fixed = False
+
+        self.params = {
+            'module_list': [self.__class__.__name__],
+            'name_list': [self.__class__.__name__],
+            self.__class__.__name__: {'in_chan': in_chan,
+                           'out_chan': out_chan,
+                           'k_size': k_size,
+                           'stride': stride},
+            'in_chan': in_chan,
+            'out_chan': out_chan
+        }
+
+        self.bn1 = nn.BatchNorm2d(in_chan,
+                                  momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                                  track_running_stats=NetworkBlock.bn_track_running_stats
+                                  )
+        self.relu = nn.ReLU(inplace=True)
+        self.conv1 = nn.Conv2d(in_chan,
+                               out_chan,
+                               kernel_size=k_size,
+                               stride=stride,
+                               padding=k_size//2,
+                               bias=False)
+
+        self.in_chan = in_chan
+        self.out_chan = out_chan
+        self.k_size = k_size
+        self.stride = stride
+
+    def forward(self, x, sampling=None):
+        residual = x
+        out = self.conv1(self.relu(self.bn1(x)))
+
+        if self.in_chan == self.out_chan:
+            out = out + residual
+
+        if sampling is None:
+            return out
+
+        is_activate = int(sampling.item())
+        if is_activate == 1:
+            return out
+        else:
+            return torch.zeros(out.shape, device=out.device)
+
+    def get_param_num(self, x):
+        conv1_params = \
+            self.conv1.kernel_size[0]*self.conv1.kernel_size[1]*self.conv1.in_channels*self.conv1.out_channels + 2*self.in_chan
+
+        return [0] + [conv1_params] + [0] * (NetworkBlock.state_num - 2)
+
+    def get_flop_cost(self, x):
+        conv_in_data_size = torch.Size([1, *x.shape[1:]])
+        conv_out_data_size = torch.Size([1, self.out_chan, x.shape[-2]//self.conv1.stride[0], x.shape[-1]//self.conv1.stride[1]])
+
+        flops_1 = self.get_bn_flops(self.bn1, conv_in_data_size, conv_in_data_size)
+        flops_2 = self.get_conv2d_flops(self.conv1, conv_in_data_size, conv_out_data_size)
+
+        flops_cost = [0] + [flops_1+flops_2] + [0] * (NetworkBlock.state_num - 2)
+        return flops_cost
+
+
+class AsynBottlenectBlock(NetworkBlock):
+    def __init__(self, in_chan, out_chan, k_size=3, stride=1, expansion=4):
+        super(AsynBottlenectBlock, self).__init__()
+        self.structure_fixed = False
+
+        self.params = {
+            'module_list': [self.__class__.__name__],
+            'name_list': [self.__class__.__name__],
+            self.__class__.__name__: {'in_chan': in_chan,
+                           'out_chan': out_chan,
+                           'k_size': k_size,
+                           'stride': stride,
+                           'expansion': expansion},
+            'in_chan': in_chan,
+            'out_chan': out_chan
+        }
+        self.in_chan = in_chan
+        self.out_chan = out_chan
+        self.k_size = k_size
+        self.stride = stride
+        self.expansion = expansion
+
+        inter_planes = expansion * 4
+        self.bn1 = nn.BatchNorm2d(in_chan,
+                                  momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                                  track_running_stats=NetworkBlock.bn_track_running_stats)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv1 = nn.Conv2d(in_chan, inter_planes, kernel_size=1, stride=1,
+                               padding=0, bias=False)
+        self.bn2 = nn.BatchNorm2d(inter_planes,
+                                  momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                                  track_running_stats=NetworkBlock.bn_track_running_stats)
+        self.conv2 = nn.Conv2d(inter_planes, out_chan, kernel_size=k_size, stride=stride,
+                               padding=k_size//2, bias=False)
+
+    def forward(self, x, sampling=None):
+        residual = x
+
+        out = self.conv1(self.relu(self.bn1(x)))
+        out = self.conv2(self.relu(self.bn2(out)))
+
+        if self.in_chan == self.out_chan and self.stride == 1:
+            out = out + residual
+
+        if sampling is None:
+            return out
+
+        is_activate = int(sampling.item())
+        if is_activate == 1:
+            return out
+        else:
+            return torch.zeros(out.shape, device=out.device)
+
+    def get_param_num(self, x):
+        conv1_params = \
+            self.conv1.kernel_size[0]*self.conv1.kernel_size[1]*self.conv1.in_channels*self.conv1.out_channels + 2*self.conv1.in_channels
+        conv2_params = \
+            self.conv2.kernel_size[0]*self.conv2.kernel_size[1]*self.conv2.in_channels*self.conv2.out_channels + 2*self.conv2.in_channels
+
+        return [0] + [conv1_params+conv2_params] + [0]*(NetworkBlock.state_num - 2)
+
+    def get_flop_cost(self, x):
+        conv_in_data_size = torch.Size([1, *x.shape[1:]])
+        conv_out_data_size = torch.Size([1, self.conv1.out_channels, x.shape[-2], x.shape[-1]])
+
+        bn_1_flops = self.get_bn_flops(self.bn1, conv_in_data_size, conv_in_data_size)
+        conv_1_flops = self.get_conv2d_flops(self.conv1, conv_in_data_size, conv_out_data_size)
+
+        conv_in_data_size = torch.Size([1, self.conv2.in_channels, x.shape[-2], x.shape[-1]])
+        conv_out_data_size = torch.Size([1, self.conv2.out_channels, x.shape[-2]//self.stride, x.shape[-1]//self.stride])
+
+        bn_2_flops = self.get_bn_flops(self.bn2, conv_in_data_size, conv_in_data_size)
+        conv_2_flops = self.get_conv2d_flops(self.conv2, conv_in_data_size, conv_out_data_size)
+
+        flops = conv_1_flops+bn_1_flops+conv_2_flops+bn_2_flops
+        return [0] + [flops] + [0]*(NetworkBlock.state_num - 2)
+
+
+class AsynMB(NetworkBlock):
+    # only test
+    def __init__(self, in_chan, out_chan, expansion, k_size, stride=1):
+        super(AsynMB, self).__init__()
+        self.structure_fixed = False
+        self.params = {
+            'module_list': [self.__class__.__name__],
+            'name_list': [self.__class__.__name__],
+            self.__class__.__name__: {'in_chan': in_chan,
+                                      'expansion': expansion,
+                                      'k_size': k_size,
+                                      'out_chan': out_chan,
+                                      'stride': stride},
+            'in_chan': in_chan,
+            'out_chan': out_chan
+        }
+
+        # expansion,
+        expansion_channels = in_chan
+        if expansion != 1:
+            expansion_channels = _make_divisible(in_chan * expansion, 4)
+            self.bn1 = nn.BatchNorm2d(in_chan,
+                                      momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                                      track_running_stats=NetworkBlock.bn_track_running_stats)
+            self.conv1 = nn.Conv2d(in_chan,
+                                   expansion_channels,
+                                   kernel_size=1,
+                                   stride=1,
+                                   bias=False)
+
+        # depthwise
+        self.bn2 = nn.BatchNorm2d(expansion_channels,
+                                  momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                                  track_running_stats=NetworkBlock.bn_track_running_stats)
+        self.dwconv2 = nn.Conv2d(expansion_channels,
+                                 expansion_channels,
+                                 kernel_size=k_size,
+                                 groups=expansion_channels,
+                                 stride=stride,
+                                 padding=k_size // 2,
+                                 bias=False)
+
+        # pointwise
+        self.bn3 = nn.BatchNorm2d(expansion_channels,
+                                  momentum=1.0 if not NetworkBlock.bn_moving_momentum else 0.1,
+                                  track_running_stats=NetworkBlock.bn_track_running_stats)
+        self.conv3 = nn.Conv2d(expansion_channels,
+                               out_chan,
+                               kernel_size=1,
+                               stride=1,
+                               bias=False)
+
+        self.in_chan = in_chan
+        self.out_chan = out_chan
+        self.k_size = k_size
+        self.expansion = expansion
+        self.stride = stride
+
+    def forward(self, x, sampling=None):
+        residual = x
+        # expansion
+        if self.expansion != 1:
+            x = self.conv1(F.relu(self.bn1(x)))
+
+        # depthwise
+        x = self.dwconv2(F.relu(self.bn2(x)))
+
+        # pointwise
+        x = self.conv3(F.relu(self.bn3(x)))
+
+        if self.stride == 1 and self.in_chan == self.out_chan:
+            x = residual + x
+
+        if sampling is None:
+            return x
+
+        is_activate = int(sampling.item())
+        if is_activate == 1:
+            return x
+        else:
+            return torch.zeros(x.shape, device=x.device)
+
+    def get_param_num(self, x):
+        conv1_param = 0
+        bn1_param = 0
+        if self.expansion != 1:
+            conv1_param = self.conv1.in_channels * self.conv1.out_channels * self.conv1.kernel_size[0] * \
+                          self.conv1.kernel_size[1]
+            bn1_param = 2 * self.conv1.in_channels
+
+        conv2_param = self.dwconv2.kernel_size[0] * self.dwconv2.kernel_size[1] * self.dwconv2.in_channels
+        bn2_param = 2 * self.dwconv2.in_channels
+
+        conv3_param = self.conv3.kernel_size[0] * self.conv3.kernel_size[
+            1] * self.conv3.in_channels * self.conv3.out_channels
+        bn3_param = 2 * self.conv3.in_channels
+
+        params = \
+            conv1_param +\
+            conv2_param +\
+            conv3_param +\
+            bn1_param +\
+            bn2_param +\
+            bn3_param
+        return [0] + [params] + [0]*(NetworkBlock.state_num - 2)
+
+    def get_flop_cost(self, x):
+        step_1_out_size = torch.Size([1, *x.shape[1:]])
+        step_2_out_size = [1, self.dwconv2.out_channels, x.shape[2], x.shape[3]]
+        if self.stride == 1 and self.in_chan == self.out_chan:
+            step_2_out_size[2] = step_2_out_size[2] // 2
+            step_2_out_size[3] = step_2_out_size[3] // 2
+        step_2_out_size = torch.Size(step_2_out_size)
+        step_3_out_size = torch.Size([1, self.out_chan, step_2_out_size[2], step_2_out_size[3]])
+
+        # expansion flops
+        flops_1 = 0.0
+        flops_2 = 0.0
+        flops_3 = 0.0
+        if self.expansion != 1:
+            step_1_in_size = torch.Size([1, *x.shape[1:]])
+            step_1_out_size = [1, self.conv1.out_channels, x.shape[2], x.shape[3]]
+            step_1_out_size = torch.Size(step_1_out_size)
+
+            flops_1 = self.get_conv2d_flops(self.conv1, step_1_in_size, step_1_out_size)
+            flops_2 = self.get_bn_flops(self.bn1, step_1_out_size, step_1_out_size)
+
+        # depthwise flops
+        flops_4 = self.get_conv2d_flops(self.dwconv2, step_1_out_size, step_2_out_size)
+        flops_5 = self.get_bn_flops(self.bn2, step_2_out_size, step_2_out_size)
+
+        # pointwise flops
+        flops_7 = self.get_conv2d_flops(self.conv3, step_2_out_size, step_3_out_size)
+        flops_8 = self.get_bn_flops(self.bn3, step_3_out_size, step_3_out_size)
+
+        total_flops = \
+            flops_1 + \
+            flops_2 + \
+            flops_3 + \
+            flops_4 + \
+            flops_5 + \
+            flops_7 + \
+            flops_8
+
+        flop_cost = [0] + [total_flops] + [0]*(NetworkBlock.state_num - 2)
+        return flop_cost
 
 
 def _make_divisible(v, divisor=4, min_value=None):

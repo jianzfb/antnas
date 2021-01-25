@@ -241,6 +241,29 @@ class DualStageBlockCellArc(Arc):
                                     SuperNetwork._AGGREGATION_NODE_FORMAT.format(3, offset_per_block[block_i]+2),
                                     width_node=SuperNetwork._AGGREGATION_NODE_FORMAT.format(3, offset_per_block[block_i]+2))
 
+        # connect dense blocks
+        for block_i in range(2, block_num):
+            # branch 1
+            in_chan = channles_per_block[block_i-2]
+            out_chan = channles_per_block[block_i-1]
+            self.add_transformer((0, offset_per_block[block_i-2]+cells_per_block[block_i-2]*4 - 3),
+                                 (0, offset_per_block[block_i]),
+                                 self.transformer_cls(in_chan, out_chan),
+                                 SuperNetwork._CELL_NODE_FORMAT,
+                                 SuperNetwork._AGGREGATION_NODE_FORMAT,
+                                 SuperNetwork._TRANSFORMATION_FORMAT)
+
+            # branch 2a
+            in_chan = channles_per_block[block_i-2]
+            out_chan = channles_per_block[block_i-1]
+            self.add_transformer((3, offset_per_block[block_i-2]+cells_per_block[block_i-2]*4 - 1),
+                                 (3, offset_per_block[block_i]+2),
+                                 self.transformer_cls(in_chan, out_chan),
+                                 SuperNetwork._CELL_NODE_FORMAT,
+                                 SuperNetwork._AGGREGATION_NODE_FORMAT,
+                                 SuperNetwork._TRANSFORMATION_FORMAT)
+            stage_offset += 2
+
         self.offset = stage_offset
         return self.offset
 

@@ -110,3 +110,30 @@ macs, params = profile(cn_9, inputs=(input, ))
 print("test - 9")
 print("thop: macs %f params %f"%(macs, params))
 print("antnas: macs %f params %f"%(cn_9.get_flop_cost(input)[1], cn_9.get_param_num(input)[1]))
+
+# 测试10： AsynBasicBlock flops, params
+cn_10 = AsynBasicBlock(32,64, k_size=3, stride=1)
+input = torch.randn(1, 32, 224, 224)
+macs, params = profile(cn_10, inputs=(input, ))
+
+print("test - 10")
+print("thop: macs %f params %f"%(macs, params))
+print("antnas: macs %f params %f"%(cn_10.get_flop_cost(input)[1], cn_10.get_param_num(input)[1]))
+
+# 测试11： AsynBottlenectBlock flops, params
+cn_11 = AsynBottlenectBlock(32,64, k_size=3, stride=1)
+input = torch.randn(1, 32, 224, 224)
+macs, params = profile(cn_11, inputs=(input, ))
+
+print("test - 11")
+print("thop: macs %f params %f"%(macs, params))
+print("antnas: macs %f params %f"%(cn_11.get_flop_cost(input)[1], cn_11.get_param_num(input)[1]))
+
+# 测试12： AsynMB flops, params
+cn_12 = AsynMB(32, 64, expansion=4, k_size=3, stride=1)
+input = torch.randn(1, 32, 224, 224)
+macs, params = profile(cn_12, inputs=(input, ))
+
+print("test - 12")
+print("thop: macs %f params %f"%(macs, params))
+print("antnas: macs %f params %f"%(cn_12.get_flop_cost(input)[1], cn_12.get_param_num(input)[1]))
