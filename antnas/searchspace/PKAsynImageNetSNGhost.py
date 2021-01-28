@@ -230,8 +230,8 @@ class PKAsynImageNetSNGhost(UniformSamplingSuperNetwork):
         self.sbca = \
             DualStageBlockCellArc(ImageNetCellBlock,
                               ImageNetReductionCellBlock,
-                              ConcatBlock,
-                              ConvBn,
+                              AddBlock,
+                              lambda in_chan, out_chan: ConvBn(in_chan, out_chan, relu=False),
                               self.graph,
                               cross_interval=1)
         in_name, out_name =\

@@ -12,6 +12,7 @@ import torch
 import json
 import os
 import math
+from torch.autograd import Variable
 
 
 class NetworkBlock(nn.Module):
@@ -232,6 +233,69 @@ class Zero(NetworkBlock):
     def get_latency(self, x):
         if NetworkBlock.device_num == 1:
             return [0.01] * self.state_num
+        else:
+            return [[0.01] * self.state_num, [0.01] * self.state_num]
+
+
+class SmoothSkip(NetworkBlock):
+    n_layers = 0
+    n_comp_steps = 0
+
+    def __init__(self, in_chan, out_chan, decay=0.9, reduction=False):
+        super(SmoothSkip, self).__init__()
+        self.in_channels = in_chan
+        self.out_channels = out_chan
+        self.reduction = reduction
+        self.pool2d = None
+        if reduction:
+            self.pool2d = torch.nn.AvgPool2d(2, 2)
+        self.structure_fixed = False
+
+        self.params = {
+            'module_list': ['Skip'],
+            'name_list': ['Skip'],
+            'Skip': {'out_chan': out_chan, 'reduction': reduction, 'in_chan': in_chan},
+            'in_chan': in_chan,
+            'out_chan': out_chan
+        }
+        self.decay = decay
+
+    def forward(self, x, sampling=None):
+        x_res = x
+        if self.out_channels > self.in_channels:
+            x_res = torch.cat([x, torch.zeros(x.size(0),
+                                              (self.out_channels - self.in_channels),
+                                              x.size(2),
+                                              x.size(3), device=x.device)], dim=1)
+        elif self.out_channels < self.in_channels:
+            x_res = x[:, 0:self.out_channels, :, :]
+
+        if self.reduction:
+            x_res = self.pool2d(x_res)
+
+        if getattr(self, 'smooth_tensor', None) is None:
+            self.register_buffer('smooth_tensor', torch.mean(x_res, dim=0, keepdim=True))
+        else:
+            self.smooth_tensor =\
+                (1.0-self.decay) * torch.mean(x_res, dim=0, keepdim=True) +\
+                self.decay * self.smooth_tensor
+
+        if sampling is None:
+            return x_res
+
+        is_activate = (int)(sampling.item())
+        if is_activate == 1:
+            return x_res
+        else:
+            # smooth_tensor 1,C,H,W
+            return self.smooth_tensor.expand(x_res.shape[0], -1, -1, -1)
+
+    def get_flop_cost(self, x):
+        return [0] * NetworkBlock.state_num
+
+    def get_latency(self, x):
+        if NetworkBlock.device_num == 1:
+            return [0.01] * NetworkBlock.state_num
         else:
             return [[0.01] * self.state_num, [0.01] * self.state_num]
 
@@ -1796,7 +1860,6 @@ class GhostBottleneck(NetworkBlock):
     def forward(self, x, sampling=None):
         residual = x
 
-        print(x.shape)
         # 1st ghost bottleneck
         x = self.ghost1(x)
 

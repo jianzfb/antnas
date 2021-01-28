@@ -192,7 +192,7 @@ class DualStageBlockCellArc(Arc):
                 # skip
                 self.add_transformer((0, pos_offset + (cell_i-self.cross_interval) * 4 + 1),
                                      (3, pos_offset + cell_i * 4 + 2),
-                                     Skip(channles, channles, False),
+                                     SmoothSkip(channles, channles, 0.9, False),
                                      SuperNetwork._CELL_NODE_FORMAT,
                                      SuperNetwork._AGGREGATION_NODE_FORMAT,
                                      SuperNetwork._TRANSFORMATION_FORMAT)
@@ -201,7 +201,7 @@ class DualStageBlockCellArc(Arc):
                 # skip
                 self.add_transformer((3, pos_offset + (cell_i-self.cross_interval) * 4 + 3),
                                      (0, pos_offset + cell_i * 4),
-                                     Skip(channles, channles, False),
+                                     SmoothSkip(channles, channles, 0.9, False),
                                      SuperNetwork._CELL_NODE_FORMAT,
                                      SuperNetwork._AGGREGATION_NODE_FORMAT,
                                      SuperNetwork._TRANSFORMATION_FORMAT)
