@@ -7,7 +7,7 @@ numpy
 easydict
 scipy
 sklearn
-Pillow==6.2.2
+Pillow==9.3.0
 psutil
 requests
 webdavclient3
